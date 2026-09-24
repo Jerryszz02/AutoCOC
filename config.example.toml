@@ -1,0 +1,78 @@
+[adb]
+adb_path = "E:\\MuMuPlayer-12.0\\shell\\adb.exe"
+auto_scan_ports = true
+manual_serial = ""
+scan_hosts = ["127.0.0.1"]
+scan_ports = [7555, 16384, 16416, 16448, 16512]
+connect_timeout_sec = 5
+
+# Optional native screenshot/touch transport (MuMu >= 6.3.2.0).
+# Omit this section to use ADB. The manager must confirm this instance's
+# ADB endpoint matches the selected serial; no automatic input fallback.
+# [mumu]
+# install_dir = "E:\\MuMuPlayer-12.0"
+# instance_index = 1
+
+[runtime]
+log_level = "INFO"
+screenshot_dir = "screenshots"
+report_dir = "reports"
+step_timeout_sec = 10
+task_timeout_sec = 300
+poll_interval_sec = 1.0
+dry_run = false
+
+[game]
+package_name = "com.supercell.clashofclans"
+launch_activity = ""
+home_scene = "village"
+baseline_resolution = [1280, 720]
+startup_timeout_sec = 90
+# Omit display_id to find the display where the game is actually running.
+# display_id = 2
+
+[vision]
+template_dir = "assets/templates"
+roi_base_resolution = [1280, 720]
+template_threshold = 0.8
+feature_threshold = 0.7
+color_space = "HSV"
+save_debug_frames = true
+
+[ocr]
+provider = "auto"
+language = "zh"
+confidence_threshold = 0.75
+roi_padding = 4
+
+[profiles.core-loop]
+enabled_tasks = ["launch", "collect", "request", "donate", "battle"]
+
+[profiles.village-only]
+enabled_tasks = ["launch", "collect", "request", "donate"]
+
+[profiles.battle-only]
+enabled_tasks = ["launch", "battle"]
+
+[profiles.social-only]
+enabled_tasks = ["launch", "request", "donate"]
+
+[battle]
+# Implemented objective: observed gold + elixir; dark elixir is reported separately.
+objective = "resources"
+# Attack only when both amounts are readable and their sum reaches this threshold.
+min_expected_resources = 300000
+# Maximum observed candidates, including the first. Never attack below the threshold to exhaust this budget.
+max_searches = 30
+deploy_timeout_sec = 180
+
+[reporting]
+write_markdown = true
+save_success_screenshots = false
+save_failure_screenshots = true
+save_decision_trace = true
+
+[stop]
+max_runs = 10
+max_duration_sec = 1800
+max_failures = 3

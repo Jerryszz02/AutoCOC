@@ -1,0 +1,389 @@
+"""Logging and report output."""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field, replace
+from datetime import datetime
+from pathlib import Path
+import hashlib
+import json
+import logging
+import math
+import time
+from typing import Literal
+from uuid import uuid4
+
+from .config import AppConfig
+
+
+@dataclass(frozen=True)
+class DecisionTrace:
+    attempt: int
+    task: str
+    scene: str
+    confidence: float
+    plan_reason: str
+    actions: tuple[str, ...]
+    expected_next_scene: str | None
+
+
+@dataclass
+class TaskResult:
+    task: str
+    status: Literal["succeeded", "skipped", "failed", "simulated"]
+    reason: str
+    started_at: datetime = field(default_factory=datetime.now)
+    elapsed_sec: float = 0.0
+    evidence: list[Path] = field(default_factory=list)
+    metrics: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.status not in {"succeeded", "skipped", "failed", "simulated"}:
+            raise ValueError(f"Unknown task status: {self.status}")
+        if self.status == "succeeded" and not self.evidence:
+            raise ValueError("A succeeded task requires verification evidence")
+
+
+def _new_run_id() -> str:
+    return f"{datetime.now():%Y%m%d-%H%M%S-%f}-{uuid4().hex[:8]}"
+
+
+@dataclass
+class RunStats:
+    started_at: datetime = field(default_factory=datetime.now)
+    started_monotonic: float = field(default_factory=time.monotonic)
+    profile: str = ""
+    device_serial: str = ""
+    screenshot_resolution: tuple[int, int] | None = None
+    attempts: int = 0
+    successes: int = 0
+    failures: int = 0
+    stop_reason: str = ""
+    decision_traces: list[DecisionTrace] = field(default_factory=list)
+    success_screenshots: list[Path] = field(default_factory=list)
+    failure_screenshots: list[Path] = field(default_factory=list)
+    failure_xml: list[Path] = field(default_factory=list)
+    mode: Literal["live", "dry-run"] = "live"
+    cycles: int = 0
+    skipped: int = 0
+    simulated: int = 0
+    task_results: list[TaskResult] = field(default_factory=list)
+    events_path: Path | None = None
+    run_id: str = field(default_factory=_new_run_id)
+    provenance: dict[str, object] = field(default_factory=dict)
+
+    def record_task(self, result: TaskResult) -> None:
+        if self.mode != "live" and result.status == "succeeded":
+            result = replace(result, status="simulated")
+        self.task_results.append(result)
+        if result.status == "succeeded":
+            self.successes += 1
+            self.attempts += 1
+        elif result.status == "failed":
+            self.failures += 1
+            self.attempts += 1
+        elif result.status == "skipped":
+            self.skipped += 1
+        elif result.status == "simulated":
+            self.simulated += 1
+
+    @property
+    def elapsed_sec(self) -> float:
+        return time.monotonic() - self.started_monotonic
+
+
+def capture_run_provenance(config: AppConfig, profile_name: str) -> dict[str, object]:
+    """Snapshot the on-disk inputs before session creation; never disclose config values."""
+    root = Path(__file__).resolve().parents[2]
+    files: dict[str, str | None] = {}
+    errors: dict[str, str] = {}
+    for relative, suffix in (("src/autococ", ".py"), ("assets/templates", None)):
+        try:
+            paths = sorted(path for path in (root / relative).iterdir()
+                           if path.is_file() and (suffix is None or path.suffix == suffix))
+            if not paths:
+                errors[relative] = "no matching files"
+            for path in paths:
+                name = path.relative_to(root).as_posix()
+                try:
+                    files[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+                except OSError as exc:
+                    files[name] = None
+                    errors[name] = type(exc).__name__
+        except OSError as exc:
+            errors[relative] = type(exc).__name__
+    # Hash the sorted path/hash manifest, so adding or removing a file also
+    # changes the fingerprint. An incomplete manifest has no aggregate hash.
+    fingerprint = (hashlib.sha256(json.dumps(files, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+                   if files and not errors else None)
+    config_hash = None
+    try:
+        effective = asdict(config)
+        effective.pop("source_path", None)  # The config filename is not an effective setting.
+        serialized = json.dumps(effective, sort_keys=True, separators=(",", ":"),
+                                ensure_ascii=False, default=_json_value, allow_nan=False)
+        config_hash = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    except (TypeError, ValueError) as exc:
+        errors["effective_config"] = type(exc).__name__
+    return {
+        "captured_at": datetime.now().isoformat(timespec="microseconds"),
+        "scope": "on-disk files at run_profile start; not loaded module bytecode",
+        "file_scope": ["src/autococ/*.py", "assets/templates/* (files only)"],
+        "source_fingerprint_sha256": fingerprint,
+        "files_sha256": files,
+        "effective_config_sha256": config_hash,
+        "package_name": config.game.package_name,
+        "client_version": "unknown",
+        "baseline_resolution": list(config.game.baseline_resolution),
+        "profile": profile_name,
+        "tasks": list(config.profiles[profile_name].enabled_tasks),
+        "errors": errors,
+    }
+
+
+def setup_logging(log_level: str, report_dir: Path, *, run_id: str | None = None) -> logging.Logger:
+    report_dir.mkdir(parents=True, exist_ok=True)
+    logger = logging.getLogger("autococ")
+    logger.setLevel(getattr(logging, log_level))
+    for handler in logger.handlers[:]:
+        handler.close()
+        logger.removeHandler(handler)
+
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    stream_handler.setLevel(getattr(logging, log_level))
+    logger.addHandler(stream_handler)
+
+    log_path = report_dir / f"run-{run_id or _new_run_id()}.log"
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(getattr(logging, log_level))
+    logger.addHandler(file_handler)
+    return logger
+
+
+def write_report(report_dir: Path, stats: RunStats, *, save_decision_trace: bool = True) -> Path:
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_path = report_dir / f"run-{stats.run_id}.md"
+    payload = summarize_run(stats, save_decision_trace=save_decision_trace)
+    lines = [
+        "# AutoCOC Run Report",
+        "",
+        f"- Profile: {stats.profile or 'not set'}",
+        f"- Run ID: {stats.run_id}",
+        f"- Mode: {stats.mode}",
+        f"- Started: {stats.started_at.isoformat(timespec='seconds')}",
+        f"- Device serial: {stats.device_serial or 'not set'}",
+        f"- Screenshot resolution: {_format_resolution(stats.screenshot_resolution)}",
+        f"- Attempts: {payload['attempts']}",
+        f"- Profile cycles: {stats.cycles}",
+        f"- Successes: {payload['successes']}",
+        f"- Failures: {payload['failures']}",
+        f"- Skipped: {payload['skipped']}",
+        f"- Simulated: {payload['simulated']}",
+        f"- Elapsed seconds: {payload['elapsed_sec']:.2f}",
+        f"- Stop reason: {stats.stop_reason or 'not set'}",
+        f"- Events: {stats.events_path or 'not recorded'}",
+        f"- Machine-readable report: {report_path.with_suffix('.json').name}",
+        "",
+        "## Run Provenance",
+        "",
+        f"- Source fingerprint (SHA256): {stats.provenance.get('source_fingerprint_sha256') or 'unknown'}",
+        f"- Effective config (SHA256): {stats.provenance.get('effective_config_sha256') or 'unknown'}",
+        f"- Snapshot scope: {stats.provenance.get('scope', 'unknown')}",
+        f"- Snapshot time: {stats.provenance.get('captured_at', 'unknown')}",
+        f"- Package: {stats.provenance.get('package_name', 'unknown')}",
+        f"- Client version: {stats.provenance.get('client_version', 'unknown')}",
+        f"- Baseline resolution: {_format_resolution(stats.provenance.get('baseline_resolution'))}",
+        f"- Profile tasks: {', '.join(stats.provenance.get('tasks', [])) or 'unknown'}",
+        f"- Snapshot errors: {json.dumps(stats.provenance.get('errors', {}), ensure_ascii=False)}",
+        "- Per-file SHA256 values are in the machine-readable report's provenance.files_sha256.",
+        "",
+        "## Task Results",
+        "",
+    ]
+    for result in payload["task_results"]:
+        lines.extend([
+            f"### {result['task']}: {result['status']}", "",
+            f"- Reason: {result['reason']}",
+            f"- Elapsed seconds: {result['elapsed_sec']:.2f}",
+            "- Evidence: " + (", ".join(str(path) for path in result["evidence"]) or "none"), "",
+        ])
+    if not stats.task_results:
+        lines.extend(["- No verified task results recorded.", ""])
+
+    revenue = payload["resource_metrics"]
+    lines.extend([
+        "## Resource Ledger", "",
+        "Unknown values are not zero. Rates use the entire run wall-clock duration.", "",
+        "| Resource | Battle loot | Bonus | Collected | Donation spend | Search spend | Battle gross / h | Operating net / h |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ])
+    for resource, values in revenue["resources"].items():
+        columns = ("battle_loot", "battle_bonus", "collected_credited", "donation_spend", "search_spend", "battle_gross_per_hour", "operating_net_per_hour")
+        lines.append(f"| {resource} | " + " | ".join(_format_number(values[key]) for key in columns) + " |")
+    lines.extend([
+        "",
+        f"- Gold + elixir battle gross / hour: {_format_number(revenue['battle_gold_elixir_per_hour'])}",
+        f"- Gold + elixir operating net / hour: {_format_number(revenue['net_gold_elixir_per_hour'])}",
+        "- Full acceptance remains subject to the evidence requirements in docs/ACCEPTANCE.md.", "",
+    ])
+
+    if save_decision_trace:
+        lines.extend(["## Decision Trace", ""])
+    if save_decision_trace and stats.decision_traces:
+        for trace in stats.decision_traces:
+            lines.extend(
+                [
+                    f"### Attempt {trace.attempt}: {trace.task}",
+                    "",
+                    f"- Scene: {trace.scene} ({trace.confidence:.2f})",
+                    f"- Plan: {trace.plan_reason}",
+                    f"- Expected next scene: {trace.expected_next_scene or 'none'}",
+                    f"- Actions: {', '.join(trace.actions) or 'none'}",
+                    "",
+                ]
+            )
+    elif save_decision_trace:
+        lines.append("- none")
+        lines.append("")
+
+    lines.extend(["## Success Screenshots", ""])
+    lines.extend(f"- {path}" for path in stats.success_screenshots)
+    if not stats.success_screenshots:
+        lines.append("- none")
+
+    lines.extend(["", "## Failure Screenshots", ""])
+    lines.extend(f"- {path}" for path in stats.failure_screenshots)
+    if not stats.failure_screenshots:
+        lines.append("- none")
+
+    lines.extend(["", "## Failure UI XML", ""])
+    lines.extend(f"- {path}" for path in stats.failure_xml)
+    if not stats.failure_xml:
+        lines.append("- none")
+
+    serialized = json.dumps(payload, ensure_ascii=False, indent=2, default=_json_value, allow_nan=False)
+    with report_path.open("x", encoding="utf-8") as report:
+        report.write("\n".join(lines) + "\n")
+    with report_path.with_suffix(".json").open("x", encoding="utf-8") as report:
+        report.write(serialized + "\n")
+    return report_path
+
+
+def summarize_run(stats: RunStats, *, save_decision_trace: bool = True) -> dict[str, object]:
+    elapsed_sec = stats.elapsed_sec
+    results = [
+        replace(result, status="simulated") if stats.mode != "live" and result.status == "succeeded" else result
+        for result in stats.task_results
+    ]
+    counts = {status: sum(result.status == status for result in results) for status in ("succeeded", "failed", "skipped", "simulated")}
+    payload = asdict(stats)
+    payload.pop("started_monotonic")
+    payload.update({
+        "elapsed_sec": elapsed_sec,
+        "attempts": counts["succeeded"] + counts["failed"],
+        "successes": counts["succeeded"],
+        "failures": counts["failed"],
+        "skipped": counts["skipped"],
+        "simulated": counts["simulated"],
+        "task_results": [asdict(result) for result in results],
+        "resource_metrics": resource_metrics(stats, elapsed_sec=elapsed_sec),
+    })
+    if not save_decision_trace:
+        payload.pop("decision_traces")
+    return payload
+
+
+def resource_metrics(stats: RunStats, *, elapsed_sec: float | None = None) -> dict[str, object]:
+    elapsed = stats.elapsed_sec if elapsed_sec is None else elapsed_sec
+    live = stats.task_results if stats.mode == "live" else []
+    successful = [result for result in live if result.status == "succeeded"]
+    battles = [result for result in successful if result.task == "battle"]
+    collections = [result for result in live if result.task == "collect" and result.status in {"succeeded", "failed"}]
+    donations = [result for result in live if result.task in {"donate", "donation"} and result.status in {"succeeded", "failed"}]
+    searches = [result for result in live if result.task == "battle" and result.status in {"succeeded", "failed"}]
+    resources: dict[str, dict[str, int | float | None]] = {}
+    for resource in ("gold", "elixir", "dark_elixir"):
+        values = {
+            "battle_loot": _sum_metric(battles, f"loot_{resource}"),
+            "battle_bonus": _sum_metric(battles, f"bonus_{resource}"),
+            "collected_credited": _collection_credit(collections, resource),
+            "donation_spend": _sum_metric(donations, f"donation_cost_{resource}", empty=0),
+            "search_spend": _sum_metric(searches, f"search_cost_{resource}", empty=0),
+        }
+        gross = _sum_known(values["battle_loot"], values["battle_bonus"])
+        net_in = _sum_known(gross, values["collected_credited"])
+        spend = _sum_known(values["donation_spend"], values["search_spend"])
+        net = net_in - spend if net_in is not None and spend is not None else None
+        values.update({
+            "battle_gross": gross,
+            "operating_net": net,
+            "battle_loot_per_hour": _hourly(values["battle_loot"], elapsed),
+            "battle_gross_per_hour": _hourly(gross, elapsed),
+            "operating_net_per_hour": _hourly(net, elapsed),
+        })
+        resources[resource] = values
+    return {
+        "elapsed_sec": elapsed,
+        "resources": resources,
+        "battle_gold_elixir_per_hour": _sum_known(resources["gold"]["battle_gross_per_hour"], resources["elixir"]["battle_gross_per_hour"]),
+        "net_gold_elixir_per_hour": _sum_known(resources["gold"]["operating_net_per_hour"], resources["elixir"]["operating_net_per_hour"]),
+    }
+
+
+def _sum_metric(results: list[TaskResult], key: str, *, empty: int | None = None) -> int | float | None:
+    return _sum_amounts([result.metrics.get(key) for result in results], empty=empty)
+
+
+def _collection_credit(results: list[TaskResult], resource: str) -> int | float | None:
+    amounts: list[object] = []
+    for result in results:
+        if result.status == "succeeded":
+            amounts.append(result.metrics.get(f"collected_{resource}"))
+            continue
+        events = result.metrics.get("verified_collections")
+        if not isinstance(events, list) or any(
+            not isinstance(event, dict) or event.get("resource") not in {"gold", "elixir", "dark_elixir"}
+            for event in events
+        ):
+            amounts.append(None)
+            continue
+        # A failed task may have later unverified changes; only its confirmed events count.
+        amounts.append(_sum_amounts([event.get("increase") for event in events if event["resource"] == resource], empty=0))
+    return _sum_amounts(amounts)
+
+
+def _sum_amounts(values: list[object], *, empty: int | None = None) -> int | float | None:
+    if not values:
+        return empty
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0 for value in values):
+        return None
+    return sum(values)
+
+
+def _sum_known(*values: int | float | None) -> int | float | None:
+    return sum(values) if all(value is not None for value in values) else None
+
+
+def _hourly(value: int | float | None, elapsed_sec: float) -> float | None:
+    return value * 3600 / elapsed_sec if value is not None and elapsed_sec > 0 else None
+
+
+def _format_number(value: int | float | None) -> str:
+    return "unknown" if value is None else f"{value:,.2f}"
+
+
+def _json_value(value: object) -> str:
+    if isinstance(value, datetime):
+        return value.isoformat(timespec="microseconds")
+    if isinstance(value, Path):
+        return str(value)
+    raise TypeError(f"Unable to serialize report value {type(value).__name__}")
+
+
+def _format_resolution(value: tuple[int, int] | None) -> str:
+    if value is None:
+        return "not set"
+    return f"{value[0]}x{value[1]}"

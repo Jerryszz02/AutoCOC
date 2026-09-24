@@ -1,0 +1,21 @@
+# Local Python environment and generated files
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# Machine-specific configuration and credentials
+/config.toml
+.env
+.env.*
+!.env.example
+
+# Local runtime evidence and logs
+/reports/
+/screenshots/
+*.log

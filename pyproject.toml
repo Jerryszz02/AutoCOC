@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autococ"
+version = "0.1.0"
+description = "Local Android UI automation test framework for authorized apps on MuMu emulator."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["opencv-python>=4.10,<5", "rapidocr>=3.9,<4", "onnxruntime>=1.20,<2"]
+
+[project.optional-dependencies]
+image = ["opencv-python>=4.10"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+autococ = "autococ.cli:main"
+
+[project.gui-scripts]
+autococ-gui = "autococ.gui:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
