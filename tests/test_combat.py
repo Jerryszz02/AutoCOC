@@ -60,6 +60,7 @@ class FakeSession:
                                       game=SimpleNamespace(startup_timeout_sec=10),
                                       runtime=SimpleNamespace(poll_interval_sec=0))
         self.last_snapshot = None
+        self.native = object()
         self.taps, self.back_actions, self.templates, self.events = [], [], [], []
         self.observe_labels = []
         self.deploy_calls = 0
@@ -67,7 +68,7 @@ class FakeSession:
     def check_deadline(self) -> None:
         pass
 
-    def observe(self, label: str = "observe") -> SceneSnapshot:
+    def observe(self, label: str = "observe", **options) -> SceneSnapshot:
         self.observe_labels.append(label)
         try:
             self.last_snapshot = next(self.frames)
@@ -75,7 +76,7 @@ class FakeSession:
             raise FlowError("Observation deadline exceeded")
         return self.last_snapshot
 
-    def wait_for(self, scenes: set[str], *, timeout_sec: float = 30, label: str = "wait") -> SceneSnapshot:
+    def wait_for(self, scenes: set[str], *, timeout_sec: float = 30, label: str = "wait", **options) -> SceneSnapshot:
         for _ in range(20):
             snapshot = self.observe(label)
             if snapshot.scene in scenes:
@@ -128,6 +129,143 @@ class CombatTests(unittest.TestCase):
         self.assertEqual(len(result.metrics["settlement_reads"]), 1)
         self.assertTrue(result.metrics["settlement_reads"][0]["valid"])
         self.assertNotIn("battle-settlement-reread", session.observe_labels)
+
+    def test_two_edge_round_accepts_loss_capped_inventory_and_first_low_loot_opponent(self):
+        frames = complete_frames()
+        frames[3].observations["resources"] = {"gold": 0, "elixir": 0}
+        frames[5].observations["settlement"].update(stars=0, percentage=20)
+        frames[6].observations["resources"] = deepcopy(BEFORE)
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle, strategy="two_edge")
+        result = battle(session)
+        self.assertEqual(result.status, "succeeded")
+        self.assertEqual(result.metrics["rounds_completed"], 1)
+        self.assertFalse(result.metrics["victory"])
+        self.assertFalse(result.metrics["inventory_reconciled"])
+        self.assertTrue(result.metrics["searches"][0]["decision"]["should_attack"])
+        self.assertEqual(session.last_snapshot.scene, "village")
+
+    def test_two_edge_requires_native_zoom_before_any_game_input(self):
+        session = FakeSession(complete_frames())
+        session.config.battle = replace(session.config.battle, strategy="two_edge")
+        session.native = None
+        result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertIn("MuMu native", result.reason)
+        self.assertEqual(session.taps, [])
+
+    def test_star_bonus_receipt_is_confirmed_once_before_verifying_home(self):
+        for strategy in ("verified", "edrag_line"):
+            with self.subTest(strategy=strategy):
+                frames = complete_frames()
+                popup = frame(7, "popup")
+                popup.observations.update(ocr=[{"text": "已收到胜利之星奖励！", "confidence": .99}],
+                    buttons=[{"name": "confirm", "text": "确定", "point": [645, 616]}])
+                frames[6:6] = [popup, deepcopy(popup)]
+                session = FakeSession(frames)
+                session.config.battle = replace(session.config.battle, strategy=strategy)
+                result = battle(session)
+                self.assertEqual(result.status, "succeeded")
+                self.assertEqual(result.metrics["star_bonus_popup_frame"], "combat-7.png")
+                self.assertEqual(sum("Recognized confirm" in reason for _, reason in session.taps), 1)
+                self.assertEqual(session.last_snapshot.scene, "village")
+
+    def test_unknown_or_uncertain_return_popup_is_never_confirmed(self):
+        for text, confidence in (("购买宝石", .99), ("已收到胜利之星奖励", .8),
+                                 ("已收到胜利之星奖励", float("nan"))):
+            with self.subTest(text=text, confidence=confidence):
+                frames = complete_frames()
+                popup = frame(7, "popup")
+                popup.observations.update(ocr=[{"text": text, "confidence": confidence}],
+                    buttons=[{"name": "confirm", "text": "确定", "point": [645, 616]}])
+                frames[6:6] = [popup]
+                session = FakeSession(frames)
+                session.config.battle = replace(session.config.battle, strategy="edrag_line")
+                result = battle(session)
+                self.assertEqual(result.status, "failed")
+                self.assertIn("Unrecognized popup", result.reason)
+                self.assertFalse(any("Recognized confirm" in reason for _, reason in session.taps))
+
+    def test_edrag_round_returns_home_without_inventory_or_ability_requirements(self):
+        frames = complete_frames()
+        frames[3].observations["resources"] = {"gold": 0, "elixir": 0}
+        frames[5].observations["settlement"].update(stars=0, percentage=20)
+        frames[6].observations["resources"] = deepcopy(BEFORE)
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        result = battle(session)
+        self.assertEqual(result.status, "succeeded")
+        self.assertEqual(result.reason, "edrag_line_troops_settlement_and_return_verified")
+        self.assertEqual(session.last_snapshot.scene, "village")
+
+    def test_edrag_incomplete_hero_receipt_is_failure_even_after_return_home(self):
+        frames = complete_frames()
+        frames[4].observations["deployment"]["completed"] = False
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(session.last_snapshot.scene, "village")
+
+    def test_line_home_counter_animation_is_reobserved_without_input(self):
+        frames = complete_frames()
+        frames[6].observations["resources"]["gems"] = 38
+        frames.append(frame(7, "village", resources=deepcopy(AFTER)))
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        result = battle(session)
+        self.assertEqual(result.status, "succeeded")
+        self.assertEqual(result.metrics["resources_after"]["gems"], 50)
+        self.assertEqual(len(result.metrics["home_resource_reads"]), 2)
+        self.assertEqual(session.taps[-1][1], "Recognized return_home: return_home")
+
+    def test_line_persistent_or_unreadable_gem_change_is_not_accepted(self):
+        for gems in (49, None):
+            with self.subTest(gems=gems):
+                frames = complete_frames()
+                frames[6].observations["resources"]["gems"] = 38
+                frames.extend(frame(i, "village", resources={**AFTER, "gems": gems}) for i in range(7, 10))
+                session = FakeSession(frames)
+                session.config.battle = replace(session.config.battle, strategy="two_edge")
+                result = battle(session)
+                self.assertEqual(result.status, "failed")
+                self.assertIn("Gem balance", result.reason)
+                self.assertEqual(len(result.metrics["home_resource_reads"]), 4)
+
+    def test_failed_line_with_zero_consumption_still_waits_and_returns_without_replay(self):
+        session = FakeSession(complete_frames())
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        def fail_deployment(session, scout):
+            session.observe("failed-deployment")
+            raise DeploymentError("No troop was consumed", partial_receipt={
+                "completed": False, "verified": False, "deployed_units": 0,
+                "issued_placements": 10, "evidence": ["combat-4.png"]})
+        session.deploy = fail_deployment
+        result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.metrics["deployment"]["deployed_units"], 0)
+        self.assertTrue(result.metrics["returned_home"])
+        self.assertEqual(session.last_snapshot.scene, "village")
+
+    def test_two_edge_does_not_claim_provisional_zero_rewards_as_verified(self):
+        frames = complete_frames()
+        frames[5].observations["settlement"]["evidence"]["bonus"] = {"requires_inventory_reconciliation": True}
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle, strategy="two_edge")
+        result = battle(session)
+        self.assertEqual(result.status, "succeeded")
+        self.assertIsNone(result.metrics["bonus_gold"])
+
+    def test_two_edge_result_keeps_unknown_loot_unknown_without_blocking_return(self):
+        frames = complete_frames()
+        frames[5].observations["settlement"]["loot"]["gold"] = None
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle, strategy="two_edge")
+        result = battle(session)
+        self.assertEqual(result.status, "succeeded")
+        self.assertIsNone(result.metrics["loot_gold"])
+        self.assertIsNotNone(result.metrics["settlement_validation_error"])
+        self.assertEqual(session.last_snapshot.scene, "village")
 
     def test_natural_countdown_without_deployment_cannot_count_as_success(self) -> None:
         for receipt in (None, {"verified": False, "deployed_units": 10, "evidence": ["frame.png"]},

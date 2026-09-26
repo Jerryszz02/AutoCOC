@@ -9,6 +9,7 @@ import re
 import time
 
 from .config import OCRConfig
+from .images import read_frame, read_template
 from .errors import LocatorError, SceneError
 from .locator import find_template, scale_box
 from .ocr import OCRProvider, OCRText, create_ocr_provider, filter_ocr_results
@@ -83,7 +84,7 @@ def detect_collectibles(
     import numpy as np
 
     path = Path(screenshot_path)
-    source = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+    source = read_frame(path, cv2.IMREAD_COLOR)
     if source is None:
         raise SceneError(f"Unable to decode screenshot: {path}")
     image = cv2.resize(source, baseline_resolution, interpolation=cv2.INTER_AREA)
@@ -97,7 +98,7 @@ def detect_collectibles(
         template_path = template_root / f"collect_{resource}.png"
         if not template_path.is_file():
             raise SceneError(f"Missing collection template: {template_path}")
-        original = cv2.imdecode(np.fromfile(template_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        original = read_template(template_path)
         if original is None:
             raise SceneError(f"Unable to decode collection template: {template_path}")
         for size in (0.8, 0.9, 1.0, 1.1, 1.2):
@@ -149,12 +150,25 @@ class ScreenshotRecognizer:
         self.ocr_config = ocr_config or OCRConfig()
         self.baseline_resolution = baseline_resolution
         self.provider = provider or create_ocr_provider(self.ocr_config)
+        from .battle_vision import BattleObserver
 
-    def recognize(self, screenshot_path: str | Path) -> SceneSnapshot:
+        self.battle_observer = BattleObserver(self)
+
+    def recognize_battle(self, screenshot_path: str | Path, *, purpose: str,
+                         slot: dict | None = None, previous: SceneSnapshot | None = None) -> SceneSnapshot:
+        if purpose not in {"troop_count", "hero", "settlement"}:
+            raise ValueError(f"Unknown battle observation purpose: {purpose}")
+        if purpose == "troop_count" and slot is None:
+            raise ValueError("Troop observation requires a known card")
+        return self.battle_observer.observe(Path(screenshot_path), purpose=purpose, slot=slot, previous=previous)
+
+    def recognize(self, screenshot_path: str | Path, *, battle_details: bool = True) -> SceneSnapshot:
         started = time.monotonic()
         path = Path(screenshot_path)
         resolution = self._resolution(path)
+        decoded = time.monotonic()
         results = filter_ocr_results(self.provider.recognize(path), self.ocr_config.confidence_threshold)
+        ocr_finished = time.monotonic()
         texts = [self._baseline_result(result, resolution) for result in results]
         scene, confidence, reasons = classify_scene_text("\n".join(result.text for result in texts))
         startup_logo = self._startup_logo(path) if scene == SCENE_UNKNOWN else None
@@ -276,7 +290,7 @@ class ScreenshotRecognizer:
             observations["resources"] = {**settlement["loot"], "gems": None}
             observations["resource_evidence"] = settlement["evidence"]["loot"]
             observations["resource_source"] = "settlement_gained"
-        elif scene in {SCENE_ENEMY_VILLAGE, SCENE_BATTLE}:
+        elif scene in {SCENE_ENEMY_VILLAGE, SCENE_BATTLE} and battle_details:
             resources, evidence = self._enemy_resources(path, texts, resolution)
             observations["resources"] = resources
             observations["resource_evidence"] = evidence
@@ -297,6 +311,8 @@ class ScreenshotRecognizer:
                 observations["search_cost_gold"] = parse_resource_number(price.text)
                 observations["search_cost_evidence"] = asdict(price)
         observations["recognition_seconds"] = round(time.monotonic() - started, 3)
+        observations["recognition_timings_sec"] = {"decode": decoded - started,
+            "ocr": ocr_finished - decoded, "details": time.monotonic() - ocr_finished}
         return SceneSnapshot(scene, confidence, path, observations)
 
     @staticmethod
@@ -304,7 +320,7 @@ class ScreenshotRecognizer:
         import cv2
         import numpy as np
 
-        source = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        source = read_frame(path, cv2.IMREAD_COLOR)
         if source is None:
             raise SceneError(f"Unable to decode screenshot: {path}")
         image = cv2.resize(source, (1280, 720), interpolation=cv2.INTER_AREA)
@@ -379,6 +395,12 @@ class ScreenshotRecognizer:
             line_left = max(roi[0], min(cl - px, line_right - 2 * (cb - ct)))
             line_roi = (line_left, max(roi[1], ct - py), line_right, min(roi[3], cb + 2 * py))
         native_roi = scale_box(roi, from_resolution=self.baseline_resolution, to_resolution=resolution)
+        if self.battle_observer.cards:
+            image = cv2.resize(read_frame(path), (1280, 720), interpolation=cv2.INTER_AREA)
+            fast = self.battle_observer.count(path, image, {"point": [(left + right) // 2, (top + bottom) // 2],
+                                                         "bbox": list(bbox)})
+            if fast is not None:
+                return fast
         reads = []
         for item in self.provider.recognize(path, native_roi):
             item = self._baseline_result(item, resolution)
@@ -400,7 +422,7 @@ class ScreenshotRecognizer:
 
         read_line = getattr(self.provider, "recognize_line", None)
         if read_line is not None:
-            image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+            image = read_frame(path, cv2.IMREAD_GRAYSCALE)
             x0, y0, x1, y1 = scale_box(line_roi, from_resolution=self.baseline_resolution, to_resolution=resolution)
             # Exhausted cards dim both the portrait and count. Preserve explicit
             # glyphs while separating their gray fill from the dark header.
@@ -438,7 +460,7 @@ class ScreenshotRecognizer:
         import cv2
         import numpy as np
 
-        image = cv2.resize(cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR), (1280, 720), interpolation=cv2.INTER_AREA)
+        image = cv2.resize(read_frame(path, cv2.IMREAD_COLOR), (1280, 720), interpolation=cv2.INTER_AREA)
         panel_coverage = {}
         # These empty margins are opaque cream in every observed settled dialog.
         # During fade-in, map/chat pixels remain visible and contaminate body OCR.
@@ -469,7 +491,7 @@ class ScreenshotRecognizer:
         import cv2
         import numpy as np
 
-        image = cv2.resize(cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR), (1280, 720), interpolation=cv2.INTER_AREA)
+        image = cv2.resize(read_frame(path, cv2.IMREAD_COLOR), (1280, 720), interpolation=cv2.INTER_AREA)
         values: dict[str, int | None] = {"gold": None, "elixir": None, "dark_elixir": None, "gems": None}
         evidence: dict[str, object] = {}
         # These offsets follow the actual icon crops, including the smaller dark
@@ -482,7 +504,7 @@ class ScreenshotRecognizer:
             template_path = Path(__file__).resolve().parents[2] / "assets/templates" / f"enemy_{name}.png"
             if not template_path.is_file():
                 continue
-            template = cv2.imdecode(np.fromfile(template_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            template = read_template(template_path)
             if template is None:
                 continue
             scores = cv2.matchTemplate(image[85:220, 20:72], template, cv2.TM_CCOEFF_NORMED)
@@ -539,7 +561,7 @@ class ScreenshotRecognizer:
         import cv2
         import numpy as np
 
-        image = cv2.resize(cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR), (1280, 720), interpolation=cv2.INTER_AREA)
+        image = cv2.resize(read_frame(path, cv2.IMREAD_COLOR), (1280, 720), interpolation=cv2.INTER_AREA)
         resources = ("gold", "elixir", "dark_elixir")
         loot = {name: None for name in resources}
         bonus = {name: None for name in resources}
@@ -550,7 +572,7 @@ class ScreenshotRecognizer:
             template_path = Path(__file__).resolve().parents[2] / "assets/templates" / f"settlement_{name}.png"
             if not template_path.is_file():
                 continue
-            template = cv2.imdecode(np.fromfile(template_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            template = read_template(template_path)
             if template is None:
                 continue
             mask = None
@@ -734,7 +756,7 @@ class ScreenshotRecognizer:
 
         timers = [item for item in texts if self._in_observed_roi(item, (530, 30, 750, 95)) and parse_countdown(item.text) is not None]
         timer = max(timers, key=lambda item: item.confidence) if timers else None
-        image = cv2.resize(cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR), (1280, 720), interpolation=cv2.INTER_AREA)
+        image = cv2.resize(read_frame(path, cv2.IMREAD_COLOR), (1280, 720), interpolation=cv2.INTER_AREA)
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv, np.array([75, 65, 60]), np.array([170, 255, 255]))
         contours, _ = cv2.findContours(mask[585:720], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -851,12 +873,27 @@ class ScreenshotRecognizer:
                 continue
             boxes.append((left, top, right, colored_bottom(left, right) or bottom))
 
+        # This event troop is added by the battle screen, outside My Army. Its
+        # gray card has no blue/purple header; identify the sampled portrait.
+        event_portrait = _match(image, Path(__file__).resolve().parents[2] / "assets/templates/battle_event_super_pekka.png",
+                                (20, 620, 1250, 695), (1.0, .95, 1.05, 1.1))
+        event_box = None
+        if event_portrait is not None and event_portrait["confidence"] >= .95:
+            left = round(event_portrait["bbox"][0] - 6 * event_portrait["scale"])
+            right = round(left + 90 * event_portrait["scale"])
+            if (3 <= left < right <= 1277 and
+                    any(self._in_observed_roi(item, (left, 585, right, 630))
+                        and item.confidence >= .9 and re.fullmatch(r"[xX×]\s*\d+", item.text.strip()) for item in texts)):
+                event_box = (left, 595, right, 711)
+                if not any(min(right, box[2]) > max(left, box[0]) for box in boxes):
+                    boxes.append(event_box)
+
         # An unresolved overlap is not two independently located cards.
         boxes = [box for index, box in enumerate(boxes) if not any(
             min(box[2], other[2]) > max(box[0], other[0])
             for other_index, other in enumerate(boxes) if index != other_index)]
         badge_path = Path(__file__).resolve().parents[2] / "assets/templates/battle_clan_badge.png"
-        badge = cv2.imdecode(np.fromfile(badge_path, dtype=np.uint8), cv2.IMREAD_COLOR) if badge_path.is_file() else None
+        badge = read_template(badge_path) if badge_path.is_file() else None
         slots = []
         for index, box in enumerate(sorted(boxes)):
             baseline_box = scale_box(box, from_resolution=(1280, 720), to_resolution=self.baseline_resolution)
@@ -884,6 +921,9 @@ class ScreenshotRecognizer:
                         if match is not None and (hero_evidence is None or match["confidence"] > hero_evidence["confidence"]):
                             kind, hero_evidence = "hero", match
             clan_evidence = None
+            is_event = event_box is not None and abs(box[0] - event_box[0]) < 10
+            if is_event:
+                kind = "troop"
             if kind in {"troop", "spell"} and badge is not None:
                 header = image[588:628, box[0]:min(box[0] + 45, box[2])]
                 for scale in (1.0, 1 / 1.1, 1.1):
@@ -893,12 +933,13 @@ class ScreenshotRecognizer:
                         clan_evidence = {"template": str(badge_path), "confidence": score, "scale": scale}
             slots.append({
                 "index": index, "kind": kind, "bbox": list(baseline_box),
-                "source": "clan_reinforcement" if clan_evidence is not None else "army",
+                "source": "event" if is_event else "clan_reinforcement" if clan_evidence is not None else "army",
                 "point": [(baseline_box[0] + baseline_box[2]) // 2, (baseline_box[1] + baseline_box[3]) // 2],
                 "count": int(re.sub(r"\D", "", count.text)) if count is not None else None,
                 "evidence": {"method": "independent_card_border", "header_hue": hue,
                              "hero_pet_icon": hero_evidence,
                              "clan_badge": clan_evidence,
+                             "event_portrait": event_portrait if is_event else None,
                              "count": asdict(count) if count is not None else None},
             })
         return {"phase": "scout" if scene == SCENE_ENEMY_VILLAGE else "active",
@@ -1022,7 +1063,7 @@ class ScreenshotRecognizer:
             import cv2
             import numpy as np
 
-            image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            image = read_frame(path, cv2.IMREAD_COLOR)
         except Exception as exc:
             raise SceneError(f"Unable to read screenshot {path}: {exc}") from exc
         if image is None:

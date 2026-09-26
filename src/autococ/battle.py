@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import re
 
 from .config import BattleConfig
+from .strategies import is_line_strategy
 
 
 RESOURCE_PATTERN = re.compile(r"(?P<number>\d[\d.,]*)(?P<suffix>[kKmM]?)")
@@ -58,6 +59,8 @@ def score_target(target: BattleTarget, config: BattleConfig, *, searches: int = 
     total = target.gold_elixir_total
     if searches > config.max_searches:
         return BattleScore(target, total, False, False, ("search limit exceeded",))
+    if is_line_strategy(config.strategy):
+        return BattleScore(target, total, True, False, ("first clear opponent for round count",))
     should_attack = total is not None and total >= config.min_expected_resources
     reason = "resource floor met" if should_attack else "resource floor not met"
     if total is None:
@@ -104,4 +107,3 @@ def basic_deployment_plan(points: tuple[tuple[int, int], ...]) -> DeploymentPlan
         for index, (x, y) in enumerate(points)
     )
     return DeploymentPlan(reason="basic edge deployment", steps=steps)
-

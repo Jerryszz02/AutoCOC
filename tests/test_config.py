@@ -79,6 +79,15 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(ConfigError, "only 'resources'"):
                 load_config(path)
 
+    def test_two_edge_strategy_loads_and_unknown_strategy_is_rejected(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text('[battle]\nstrategy = "two_edge"\n', encoding="utf-8")
+            self.assertEqual(load_config(path).battle.strategy, "two_edge")
+            path.write_text('[battle]\nstrategy = "guess"\n', encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                load_config(path)
+
     def test_legacy_weights_are_explicitly_ignored_for_existing_local_configs(self) -> None:
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.toml"

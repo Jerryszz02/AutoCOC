@@ -4,6 +4,19 @@
 
 AutoCOC 是 Windows + MuMu 上的本地《部落冲突》自动化项目，通过 ADB 或可选的 MuMu 原生 SDK 截图和模拟输入运行任务。当前正在重构、迭代和现场验证，**完整自动对战、资源收集、部落捐兵、请求增援的组合目标尚未通过完整验收**。单元测试、截图回放和某一次任务成功都不能替代持续现场验收。
 
+2026-09-25 新增 **两边一字划（刷场数）**：通过 MuMu 双指缩到最小，固定两条边，按兵栏数量连续投放普通/活动部队，之后等自然结算并回村。忽略资源门槛和胜负，暂不操作英雄、攻城器、法术。已完成一场雷龙编队实战：12/12 个兵投放核验，40% / 0 星，正常结算回村；40 个活动兵的识别和 20+20 分配已做回放/单元测试，尚未完成 40 兵实际投放。范围、耗时和证据见 [两边一字划实测](docs/TWO_EDGE.md)。下述 9 月 24 日统计是旧资源模式的历史结果。
+
+GUI 选择“仅对战”，再手动选择“活动兵两边划”或“雷龙一字划跟英雄”。后者按兵栏顺序单边铺完普通兵，再从中点下英雄；不自动识别雷龙身份，不主动开技能，不下法术和攻城器。两种策略都不按资源门槛筛选对手。策略接口、快速识别和本轮验证见 [策略与识别说明](docs/STRATEGIES.md)。也可执行：
+
+```powershell
+.\.venv\Scripts\python.exe -m autococ.cli run --config config.toml --profile battle-only --strategy two_edge --once
+.\.venv\Scripts\python.exe -m autococ.cli run --config config.toml --profile battle-only --strategy edrag_line --once
+# 只测截图和识别耗时，不操作游戏：
+.\.venv\Scripts\python.exe scripts/benchmark_observation.py --config config.toml --frames 3
+```
+
+该模式需要配置 `[mumu]` 原生通道，以支持双指缩放；未配置时会在进入对战前停止。`--strategy verified` 保留原有资源模式。
+
 量化目标、成功定义和证据要求见 [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md)。初始收益目标包括金币与圣水战斗毛收益合计至少 2,000,000 / 小时、扣除已核验经营支出后的净产出至少 1,000,000 / 小时；这些是目标，不是当前已取得的成绩。
 
 截至 2026-09-24 04:55 启动且已结束的 35 份正式 `live` 报告，收集 6 次成功、请求 4 次成功，完整自动战斗 0 成功/23 失败、真实捐兵 0 次。启动原始状态为 32 成功/1 失败，其中[历史审查](reports/idle-disconnect-audit-20260924.json)已证实 3 次是断线弹窗假阳性。最新社交任务确认发送一次请求、宝石 331 不变，有限扫描无可捐按钮；上一场战斗仍失败，批量回执修复尚待新实战。[运行诊断](reports/render-timing-evaluation-20260924.json)记录游戏图层约每秒 1～1.5 条帧记录及冷却停滞，重启游戏和模拟器后均未确认恢复正常速度。累计统计及限制见[运行检查点](reports/runtime-checkpoint-20260924.json)和[开发进度](docs/PROGRESS.md)。全量离线测试为 559 tests、423 subtests 通过，不能替代现场验收。

@@ -52,6 +52,13 @@ class DesktopTests(unittest.TestCase):
         self.assertTrue(load_options(path, self.config).dry_run)
         self.assertEqual(list(self.root.glob("*.tmp")), [])
 
+    def test_two_edge_desktop_configuration_and_saved_selection(self):
+        options = replace(self.options, strategy="two_edge", tasks=("launch", "battle"))
+        self.assertEqual(desktop_config(self.path, options).battle.strategy, "two_edge")
+        path = self.root / "desktop.json"
+        save_options(path, options)
+        self.assertEqual(load_options(path, self.config).strategy, "two_edge")
+
     def test_malformed_settings_do_not_silently_enable_defaults(self):
         path = self.root / "desktop.json"
         for text in ("{", "[]", '{"tasks": ["launch"]}'):

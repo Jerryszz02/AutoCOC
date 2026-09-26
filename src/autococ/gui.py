@@ -12,7 +12,7 @@ from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
 from .config import load_config
-from .desktop import (DesktopController, RunOptions, STATUS_LABELS, TASK_LABELS, desktop_config, display_reason,
+from .desktop import (DesktopController, RunOptions, STATUS_LABELS, STRATEGY_LABELS, TASK_LABELS, desktop_config, display_reason,
                       load_options, report_history, report_text, save_options, settings_path)
 from .errors import AutoCOCError
 
@@ -115,25 +115,33 @@ class AutoCOCApp:
             entry = ttk.Entry(left, textvariable=var, width=19)
             entry.grid(row=row, column=1, sticky="ew", padx=(10, 0), pady=4)
             self.editors.append(entry)
+        self.strategy = tk.StringVar(value=STRATEGY_LABELS["two_edge"])
+        ttk.Label(left, text="对战策略").grid(row=15, column=0, sticky="w", pady=4)
+        self.strategy_box = ttk.Combobox(left, textvariable=self.strategy, values=tuple(STRATEGY_LABELS.values()),
+                                        state="readonly", width=20)
+        self.strategy_box.grid(row=15, column=1, sticky="ew", padx=(10, 0), pady=4)
+        self.editors.append(self.strategy_box)
+        ttk.Label(left, text="两边划：活动兵优先，普通兵分两边。\n雷龙：按兵栏顺序单边铺兵，再跟英雄。\n两者忽略资源门槛，不开技能、不下法术和攻城器。",
+                  style="Muted.TLabel", wraplength=330).grid(row=16, column=0, columnspan=2, sticky="w", pady=(3, 8))
         self.mode = tk.StringVar(value="离线预演")
-        ttk.Label(left, text="运行模式").grid(row=15, column=0, sticky="w", pady=(10, 4))
+        ttk.Label(left, text="运行模式").grid(row=17, column=0, sticky="w", pady=(10, 4))
         self.mode_box = ttk.Combobox(left, textvariable=self.mode, values=("离线预演", "实机执行"),
                                      state="readonly", width=17)
-        self.mode_box.grid(row=15, column=1, sticky="ew", padx=(10, 0), pady=(10, 4))
+        self.mode_box.grid(row=17, column=1, sticky="ew", padx=(10, 0), pady=(10, 4))
         self.mode_box.bind("<<ComboboxSelected>>", self._mode_changed)
         self.editors.append(self.mode_box)
         self.mode_note = tk.StringVar(value="不连接模拟器，不操作游戏。")
         ttk.Label(left, textvariable=self.mode_note, style="Muted.TLabel", wraplength=300).grid(
-            row=16, column=0, columnspan=2, sticky="w", pady=(3, 12))
+            row=18, column=0, columnspan=2, sticky="w", pady=(3, 12))
         buttons = ttk.Frame(left, style="Card.TFrame")
-        buttons.grid(row=17, column=0, columnspan=2, sticky="ew")
+        buttons.grid(row=19, column=0, columnspan=2, sticky="ew")
         buttons.columnconfigure((0, 1), weight=1)
         self.start_button = ttk.Button(buttons, text="开始预演", style="Accent.TButton", command=self.start)
         self.start_button.grid(row=0, column=0, sticky="ew", padx=(0, 7))
         self.stop_button = ttk.Button(buttons, text="停止", command=self.stop, state="disabled")
         self.stop_button.grid(row=0, column=1, sticky="ew")
         self.save_button = ttk.Button(left, text="保存界面方案", command=self._save)
-        self.save_button.grid(row=18, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self.save_button.grid(row=20, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         self.editors.append(self.save_button)
 
         right = ttk.Frame(body)
@@ -241,6 +249,7 @@ class AutoCOCApp:
                            ("serial", options.serial)):
             self.values[key].set(str(value))
         self.mode.set("离线预演")
+        self.strategy.set(STRATEGY_LABELS[options.strategy])
         self._mode_changed()
 
     def _options(self) -> RunOptions:
@@ -251,7 +260,8 @@ class AutoCOCApp:
         tasks += tuple(task for task in TASK_LABELS if self.task_vars[task].get() and task not in tasks)
         options = RunOptions(tasks, int(self.values["max_runs"].get()), int(minutes * 60),
                              int(self.values["resources"].get()), int(self.values["searches"].get()),
-                             self.values["serial"].get(), self.mode.get() == "离线预演")
+                             self.values["serial"].get(), self.mode.get() == "离线预演",
+                             strategy=next(key for key, label in STRATEGY_LABELS.items() if label == self.strategy.get()))
         options.validate()
         return options
 

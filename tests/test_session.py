@@ -107,6 +107,21 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(snapshot.observations["capture_method"], "unknown")
         self.assertEqual(snapshot.observations["capture_elapsed_sec"], .01)
 
+    def test_observation_times_capture_and_recognition_separately(self):
+        def capture(path):
+            self.clock.advance(.4)
+            return ScreenshotCapture(path, 2560, 1440, .4)
+
+        def recognize(path):
+            self.clock.advance(4.7)
+            return SceneSnapshot("village", .95, path)
+
+        self.capture.capture_screenshot_artifact.side_effect = capture
+        self.recognizer.recognize.side_effect = recognize
+        snapshot = self.session.observe()
+        self.assertAlmostEqual(snapshot.observations["recognition_elapsed_sec"], 4.7)
+        self.assertAlmostEqual(snapshot.observations["observation_elapsed_sec"], 5.1)
+
     def test_nonfinite_confidence_cannot_click(self) -> None:
         for confidence in (float("nan"), float("inf")):
             with self.subTest(confidence=confidence):
@@ -115,6 +130,17 @@ class SessionTests(unittest.TestCase):
                 with self.assertRaises(FlowError):
                     self.session.tap(snapshot, (100, 200), reason="invalid confidence")
         self.adb.run.assert_not_called()
+
+    def test_explicit_battle_purpose_preserves_previous_snapshot_and_new_capture_age(self):
+        previous = self.session.observe("before")
+        slot = {"bbox": [100, 590, 190, 710]}
+        self.recognizer.recognize_battle.side_effect = lambda path, **kwargs: SceneSnapshot("battle", .95, path)
+        self.clock.advance(2)
+        snapshot = self.session.observe("any-label", purpose="troop_count", slot=slot)
+        self.recognizer.recognize_battle.assert_called_once_with(snapshot.screenshot_path,
+            purpose="troop_count", slot=slot, previous=previous)
+        self.assertEqual(snapshot.observations["observed_at_monotonic"], self.clock.now)
+        self.assertIs(self.session.last_snapshot, snapshot)
 
     def test_stale_or_noncurrent_snapshot_cannot_click(self) -> None:
         previous = self.session.observe("previous")

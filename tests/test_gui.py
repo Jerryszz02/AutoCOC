@@ -52,6 +52,16 @@ class GUITests(unittest.TestCase):
         error.assert_called_once()
         self.controller.start.assert_not_called()
 
+    def test_two_edge_strategy_reaches_worker(self):
+        self.app.strategy.set("活动兵两边划")
+        self.app.start()
+        self.assertEqual(self.controller.start.call_args.args[1].strategy, "two_edge")
+
+    def test_edrag_strategy_reaches_worker(self):
+        self.app.strategy.set("雷龙一字划跟英雄")
+        self.app.start()
+        self.assertEqual(self.controller.start.call_args.args[1].strategy, "edrag_line")
+
     def test_gui_completion_distinguishes_simulation_from_success(self):
         self.app._event({"kind": "finished", "report": None,
                          "summary": {"mode": "dry-run", "successes": 0, "failures": 0,

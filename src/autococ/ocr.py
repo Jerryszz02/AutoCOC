@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Protocol
 
 from .config import OCRConfig
+from .images import read_frame
 from .errors import OCRError
 
 
@@ -86,7 +87,7 @@ class RapidOCRProvider:
             import cv2
             import numpy as np
 
-            image = cv2.imdecode(np.fromfile(image_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            image = read_frame(image_path, cv2.IMREAD_COLOR)
             if image is None:
                 raise OCRError(f"Unable to decode image: {image_path}")
             offset_x = offset_y = 0
@@ -123,7 +124,7 @@ class RapidOCRProvider:
             import cv2
             import numpy as np
 
-            image = cv2.imdecode(np.fromfile(image_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            image = read_frame(image_path, cv2.IMREAD_COLOR)
             if image is None:
                 raise OCRError(f"Unable to decode image: {image_path}")
             height, width = image.shape[:2]
@@ -140,6 +141,18 @@ class RapidOCRProvider:
             raise
         except Exception as exc:
             raise OCRError(f"Local line OCR failed for {image_path}: {exc}") from exc
+
+    def recognize_line_image(self, image) -> list[OCRText]:
+        """Read a localized in-memory line without PNG encoding or text detection."""
+        try:
+            output = self._engine(image, use_det=False, use_cls=False, use_rec=True)
+            if output.txts is None or output.scores is None:
+                return []
+            height, width = image.shape[:2]
+            return [OCRText(str(text), float(score), (0, 0, width, height))
+                    for text, score in zip(output.txts, output.scores, strict=True)]
+        except Exception as exc:
+            raise OCRError(f"Local in-memory line OCR failed: {exc}") from exc
 
 
 def create_ocr_provider(config: OCRConfig) -> OCRProvider:

@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from .config import AppConfig, ProfileConfig, load_config
 from .device import DeviceManager
+from .strategies import STRATEGIES
 from .errors import ConfigError, StopRequested
 from .flow import FlowRunner
 from .reporting import RunStats, TaskResult, summarize_run, write_report
@@ -22,6 +23,7 @@ TASK_LABELS = {"launch": "连接与启动", "collect": "收集资源", "request"
                "donate": "部落捐兵", "train": "检查军队", "battle": "自动对战", "recover": "恢复连接"}
 STATUS_LABELS = {"succeeded": "成功", "failed": "失败", "skipped": "跳过", "simulated": "预演",
                  "running": "进行中", "pending": "等待"}
+STRATEGY_LABELS = {name: entry.label for name, entry in STRATEGIES.items()}
 
 
 def display_reason(reason: str) -> str:
@@ -32,6 +34,8 @@ def display_reason(reason: str) -> str:
             "request_record_and_cooldown_verified": "请求记录与冷却已核验",
             "request_cooldown": "增援请求仍在冷却",
             "no_donation_requests_in_scanned_chat": "已扫描范围内没有可捐请求",
+            "edrag_line_troops_settlement_and_return_verified": "单边部队、英雄投放、结算及回村已确认",
+            "two_edge_troops_settlement_and_return_verified": "两边部队投放、结算及回村已确认",
             "Game village and navigation controls recognized": "村庄及导航入口已确认"}.get(reason, reason)
 
 
@@ -44,12 +48,14 @@ class RunOptions:
     max_searches: int
     serial: str
     dry_run: bool = True
+    strategy: str = "verified"
 
     @classmethod
     def from_config(cls, config: AppConfig) -> "RunOptions":
         profile = config.profiles.get("core-loop", next(iter(config.profiles.values())))
         return cls(profile.enabled_tasks, config.stop.max_runs, config.stop.max_duration_sec,
-                   config.battle.min_expected_resources, config.battle.max_searches, config.adb.manual_serial)
+                   config.battle.min_expected_resources, config.battle.max_searches, config.adb.manual_serial,
+                   strategy=config.battle.strategy)
 
     def validate(self) -> None:
         if not self.tasks or self.tasks[0] != "launch":
@@ -62,6 +68,8 @@ class RunOptions:
                 raise ConfigError(f"{name}必须为不小于 {minimum} 的整数")
         if type(self.dry_run) is not bool or not isinstance(self.serial, str):
             raise ConfigError("运行模式或设备地址无效")
+        if self.strategy not in STRATEGY_LABELS:
+            raise ConfigError("对战策略无效")
 
 
 def desktop_config(path: Path, options: RunOptions) -> AppConfig:
@@ -79,7 +87,7 @@ def desktop_config(path: Path, options: RunOptions) -> AppConfig:
                    vision=replace(config.vision, template_dir=absolute(config.vision.template_dir)),
                    stop=replace(config.stop, max_runs=options.max_runs, max_duration_sec=options.max_duration_sec),
                    battle=replace(config.battle, min_expected_resources=options.min_expected_resources,
-                                  max_searches=options.max_searches),
+                                  max_searches=options.max_searches, strategy=options.strategy),
                    reporting=replace(config.reporting, write_markdown=True),
                    profiles={"desktop": ProfileConfig(options.tasks)})
 

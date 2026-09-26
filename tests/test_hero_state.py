@@ -12,6 +12,17 @@ class HeroStateTests(unittest.TestCase):
     root = Path(__file__).resolve().parents[1]
     slot = [599, 595, 688, 711]
 
+    def test_selected_border_with_shaded_segment_requires_a_closed_outline(self) -> None:
+        folder = self.root / "tests/fixtures"
+        slot = [502, 592, 591, 711]
+        before = recognize_hero_state(folder / "hero-border-before.png", slot)
+        selected = recognize_hero_state(folder / "hero-border-selected.png", slot)
+        self.assertFalse(before["selected"])
+        self.assertTrue(selected["selected"])
+        self.assertEqual(selected["state"], "selected")
+        self.assertIsNone(selected["deployed"])
+        self.assertIsNone(selected["ability_ready"])
+
     def fixture(self, number: int) -> Path:
         folder = self.root / "reports/live-20260922/hero-state-023106/frames"
         matches = list(folder.glob(f"{number:05d}-*.png"))

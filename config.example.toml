@@ -58,6 +58,10 @@ enabled_tasks = ["launch", "battle"]
 enabled_tasks = ["launch", "request", "donate"]
 
 [battle]
+# two_edge: event troops first, then ordinary troops, split across two edges.
+# edrag_line: troops in bar order on one edge, then heroes at its midpoint; no abilities.
+# Both choose the first opponent and exclude siege/spells. verified keeps resource mode.
+strategy = "two_edge"
 # Implemented objective: observed gold + elixir; dark elixir is reported separately.
 objective = "resources"
 # Attack only when both amounts are readable and their sum reaches this threshold.

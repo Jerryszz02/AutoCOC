@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
+from .images import read_frame, read_template
 from .errors import SceneError
 from .locator import scale_box
 
@@ -48,7 +49,7 @@ def recognize_siege_state(
     import numpy as np
 
     path = Path(screenshot_path)
-    source = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+    source = read_frame(path, cv2.IMREAD_COLOR)
     if source is None:
         raise SceneError(f"Unable to decode siege screenshot: {path}")
     image = cv2.resize(source, (1280, 720), interpolation=cv2.INTER_AREA)
@@ -88,7 +89,7 @@ def recognize_hero_state(
     import numpy as np
 
     path = Path(screenshot_path)
-    source = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+    source = read_frame(path, cv2.IMREAD_COLOR)
     if source is None:
         raise SceneError(f"Unable to decode hero screenshot: {path}")
     image = cv2.resize(source, (1280, 720), interpolation=cv2.INTER_AREA)
@@ -114,7 +115,7 @@ def recognize_hero_state(
     evidence["pet_anchor"] = pet
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     x0, x1 = max(0, left - 12), min(1280, right + 12)
-    white = cv2.inRange(hsv[565:720, x0:x1], np.array([0, 0, 230]), np.array([180, 35, 255]))
+    white = cv2.inRange(hsv[565:720, x0:x1], np.array([0, 0, 220]), np.array([180, 35, 255]))
     contours, _ = cv2.findContours(white, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     selected = None
     for contour in contours:
@@ -193,7 +194,7 @@ def _match(image, template_path: Path, roi: tuple[int, int, int, int], scales=(1
 
     if not template_path.is_file():
         return None
-    template = cv2.imdecode(np.fromfile(template_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+    template = read_template(template_path)
     if template is None:
         return None
     mask = None
@@ -211,7 +212,7 @@ def _match(image, template_path: Path, roi: tuple[int, int, int, int], scales=(1
     region = image[top:bottom, left:right]
     best = None
     for scale in scales:
-        candidate = template if scale == 1 else cv2.resize(template, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        candidate = read_template(template_path, scale)
         height, width = candidate.shape[:2]
         if height > region.shape[0] or width > region.shape[1]:
             continue

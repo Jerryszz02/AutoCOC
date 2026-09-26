@@ -140,8 +140,9 @@ class GameSession:
             output.write(json.dumps({"time": time.time(), "kind": kind, **data},
                                     ensure_ascii=False, default=str) + "\n")
 
-    def observe(self, label: str = "observe") -> SceneSnapshot:
+    def observe(self, label: str = "observe", *, purpose: str = "full", slot: dict | None = None) -> SceneSnapshot:
         self.check_deadline()
+        previous = self.last_snapshot
         self.last_snapshot = None
         self.frame_number += 1
         safe_label = "".join(c if c.isalnum() or c in "-_" else "-" for c in label)
@@ -149,7 +150,13 @@ class GameSession:
         captured_at = time.monotonic()
         artifact = self.capture.capture_screenshot_artifact(path)
         self.context.screen_resolution = (artifact.width, artifact.height)
-        snapshot = self.recognizer.recognize(path)
+        recognition_started = time.monotonic()
+        if purpose != "full":
+            snapshot = self.recognizer.recognize_battle(path, purpose=purpose, slot=slot, previous=previous)
+        else:
+            snapshot = self.recognizer.recognize(path)
+        snapshot.observations["recognition_elapsed_sec"] = time.monotonic() - recognition_started
+        snapshot.observations["observation_elapsed_sec"] = time.monotonic() - captured_at
         snapshot.observations["observed_at_monotonic"] = captured_at
         snapshot.observations["capture_method"] = getattr(artifact, "capture_method", "unknown")
         capture_elapsed = getattr(artifact, "capture_elapsed_sec", None)
@@ -157,22 +164,30 @@ class GameSession:
         self.last_snapshot = snapshot
         self.event("observation", frame=str(path), scene=snapshot.scene, confidence=snapshot.confidence,
                    observations=snapshot.observations)
-        self.logger.info("scene=%s confidence=%.2f frame=%s", snapshot.scene, snapshot.confidence, path.name)
+        self.logger.info("scene=%s confidence=%.2f capture=%.3fs recognition=%.3fs total=%.3fs frame=%s",
+                         snapshot.scene, snapshot.confidence, snapshot.observations["capture_elapsed_sec"],
+                         snapshot.observations["recognition_elapsed_sec"],
+                         snapshot.observations["observation_elapsed_sec"], path.name)
         return snapshot
 
-    def wait_for(self, scenes: set[str], *, timeout_sec: float = 30, label: str = "wait") -> SceneSnapshot:
+    def wait_for(self, scenes: set[str], *, timeout_sec: float = 30, label: str = "wait",
+                 purpose: str = "full", poll_interval_sec: float | None = None) -> SceneSnapshot:
         deadline = min(time.monotonic() + timeout_sec, self.deadline, self.task_deadline)
         while True:
             if time.monotonic() >= deadline:
                 raise FlowError(f"Expected {sorted(scenes)} before deadline")
-            snapshot = self.observe(label)
+            snapshot = self.observe(label, purpose=purpose) if purpose != "full" else self.observe(label)
             if time.monotonic() >= deadline:
                 raise FlowError(f"Expected {sorted(scenes)} before deadline; frame={snapshot.screenshot_path}")
             if snapshot.scene in scenes and math.isfinite(snapshot.confidence) and snapshot.confidence >= 0.8:
                 return snapshot
             if snapshot.scene in {"maintenance", "disconnected"}:
                 raise FlowError(f"Game interruption: {snapshot.scene}")
-            time.sleep(min(self.config.runtime.poll_interval_sec, max(0, deadline - time.monotonic())))
+            interval = self.config.runtime.poll_interval_sec if poll_interval_sec is None else poll_interval_sec
+            next_poll = min(time.monotonic() + interval, deadline)
+            while time.monotonic() < next_poll:
+                self.check_deadline()
+                time.sleep(min(.1, max(0, next_poll - time.monotonic())))
 
     def _validate_snapshot(self, snapshot: SceneSnapshot) -> None:
         self.check_deadline()

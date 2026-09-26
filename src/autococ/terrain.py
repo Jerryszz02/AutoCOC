@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 import math
 
+from .images import read_frame
 from .errors import SceneError
 from .locator import scale_box, scale_point
 
@@ -14,7 +15,7 @@ def measure_cloud_cover(screenshot_path: str | Path) -> dict:
     import cv2
     import numpy as np
 
-    source = cv2.imdecode(np.fromfile(screenshot_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+    source = read_frame(screenshot_path, cv2.IMREAD_COLOR)
     if source is None:
         raise SceneError(f"Unable to decode scout screenshot: {screenshot_path}")
     image = cv2.resize(source, (1280, 720), interpolation=cv2.INTER_AREA)
@@ -33,6 +34,66 @@ def measure_cloud_cover(screenshot_path: str | Path) -> dict:
             "joint_map_threshold": .1, "control_threshold": .5}
 
 
+def find_line_deployment_edges(screenshot_path: str | Path, *, baseline_resolution=(1280, 720)) -> list[dict]:
+    """Two western flanks offset outside current red boundaries, without panning."""
+    import cv2
+    import numpy as np
+
+    image = cv2.resize(read_frame(screenshot_path), (1280, 720), interpolation=cv2.INTER_AREA)
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    # Red wraps around the HSV hue ring. Purple scenery tints the boundary
+    # toward H=169; looking only near zero would select interior roofs instead.
+    red = cv2.bitwise_or(cv2.inRange(hsv, np.array([0, 70, 45]), np.array([28, 255, 255])),
+                        cv2.inRange(hsv, np.array([155, 70, 45]), np.array([180, 255, 255])))
+    redness = np.maximum(0, image[:, :, 2].astype(float)
+                         - (image[:, :, 0].astype(float) + image[:, :, 1]) / 2).astype(np.uint8)
+    thin = cv2.morphologyEx(redness, cv2.MORPH_TOPHAT, np.ones((5, 5), np.uint8))
+    red[thin < 8] = 0
+    red[:100] = red[495:] = 0
+    red[:, :100] = red[:, 800:] = 0
+    lines = cv2.HoughLinesP(red, 1, np.pi / 180, 20, minLineLength=45, maxLineGap=18)
+    if lines is None:
+        return []
+    # Retry with two pixels of antialiasing tolerance only when the narrow
+    # boundary check cannot establish both flanks.
+    for tolerance in (3, 5):
+        candidates = {0: [], 1: []}
+        support = cv2.dilate(red, np.ones((tolerance, tolerance), np.uint8))
+        for x1, y1, x2, y2 in lines[:, 0]:
+            if abs(int(x2) - int(x1)) < 25:
+                continue
+            slope = (int(y2) - int(y1)) / (int(x2) - int(x1))
+            if not .68 <= abs(slope) <= .82:
+                continue
+            intercept = float(y1 - slope * x1)
+            edge = 0 if slope < 0 else 1
+            low, high = max(min(y1, y2) + 5, 120 if edge == 0 else 360), min(max(y1, y2) - 5, 300 if edge == 0 else 480)
+            ys = np.arange(low, high + 1)
+            if len(ys) < 25:
+                continue
+            xs = (ys - intercept) / slope
+            valid = (xs - 32 >= 180) & (xs - 32 <= 720)
+            ys, xs = ys[valid], xs[valid]
+            if len(ys) < 25 or (support[ys.astype(int), xs.round().astype(int)] > 0).mean() < .85:
+                continue
+            frontier = (250 if edge == 0 else 430) - intercept
+            candidates[edge].append((frontier / slope, slope, intercept,
+                                     [(round(xs[0] - 32), int(ys[0])), (round(xs[-1] - 32), int(ys[-1]))]))
+        if not all(candidates.values()):
+            continue
+        upper, lower = (min(candidates[edge], key=lambda item: item[0]) for edge in (0, 1))
+        corner_x = (lower[2] - upper[2]) / (upper[1] - lower[1])
+        corner_y = upper[1] * corner_x + upper[2]
+        if not (80 <= corner_x <= 480 and 200 <= corner_y <= 480):
+            continue
+        return [{"edge": edge, "point": list(scale_point(point, from_resolution=(1280, 720),
+                                                           to_resolution=baseline_resolution)),
+                 "evidence": {"method": "current_red_boundary_offset", "frame": str(screenshot_path),
+                              "slope": line[1], "intercept": line[2], "horizontal_clearance": 32}}
+                for edge, line in enumerate((upper, lower)) for point in line[3]]
+    return []
+
+
 def measure_camera_motion(before_path: str | Path, after_path: str | Path) -> dict:
     """Compare map features only; unknown correspondence never authorizes a retry."""
     import cv2
@@ -45,7 +106,7 @@ def measure_camera_motion(before_path: str | Path, after_path: str | Path) -> di
     detector = cv2.ORB_create(nfeatures=1200)
     features = []
     for path in (before_path, after_path):
-        source = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+        source = read_frame(path, cv2.IMREAD_GRAYSCALE)
         if source is None:
             raise SceneError(f"Unable to decode camera screenshot: {path}")
         image = cv2.resize(source, (1280, 720), interpolation=cv2.INTER_AREA)
@@ -89,7 +150,7 @@ def find_west_deployment_points(
     import cv2
     import numpy as np
 
-    source = cv2.imdecode(np.fromfile(screenshot_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+    source = read_frame(screenshot_path, cv2.IMREAD_COLOR)
     if source is None:
         raise SceneError(f"Unable to decode terrain screenshot: {screenshot_path}")
     image = cv2.resize(source, (1280, 720), interpolation=cv2.INTER_AREA)
@@ -214,7 +275,7 @@ def find_clear_ground_probes(
     import cv2
     import numpy as np
 
-    source = cv2.imdecode(np.fromfile(screenshot_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+    source = read_frame(screenshot_path, cv2.IMREAD_COLOR)
     if source is None:
         raise SceneError(f"Unable to decode terrain screenshot: {screenshot_path}")
     image = cv2.resize(source, (1280, 720), interpolation=cv2.INTER_AREA)

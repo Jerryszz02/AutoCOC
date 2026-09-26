@@ -9,6 +9,7 @@ from .errors import DeploymentError, FlowError
 from .scene import SceneSnapshot
 from .session import GameSession
 from .vision import ScreenshotRecognizer
+from .strategies import BattleContext, DeploymentPlan, STRATEGIES, is_line_strategy, spread_on_edge
 
 
 def _battle_frame(snapshot: SceneSnapshot) -> None:
@@ -92,6 +93,9 @@ def deploy_army(session: GameSession, scout: SceneSnapshot) -> SceneSnapshot:
 def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, object]) -> SceneSnapshot:
     from .terrain import find_clear_ground_probes, find_west_deployment_points, measure_camera_motion
 
+    strategy = getattr(session.config.battle, "strategy", "verified")
+    line_mode = is_line_strategy(strategy)
+    receipt["strategy"] = strategy
     _battle_frame(scout)
     session._validate_snapshot(scout)
     manifest = scout.observations.get("expected_army_manifest")
@@ -103,7 +107,8 @@ def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, 
         if (not isinstance(cards, list) or any(not isinstance(card, dict)
                 or type(card.get("count")) is not int or card["count"] <= 0 for card in cards)):
             raise FlowError("Prebattle army manifest contains an unreadable quantity")
-        expected.extend((kind, card["count"]) for card in cards)
+        if not line_mode or kind == "troop":
+            expected.extend((kind, card["count"]) for card in cards)
     if not manifest["troops"]:
         raise FlowError("Prebattle army manifest has no troops")
     receipt["expected_army_manifest"] = manifest
@@ -167,8 +172,11 @@ def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, 
         check_deadline()
         return count
 
-    terrain = find_west_deployment_points(current.screenshot_path,
-                                          baseline_resolution=session.config.game.baseline_resolution)
+    if line_mode:
+        current, terrain = _prepare_two_edge_view(session, current, receipt)
+    else:
+        terrain = find_west_deployment_points(current.screenshot_path,
+                                              baseline_resolution=session.config.game.baseline_resolution)
     for duration in (600, 1200):
         if terrain:
             break
@@ -210,26 +218,32 @@ def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, 
         session.event("camera_pan_motion", **pan)
         if motion["stationary"] is not True:
             break
-    if not terrain:
+    if not terrain and not line_mode:
         terrain = find_clear_ground_probes(current.screenshot_path,
                                           baseline_resolution=session.config.game.baseline_resolution)
         check_deadline()
         if terrain:
             session.event("ground_probe_candidates", frame=str(current.screenshot_path), candidates=terrain)
     if not terrain:
-        raise FlowError("No visible west deployment boundary or clear ground probe could be verified")
+        raise FlowError("Two visible deployment edges could not be verified" if line_mode else
+                        "No visible west deployment boundary or clear ground probe could be verified")
     receipt["terrain_evidence"] = terrain
     points = [item["point"] for item in terrain]
     slots = current.observations.get("battle", {}).get("slots", [])
     _verify_visible_quantities(current, slots)
-    if any(slot["kind"] == "unknown" or slot["kind"] in {"troop", "spell"}
+    if not line_mode and any(slot["kind"] == "unknown" or slot["kind"] in {"troop", "spell"}
            and type(slot.get("count")) is not int for slot in slots):
         raise FlowError("An army card has no verified type or quantity")
     planned_cards = [slot for slot in slots if slot["kind"] in {"troop", "spell"}
-                     and type(slot.get("count")) is int and slot["count"] > 0]
+                     and type(slot.get("count")) is int and slot["count"] > 0
+                     and (not line_mode or slot["kind"] == "troop")]
     own_cards = []
     for slot in planned_cards:
-        if slot.get("source", "army") == "clan_reinforcement":
+        if slot.get("source") == "event":
+            portrait = slot.get("evidence", {}).get("event_portrait") or {}
+            if slot["kind"] != "troop" or not .95 <= portrait.get("confidence", 0) <= 1:
+                raise FlowError("Additional event troop has no verified portrait")
+        elif slot.get("source", "army") == "clan_reinforcement":
             badge = slot.get("evidence", {}).get("clan_badge") or {}
             confidence = badge.get("confidence", 0)
             if not math.isfinite(confidence) or not .95 <= confidence <= 1:
@@ -243,6 +257,11 @@ def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, 
         {"kind": slot["kind"], "source": slot.get("source", "army"),
          "bbox": list(slot["bbox"]), "before_count": slot["count"]}
         for slot in planned_cards]
+    if line_mode:
+        planner = STRATEGIES[strategy].planner
+        plan = planner.build_plan(BattleContext(tuple(planned_cards),
+            tuple(slot for slot in slots if slot["kind"] == "hero"), tuple(terrain)))
+        return _deploy_line_cards(session, current, receipt, plan, deadline)
     troops = [slot for slot in slots if slot["kind"] == "troop" and type(slot.get("count")) is int and slot["count"] > 0]
     if not troops:
         raise FlowError("No positive troop count was recognized")
@@ -428,4 +447,196 @@ def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, 
             attempt.get("verified") is True for attempt in support_attempts)
     receipt["completed"] = receipt["support_deployment_verified"] and receipt["hero_abilities_verified"]
     current.observations["deployment"] = receipt
+    return current
+
+
+def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt: dict) -> tuple[SceneSnapshot, list[dict]]:
+    from .battle_vision import selected_card_bbox
+    from .terrain import find_line_deployment_edges, measure_camera_motion
+
+    if session.native is None:
+        raise FlowError("Two-edge minimum zoom requires the MuMu native transport")
+    for _ in range(3):
+        session._validate_snapshot(current)
+        session.native.zoom_out()
+        session.action_count += 1
+        time.sleep(.5)
+    time.sleep(1)
+    before = session.observe("line-zoom-out")
+    _battle_frame(before)
+    session._validate_snapshot(before)
+    session.native.zoom_out()
+    session.action_count += 1
+    time.sleep(1)
+    current = session.observe("line-zoom-verified")
+    _battle_frame(current)
+    motion = measure_camera_motion(before.screenshot_path, current.screenshot_path)
+    receipt["evidence"].extend([str(before.screenshot_path), str(current.screenshot_path)])
+    receipt["minimum_zoom"] = {"verified": motion["stationary"] is True, "motion": motion,
+                               "frame": str(current.screenshot_path)}
+    session.event("line_minimum_zoom", **receipt["minimum_zoom"])
+    if motion["stationary"] is not True:
+        raise FlowError("Minimum zoom did not stabilize before line deployment")
+    # Minimum scale alone does not fix camera translation or the build boundary.
+    # Selecting a troop reveals the current red border without placing anything.
+    troops = [slot for slot in current.observations.get("battle", {}).get("slots", [])
+              if slot["kind"] == "troop" and type(slot.get("count")) is int and slot["count"] > 0]
+    if not troops:
+        raise FlowError("No troop card available to reveal deployment boundaries")
+    session.recognizer.battle_observer.remember(current)
+    identity_frame = str(current.screenshot_path)
+    session.tap(current, troops[0]["point"], reason="Reveal current deployment boundaries")
+    for _ in range(3):
+        current = session.observe("line-boundary")
+        receipt["evidence"].append(str(current.screenshot_path))
+        _battle_frame(current)
+        selected_box = selected_card_bbox(current.screenshot_path, troops[0]["bbox"],
+                                          session.config.game.baseline_resolution)
+        if selected_box is None:
+            continue
+        # The selected white header can erase the hue used to classify a troop.
+        # Its outline can also join a neighbor. Verify each original portrait and
+        # current count independently before replacing any missing border detection.
+        refreshed = []
+        for index, troop in enumerate(troops):
+            reading = session.recognizer.recognize_slot_count(current.screenshot_path, tuple(troop["bbox"]))
+            if reading.get("portrait_score", 0) < .92 or reading.get("count") != troop["count"]:
+                break
+            box = selected_box if index == 0 else troop["bbox"]
+            refreshed.append({**troop, "bbox": list(box),
+                "point": [(box[0] + box[2]) // 2, (box[1] + box[3]) // 2],
+                "count": reading["count"], "evidence": {**troop.get("evidence", {}),
+                "count": reading["readings"][0], "identity_reference": identity_frame,
+                "portrait_score": reading["portrait_score"]}})
+        if len(refreshed) != len(troops):
+            continue
+        slots = current.observations["battle"]["slots"]
+        current.observations["battle"]["slots"] = sorted(
+            [slot for slot in slots if all(abs(slot["point"][0] - troop["point"][0]) >= 25 for troop in troops)] + refreshed,
+            key=lambda slot: slot["point"][0])
+        terrain = find_line_deployment_edges(current.screenshot_path,
+                                            baseline_resolution=session.config.game.baseline_resolution)
+        if terrain:
+            return current, terrain
+    raise FlowError("Two current deployment boundaries could not be verified")
+
+
+def spread_along_edges(terrain: list[dict], count: int) -> list[list[int]]:
+    """Split a stack evenly and interpolate along each observed flank."""
+    if type(count) is not int or count <= 0:
+        raise FlowError("Line deployment requires a positive troop count")
+    return [list(point) for point in (spread_on_edge(terrain, 0, (count + 1) // 2)
+                                      + spread_on_edge(terrain, 1, count // 2))]
+
+
+def _deploy_line_cards(session: GameSession, current: SceneSnapshot, receipt: dict,
+                       plan: DeploymentPlan, deadline: float) -> SceneSnapshot:
+    started = time.monotonic()
+    receipt.update(scope="troops_and_heroes" if plan.heroes else "troops_only",
+                   excluded_kinds=["siege", "spell"] + ([] if plan.heroes else ["hero"]), issued_placements=0)
+
+    def check() -> None:
+        session.check_deadline()
+        if time.monotonic() >= deadline:
+            raise FlowError("Army deployment deadline exceeded")
+
+    def observe(label: str, *, purpose: str = "troop_count", slot: dict | None = None) -> SceneSnapshot:
+        check()
+        frame = session.observe(label, purpose=purpose, slot=slot)
+        receipt["evidence"].append(str(frame.screenshot_path))
+        for reading in frame.observations.get("deployment_count_reads", []):
+            receipt["count_reads"].append(reading)
+            session.event("deployment_count_read", **reading)
+        check()
+        _battle_frame(frame)
+        return frame
+
+    for step in plan.troops:
+        slot = step.card
+        check()
+        old = _remaining(current, slot, recognizer=getattr(session, "recognizer", None))
+        check()
+        if old != slot["count"]:
+            raise FlowError("Troop quantity changed before line deployment")
+        session.tap(current, slot["point"], reason=f"Select troop stack for line: {old}")
+        current = observe("line-selected", slot=slot)
+        if _remaining(current, slot, recognizer=getattr(session, "recognizer", None)) != old:
+            raise FlowError("Troop quantity changed before line placement")
+        planned = [list(point) for point in step.points]
+        before = current
+        issued = 0
+        event = {"unit_kind": "troop", "slot": slot["point"], "points": planned,
+                 "before_count": old, "issued_placements": 0, "before_frame": str(before.screenshot_path),
+                 "after_count": None, "consumed": 0}
+        receipt["consumption_events"].append(event)
+        # All placements use one selected card and a fixed camera. Refresh only
+        # if a very large stack outlives the snapshot, without selecting it again.
+        for point in planned:
+            check()
+            if time.monotonic() - current.observations["observed_at_monotonic"] > 20:
+                current = observe("line-refresh", slot=slot)
+            session.tap(current, point, reason="Place troop along planned deployment line")
+            issued += 1
+            event["issued_placements"] = issued
+            receipt["issued_placements"] += 1
+            time.sleep(.12)
+        for attempt in range(3):
+            if attempt:
+                time.sleep(min(session.config.runtime.poll_interval_sec, 1))
+            current = observe("line-consumption", slot=slot)
+            after = _remaining(current, slot, recognizer=getattr(session, "recognizer", None))
+            check()
+            if after is None:
+                continue
+            if not 0 <= after <= old - event["consumed"]:
+                raise FlowError("Troop quantity increased while verifying line deployment")
+            consumed = old - after
+            receipt["deployed_units"] += consumed - event["consumed"]
+            receipt["verified"] = receipt["deployed_units"] > 0
+            event.update(after_count=after, consumed=consumed, after_frame=str(current.screenshot_path))
+            if after == 0:
+                break
+        session.event("line_deployment_consumed", **event)
+        if event["after_count"] != 0:
+            raise FlowError("Line deployment left troops unverified; placements will not be replayed")
+    receipt["numeric_completed"] = True
+    for step in plan.heroes:
+        from .hero_state import recognize_hero_state
+
+        slot = step.card
+        check()
+        attempt = {"kind": "hero", "point": slot["point"], "status": "attempted", "verified": False,
+                   "ability_clicks": 0, "selection_frame": str(current.screenshot_path),
+                   "placement_frame": None, "states": []}
+        receipt["support_attempts"].append(attempt)
+        session.tap(current, slot["point"], reason="Select hero to follow the line")
+        for _ in range(3):
+            current = observe("line-hero-selected", purpose="hero")
+            selected = recognize_hero_state(current.screenshot_path, slot["bbox"],
+                                           baseline_resolution=session.config.game.baseline_resolution)
+            check()
+            attempt["states"].append(selected)
+            if selected["selected"] is True or selected["deployed"] is True:
+                break
+        if selected["selected"] is not True or selected["deployed"] is True:
+            raise FlowError("Hero selection is unverified; placement will not be attempted")
+        attempt["placement_frame"] = str(current.screenshot_path)
+        session.tap(current, list(step.points[0]), reason="Place hero at the line midpoint")
+        for _ in range(3):
+            current = observe("line-hero-deployed", purpose="hero")
+            state = recognize_hero_state(current.screenshot_path, slot["bbox"],
+                                        baseline_resolution=session.config.game.baseline_resolution)
+            check()
+            attempt["states"].append(state)
+            session.event("hero_state", **state)
+            if state["deployed"] is True:
+                attempt.update(verified=True, status="deployed")
+                break
+        if not attempt["verified"]:
+            raise FlowError("Hero deployment is unverified; placement will not be replayed")
+    receipt.update(completed=True, support_deployment_verified=True,
+                   deployment_elapsed_sec=time.monotonic() - started)
+    current.observations["deployment"] = receipt
+    session.event("line_deployment_complete", deployed_units=receipt["deployed_units"],
+                  elapsed_sec=receipt["deployment_elapsed_sec"], scope=receipt["scope"])
     return current

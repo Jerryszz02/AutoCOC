@@ -9,6 +9,7 @@ import tomllib
 import warnings
 
 from .errors import ConfigError
+from .strategies import STRATEGIES
 
 
 VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR"}
@@ -82,8 +83,11 @@ class BattleConfig:
     min_expected_resources: int = 300000
     max_searches: int = 30
     deploy_timeout_sec: int = 180
+    strategy: str = "verified"
 
     def __post_init__(self) -> None:
+        if self.strategy not in STRATEGIES:
+            raise ConfigError(f"battle.strategy must be one of {tuple(STRATEGIES)}")
         if self.objective != "resources":
             raise ConfigError("battle.objective supports only 'resources' (gold + elixir threshold)")
         for name, minimum in (("min_expected_resources", 0), ("max_searches", 1), ("deploy_timeout_sec", 1)):
@@ -274,6 +278,7 @@ def _load_battle(section: dict[str, Any]) -> BattleConfig:
         min_expected_resources=_non_negative_int(section, "min_expected_resources", 300000),
         max_searches=_positive_int(section, "max_searches", 30),
         deploy_timeout_sec=_positive_int(section, "deploy_timeout_sec", 180),
+        strategy=_string(section, "strategy", "verified"),
     )
 
 

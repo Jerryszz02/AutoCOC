@@ -15,6 +15,7 @@ from .flow import return_to_village
 from .reporting import TaskResult
 from .scene import SceneSnapshot
 from .session import GameSession
+from .strategies import is_line_strategy
 
 
 RESOURCES = ("gold", "elixir", "dark_elixir")
@@ -53,11 +54,15 @@ def run_battle(session: GameSession) -> TaskResult:
     }
     status, reason = "failed", "battle_verification_incomplete"
     settlement_error: str | None = None
+    line_mode = is_line_strategy(session.config.battle.strategy)
+    metrics["strategy"] = session.config.battle.strategy
     try:
+        if line_mode and session.native is None:
+            raise FlowError("Two-edge minimum zoom requires the MuMu native transport")
         home = return_to_village(session)
         evidence.append(home.screenshot_path)
         metrics["resources_before"] = home.observations.get("resources")
-        before = _inventory(home)
+        before = home.observations.get("resources", {}) if line_mode else _inventory(home)
         session.click(home, "attack")
         menu = session.wait_for({"search"}, timeout_sec=30, label="battle-menu")
         evidence.append(menu.screenshot_path)
@@ -67,7 +72,7 @@ def run_battle(session: GameSession) -> TaskResult:
         evidence.append(army_frame.screenshot_path)
         army = _read_army(army_frame)
         metrics["army"] = army
-        if not army["troops_full"] or not army["spells_full"]:
+        if not army["troops_full"] or not line_mode and not army["spells_full"]:
             raise FlowError("Army troop/spell recipe is not full")
 
         total_search_cost = 0
@@ -79,7 +84,7 @@ def run_battle(session: GameSession) -> TaskResult:
             total_search_cost += pending_cost
             metrics["search_cost_gold"] = total_search_cost
             available = scout.observations.get("resources", {})
-            if not isinstance(available, dict) or scout.observations.get("resource_source") != "enemy_available":
+            if not isinstance(available, dict) or not line_mode and scout.observations.get("resource_source") != "enemy_available":
                 raise FlowError("Enemy available resources were not identified")
             target = BattleTarget(gold=available.get("gold"), elixir=available.get("elixir"),
                                   dark_elixir=available.get("dark_elixir"))
@@ -106,9 +111,11 @@ def run_battle(session: GameSession) -> TaskResult:
             deployed = deploy_army(session, scout)
         except DeploymentError as exc:
             last = session.last_snapshot
-            if (exc.partial_receipt.get("verified") is not True or last is None
-                    or type(exc.partial_receipt.get("deployed_units")) is not int
-                    or exc.partial_receipt["deployed_units"] <= 0
+            units = exc.partial_receipt.get("deployed_units")
+            issued = exc.partial_receipt.get("issued_placements", 0)
+            verified_partial = exc.partial_receipt.get("verified") is True and type(units) is int and units > 0
+            attempted_line = line_mode and type(issued) is int and issued > 0
+            if (last is None or not (verified_partial or attempted_line)
                     or last.scene not in {"enemy_village", "battle", "settlement"}):
                 raise
             # A partial attack still needs its result recorded and a safe return
@@ -120,9 +127,11 @@ def run_battle(session: GameSession) -> TaskResult:
         deployment = deployed.observations.get("deployment")
         metrics["deployment"] = deployment
         _require_scene(deployed, {"enemy_village", "battle", "settlement"})
-        if not isinstance(deployment, dict) or deployment.get("verified") is not True:
+        cleanup_only = line_mode and "deployment_error" in metrics
+        if not isinstance(deployment, dict) or not cleanup_only and deployment.get("verified") is not True:
             raise FlowError("Deployment has no verified receipt")
-        if type(deployment.get("deployed_units")) is not int or deployment["deployed_units"] <= 0:
+        if (type(deployment.get("deployed_units")) is not int or deployment["deployed_units"] < 0
+                or deployment["deployed_units"] == 0 and not cleanup_only):
             raise FlowError("No positive troop deployment was verified")
         deployment_evidence = deployment.get("evidence")
         if not isinstance(deployment_evidence, list) or not deployment_evidence:
@@ -130,13 +139,14 @@ def run_battle(session: GameSession) -> TaskResult:
         evidence.extend(Path(path) for path in deployment_evidence)
 
         settlement_frame = deployed if deployed.scene == "settlement" else session.wait_for(
-            {"settlement"}, timeout_sec=session.config.battle.deploy_timeout_sec, label="battle-settlement")
+            {"settlement"}, timeout_sec=session.config.battle.deploy_timeout_sec + (35 if cleanup_only else 0), label="battle-settlement",
+            **({"purpose": "settlement", "poll_interval_sec": 5} if line_mode else {}))
         settlement = None
         reads: list[dict[str, object]] = []
         metrics["settlement_reads"] = reads
         read_started = time.monotonic()
         read_deadline = read_started + 10
-        for attempt in range(4):  # Initial frame plus at most three fresh observations.
+        for attempt in range(1 if line_mode else 4):  # Resource mode allows at most three fresh rereads.
             if settlement_frame.screenshot_path not in evidence:
                 evidence.append(settlement_frame.screenshot_path)
             observed = settlement_frame.observations.get("settlement")
@@ -157,6 +167,8 @@ def run_battle(session: GameSession) -> TaskResult:
                 reading["valid"] = True
                 settlement_error = None
                 break
+            if line_mode:
+                break
             if attempt == 3 or time.monotonic() >= read_deadline:
                 break
             session.check_deadline()
@@ -171,9 +183,59 @@ def run_battle(session: GameSession) -> TaskResult:
         session.check_deadline()
         _require_scene(settlement_frame, {"settlement"})
         session.click(settlement_frame, "return_home")
-        home_after = session.wait_for({"village"}, timeout_sec=45, label="battle-return-home")
+        home_after = session.wait_for({"village", "popup"}, timeout_sec=45, label="battle-return-home")
+        if home_after.scene == "popup":
+            _require_scene(home_after, {"popup"})
+            reward = [item for item in home_after.observations.get("ocr", [])
+                      if item["text"].replace(" ", "").rstrip("!！") == "已收到胜利之星奖励"
+                      and math.isfinite(item.get("confidence", 0)) and .95 <= item["confidence"] <= 1]
+            if len(reward) != 1:
+                raise FlowError("Unrecognized popup after battle return")
+            evidence.append(home_after.screenshot_path)
+            metrics["star_bonus_popup_frame"] = str(home_after.screenshot_path)
+            # This receipt acknowledges rewards already received; never confirm
+            # an arbitrary popup, or repeat the click while it animates away.
+            session.click(home_after, "confirm")
+            home_after = session.wait_for({"village"}, timeout_sec=20, label="battle-reward-return-home")
         evidence.append(home_after.screenshot_path)
         metrics["resources_after"] = home_after.observations.get("resources")
+        if line_mode:
+            observed = metrics["settlement_observed"] or {}
+            for group, prefix in (("loot", "loot"), ("bonus", "bonus")):
+                for resource in RESOURCES:
+                    proof = (observed.get("evidence") or {}).get(group) or {}
+                    proof = proof.get(resource, proof)
+                    metrics[f"{prefix}_{resource}"] = (None if proof.get("requires_inventory_reconciliation") else
+                                                       (observed.get(group) or {}).get(resource))
+            stars = observed.get("stars")
+            metrics.update(stars=stars, percentage=observed.get("percentage"),
+                           victory=stars > 0 if type(stars) is int else None,
+                           returned_home=True, rounds_completed=1)
+            after = home_after.observations.get("resources") or {}
+            if type(before.get("gems")) is int and type(after.get("gems")) is int and before["gems"] != after["gems"]:
+                # Village counters animate from zero on arrival. Confirm a
+                # discrepancy from fresh frames before reporting a balance change.
+                reads = [{"frame": str(home_after.screenshot_path), "resources": after}]
+                metrics["home_resource_reads"] = reads
+                for _ in range(3):
+                    session.check_deadline()
+                    time.sleep(min(session.config.runtime.poll_interval_sec, 1))
+                    home_after = session.observe("battle-home-resources")
+                    evidence.append(home_after.screenshot_path)
+                    _require_scene(home_after, {"village"})
+                    after = home_after.observations.get("resources") or {}
+                    reads.append({"frame": str(home_after.screenshot_path), "resources": after})
+                    metrics["resources_after"] = after
+                    if after.get("gems") == before["gems"]:
+                        break
+                else:
+                    raise FlowError("Gem balance changed during battle or could not be reverified")
+            if deployment.get("completed") is not True:
+                raise FlowError(metrics.get("deployment_error") or "Line troop/hero deployment is incomplete")
+            session.event("battle_round_verified", settlement_frame=str(settlement_frame.screenshot_path),
+                          home_frame=str(home_after.screenshot_path), victory=metrics["victory"])
+            return TaskResult("battle", "succeeded", f"{session.config.battle.strategy}_troops_settlement_and_return_verified",
+                              started_at, time.monotonic() - started, evidence, metrics)
         if settlement_error is not None:
             raise FlowError(settlement_error)
         after = _inventory(home_after)
@@ -290,6 +352,8 @@ def _next_candidate(session: GameSession, previous: SceneSnapshot | None = None)
             raise FlowError("Next target did not become distinguishable from the previous candidate")
         snapshot = session.wait_for({"enemy_village"}, timeout_sec=remaining, label="battle-candidate")
         _require_scene(snapshot, {"enemy_village"})
+        if is_line_strategy(session.config.battle.strategy) and previous is None:
+            return _wait_for_clear_scout(session, snapshot, deadline)
         values = snapshot.observations.get("resources", {})
         readable = (isinstance(values, dict) and snapshot.observations.get("resource_source") == "enemy_available"
                     and all(type(values.get(name)) is int and values[name] >= 0 for name in ("gold", "elixir")))

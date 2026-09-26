@@ -18,6 +18,7 @@ from .flow import FlowRunner
 from .mumu import MuMuClient
 from .reporting import RunStats, setup_logging
 from .scene import SceneSnapshot
+from .strategies import STRATEGIES
 from .vision import ScreenshotRecognizer
 
 
@@ -29,11 +30,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--image", type=Path, help="Inspect an existing screenshot without connecting to ADB")
     parser.add_argument("--once", action="store_true", help="Run one complete profile cycle")
     parser.add_argument("--dry-run", action="store_true", help="Plan the run without connecting to or operating the game")
+    parser.add_argument("--strategy", choices=tuple(STRATEGIES), help="Override battle strategy for run")
     args = parser.parse_args(argv)
     if args.image is not None and args.command != "inspect":
         parser.error("--image is only valid with inspect")
     if (args.once or args.dry_run) and args.command != "run":
         parser.error("--once and --dry-run are only valid with run")
+    if args.strategy is not None and args.command != "run":
+        parser.error("--strategy is only valid with run")
     if args.command == "gui":
         from .gui import main as gui_main
         return gui_main(["--config", args.config])
@@ -43,6 +47,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         config = load_config(args.config)
+        if args.strategy is not None:
+            config = replace(config, battle=replace(config.battle, strategy=args.strategy))
         if args.once:
             config = replace(config, stop=replace(config.stop, max_runs=1))
         if args.dry_run:
