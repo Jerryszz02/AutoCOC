@@ -1,5 +1,5 @@
 id = "two_edge"
-label = "当前军队双边铺兵"
+label = "普通兵双边投放"
 army_mode = "captured"
 
 [[steps]]

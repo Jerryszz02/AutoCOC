@@ -48,7 +48,7 @@ class SlotCountTests(unittest.TestCase):
         result = self.reader.recognize_slot_count(self.path, self.bbox, count_bbox=count_bbox)
         self.assertEqual(result["count"], 0)
         self.assertEqual(result["count_bbox"], list(count_bbox))
-        self.assertEqual(result["line_roi"], [197, 586, 249, 624])
+        self.assertEqual(result["line_roi"], [198, 586, 250, 624])
         self.assertEqual(result["readings"][0]["bbox"], result["line_roi"])
         self.assertEqual(result["readings"][0]["source"], "count_bbox_threshold_line")
         self.assertEqual(self.provider.recognize_line.call_args.args[1], (0, 0, 104, 76))
@@ -64,7 +64,7 @@ class SlotCountTests(unittest.TestCase):
         self.provider.recognize.return_value = [OCRText("x0", .83, (400, 1180, 496, 1252))]
         self.provider.recognize_line.return_value = [OCRText("x0", .97)]
         result = self.reader.recognize_slot_count(self.path, self.bbox, count_bbox=(215, 590, 245, 616))
-        self.assertEqual(result["line_roi"], [196, 586, 250, 630])
+        self.assertEqual(result["line_roi"], [190, 586, 250, 630])
         self.assertEqual(result["count"], 0)
         self.provider.recognize_line.return_value = []
         self.assertIsNone(self.reader.recognize_slot_count(self.path, self.bbox, count_bbox=(215, 590, 245, 616))["count"])
@@ -165,6 +165,18 @@ class SlotCountTests(unittest.TestCase):
                 self.assertLessEqual(top, 592)
                 self.assertGreaterEqual(right, 180)
                 self.assertGreaterEqual(bottom, 622)
+
+    def test_gray_electro_zero_after_tenth_placement_uses_card_local_context(self) -> None:
+        # Extracted from the second live battle with everything outside this
+        # card masked, including account name, resources, and opponent base.
+        path = Path(__file__).resolve().parent / "fixtures/battle_gray_electro_x0.png"
+        reader = ScreenshotRecognizer()
+        result = reader.recognize_slot_count(path, (93, 595, 182, 711),
+                                             count_bbox=(130, 592, 179, 621))
+        self.assertEqual(result["count"], 0)
+        self.assertGreaterEqual(result["confidence"], .9)
+        self.assertEqual(result["line_roi"], [120, 588, 182, 629])
+        self.assertTrue(all(93 <= item <= 182 for item in result["line_roi"][::2]))
 
 
 if __name__ == "__main__":

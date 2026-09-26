@@ -504,7 +504,10 @@ class ScreenshotRecognizer:
             cl, ct, cr, cb = count_bbox
             if not (roi[0] <= cl < cr <= roi[2] and roi[1] <= ct < cb <= roi[3]):
                 raise SceneError(f"Army count bbox is outside its card header: {count_bbox}")
-            px, py = max(1, round(4 * width / 1280)), max(1, round(4 * height / 720))
+            # The last deployment shifts the gray x0 glyph toward the card's
+            # right edge. Keep enough left context for line OCR even when the
+            # previous x10 detection was narrow; the crop stays inside this card.
+            px, py = max(1, round(10 * width / 1280)), max(1, round(4 * height / 720))
             # A prior x1 box is narrower than x0, and deselection can move the
             # glyphs down. Anchor to it without clipping the new two-character count.
             line_right = min(roi[2], cr + px)

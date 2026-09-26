@@ -1,5 +1,5 @@
 id = "single_edge"
-label = "当前军队单边铺兵"
+label = "普通兵单边投放"
 army_mode = "captured"
 
 [[steps]]
