@@ -231,12 +231,95 @@ class CombatTests(unittest.TestCase):
         strategy = StrategyDefinition("spells", "法术", None,
             (StrategyStep("cast_spell", "lightning_spell", 2, target="relative:center"),), "captured")
         with patch("autococ.strategy_config.load_strategy", return_value=strategy), \
-                patch("autococ.strategy_execution.execute_strategy", side_effect=lambda s, scout, definition: s.deploy(s, scout)):
+                patch("autococ.strategy_execution.execute_strategy", side_effect=lambda s, scout, definition, **kwargs: s.deploy(s, scout)):
             result = run_battle(session)
         self.assertEqual(result.status, "succeeded", result.reason)
         self.assertTrue(result.metrics["returned_home"])
         self.assertEqual(result.metrics["deployment"]["deployed_units"], 0)
         self.assertEqual(result.metrics["deployment"]["spells_used"], 2)
+
+    def test_absent_optional_building_spell_does_not_require_building_samples(self):
+        from autococ.reporting import TaskResult
+        from autococ.strategy_config import StrategyDefinition, StrategyStep
+        from autococ.unit_catalog import ArmyRecipe, ArmyRequirement
+        frames = complete_frames()
+        frames.insert(1, frame(7, "village", resources=deepcopy(BEFORE)))
+        frames[5].observations["deployment"]["offensive_actions"] = 1
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle,
+            strategy_file=str(Path("optional-spell.toml").resolve()),
+            resource_filter=ResourceFilter(enabled=False))
+        strategy = StrategyDefinition("optional", "optional", ArmyRecipe((
+            ArmyRequirement("barbarian", 1), ArmyRequirement("lightning_spell", 1, optional=True))),
+            (StrategyStep("cast_spell", "lightning_spell", target="spell_factory"),
+             StrategyStep("deploy_troop", "barbarian")))
+        prepared = TaskResult("prepare_army", "succeeded", "verified",
+            evidence=[Path("army-verified.png")],
+            metrics={"observed": {"troop": {"barbarian": 1}, "spell": {}}})
+        passed = []
+
+        def execute(s, scout, definition, **kwargs):
+            passed.append(kwargs["prepared_army"])
+            return s.deploy(s, scout)
+
+        with patch("autococ.strategy_config.load_strategy", return_value=strategy), \
+                patch("autococ.army_control.ensure_army", return_value=prepared), \
+                patch("autococ.building_vision.building_coverage", return_value={}), \
+                patch("autococ.strategy_execution.execute_strategy", side_effect=execute):
+            result = run_battle(session)
+        self.assertEqual(result.status, "succeeded", result.reason)
+        self.assertEqual(passed, [{"status": "succeeded", "frame": "army-verified.png",
+                                   "observed": {"troop": {"barbarian": 1}, "spell": {}}}])
+        self.assertFalse(any(label.startswith("building-zoom") for label in session.observe_labels))
+
+    def test_task_building_target_is_not_exempted_by_optional_spell_absence(self):
+        from autococ.strategy_config import StrategyDefinition, StrategyStep
+        from autococ.unit_catalog import ArmyRecipe, ArmyRequirement
+        session = FakeSession(complete_frames())
+        session.config.battle = replace(session.config.battle,
+            strategy_file=str(Path("optional-spell.toml").resolve()), target_building="spell_factory")
+        strategy = StrategyDefinition("optional", "optional", ArmyRecipe((
+            ArmyRequirement("barbarian", 1), ArmyRequirement("lightning_spell", 1, optional=True))),
+            (StrategyStep("cast_spell", "lightning_spell", target="spell_factory"),
+             StrategyStep("deploy_troop", "barbarian")))
+        with patch("autococ.strategy_config.load_strategy", return_value=strategy), \
+                patch("autococ.building_vision.building_coverage", return_value={}) as coverage:
+            result = run_battle(session)
+        self.assertEqual(result.status, "not_supported")
+        self.assertIn("spell_factory", result.reason)
+        self.assertEqual(session.observe_labels, [])
+        coverage.assert_called()
+
+    def test_contrary_battle_spell_requires_building_coverage_and_safe_return(self):
+        from autococ.reporting import TaskResult
+        from autococ.strategy_config import StrategyDefinition, StrategyStep
+        from autococ.unit_catalog import ArmyRecipe, ArmyRequirement
+        frames = complete_frames()[:4]
+        frames.insert(1, frame(7, "village", resources=deepcopy(BEFORE)))
+        frames[4].observations["battle"] = {"slots": [
+            {"unit_id": "lightning_spell", "kind": "spell", "source": "army",
+             "count": 1, "confidence": .99, "point": [200, 650]}]}
+        frames.extend([frame(8, "village", resources=deepcopy(BEFORE)),
+                       frame(9, "village", resources=deepcopy(BEFORE))])
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle,
+            strategy_file=str(Path("optional-spell.toml").resolve()),
+            resource_filter=ResourceFilter(enabled=False))
+        strategy = StrategyDefinition("optional", "optional", ArmyRecipe((
+            ArmyRequirement("barbarian", 1), ArmyRequirement("lightning_spell", 1, optional=True))),
+            (StrategyStep("cast_spell", "lightning_spell", target="spell_factory"),
+             StrategyStep("deploy_troop", "barbarian")))
+        prepared = TaskResult("prepare_army", "succeeded", "verified",
+            evidence=[Path("army-verified.png")],
+            metrics={"observed": {"troop": {"barbarian": 1}, "spell": {}}})
+        with patch("autococ.strategy_config.load_strategy", return_value=strategy), \
+                patch("autococ.army_control.ensure_army", return_value=prepared), \
+                patch("autococ.building_vision.building_coverage", return_value={}):
+            result = run_battle(session)
+        self.assertEqual(result.status, "not_supported", result.reason)
+        self.assertTrue(result.metrics["returned_home"])
+        self.assertEqual(session.deploy_calls, 0)
+        self.assertTrue(any("end_battle" in reason for _, reason in session.taps))
 
     def test_star_bonus_receipt_is_confirmed_once_before_verifying_home(self):
         for strategy in ("verified", "edrag_line"):

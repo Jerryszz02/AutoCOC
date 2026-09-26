@@ -10,6 +10,7 @@ from .errors import DeploymentError, FlowError, StopRequested
 from .scene import SceneSnapshot
 from .strategies import BattleContext, spread_on_edge
 from .strategy_config import StrategyDefinition, StrategyStep, planned_steps
+from .unit_catalog import get_unit
 
 
 def _cards(frame: SceneSnapshot) -> list[dict]:
@@ -655,16 +656,67 @@ def _end_battle_confirmation(frame: SceneSnapshot) -> tuple[int, int, int, int]:
     return (300, 200, 980, 650)
 
 
-def execute_strategy(session, scout: SceneSnapshot, definition: StrategyDefinition) -> SceneSnapshot:
+def _optional_absences(definition: StrategyDefinition, scout: SceneSnapshot | None,
+                       prepared_army: dict | None) -> tuple[set[str], str | None]:
+    """Only a successful, complete home-army reading can prove own units absent."""
+    if (definition.recipe is None or not isinstance(prepared_army, dict) or
+            prepared_army.get("status") != "succeeded" or
+            not isinstance(prepared_army.get("frame"), str) or not prepared_army["frame"]):
+        return set(), None
+    observed = prepared_army.get("observed")
+    if not isinstance(observed, dict):
+        return set(), None
+    absent = set()
+    for requirement in definition.recipe.units:
+        if not requirement.optional:
+            continue
+        unit = get_unit(requirement.unit_id)
+        if unit is None or unit.source == "event":
+            continue
+        group = observed.get(unit.kind)
+        if (not isinstance(group, dict) or any(
+                not isinstance(unit_id, str) or get_unit(unit_id) is None or
+                get_unit(unit_id).kind != unit.kind or type(count) is not int or count < 0
+                for unit_id, count in group.items())):
+            continue
+        if requirement.unit_id not in group:
+            absent.add(requirement.unit_id)
+    return absent, prepared_army["frame"]
+
+
+def _skip_optional_step(step: StrategyStep, absent: set[str], scout: SceneSnapshot | None) -> bool:
+    if step.unit_id not in absent or step.source not in {"auto", "army"}:
+        return False
+    kind = get_unit(step.unit_id).kind
+    allowed = {"army", "event"} if step.source == "auto" else {"army"}
+    # A fresh named card contradicts home absence; an anonymous card of the
+    # same kind could be it. Neither licenses a silent skip across viewports.
+    return scout is None or not any(
+        card.get("kind") == kind and card.get("source", "army") in allowed and
+        card.get("unit_id") in {None, step.unit_id} for card in _cards(scout))
+
+
+def declared_building_targets(definition: StrategyDefinition, objective_target: str,
+                              *, prepared_army: dict | None = None,
+                              scout: SceneSnapshot | None = None) -> set[str]:
+    """Static planner declarations and actions that cannot be proved omitted."""
+    absent, _ = _optional_absences(definition, scout, prepared_army)
+    return {objective_target if step.target == "objective" else step.target
+            for step in definition.steps if step.action == "cast_spell" and
+            (definition.planner is not None or not _skip_optional_step(step, absent, scout))}
+
+
+def execute_strategy(session, scout: SceneSnapshot, definition: StrategyDefinition, *,
+                     prepared_army: dict | None = None) -> SceneSnapshot:
     """Run ordered actions and attach a receipt understood by the battle flow.
 
     Input is issued only after current-frame scene, card, boundary, and target
     checks. All ambiguous action results fail with a partial receipt.
     """
     receipt = {"strategy": definition.id, "completed": False, "verified": False,
-               "deployed_units": 0, "spells_used": 0, "offensive_actions": 0,
-               "issued_placements": 0, "hero_abilities": 0, "siege_deployed": 0, "actions": [],
-               "hero_states": [], "evidence": [str(scout.screenshot_path)]}
+                "deployed_units": 0, "spells_used": 0, "offensive_actions": 0,
+                "issued_placements": 0, "hero_abilities": 0, "siege_deployed": 0, "actions": [],
+                "skipped_actions": [], "hero_states": [], "evidence": [str(scout.screenshot_path)]}
     frame = scout
     captured_stacks: tuple[dict, ...] = ()
     try:
@@ -697,13 +749,33 @@ def execute_strategy(session, scout: SceneSnapshot, definition: StrategyDefiniti
         )
         steps = planned_steps(definition, {"strategy_id": definition.id, **asdict(context)},
                               objective_target=getattr(session.config.battle, "target_building", ""))
+        absent, preparation_frame = _optional_absences(definition, scout, prepared_army)
+        skipped = {index for index, step in enumerate(steps)
+                   if _skip_optional_step(step, absent, scout)}
+        receipt["skipped_actions"] = [{"step_index": index, "action": steps[index].action,
+            "unit_id": steps[index].unit_id, "reason": "optional_unit_absent_in_verified_army",
+            "army_frame": preparation_frame} for index in sorted(skipped)]
+        active_steps = tuple(step for index, step in enumerate(steps) if index not in skipped)
+        if skipped and not any(step.action in {"deploy_troop", "deploy_hero", "deploy_siege", "cast_spell"}
+                   for step in active_steps):
+            raise FlowError("Strategy has no deployable offensive action after optional omissions")
+        if (any(step.action == "end_battle" and step.target == "target_destroyed"
+                for step in active_steps) and not any(
+                    step.action == "cast_spell" and not step.target.startswith("relative:")
+                    for step in active_steps)):
+            raise FlowError("Target destruction has no available building spell action")
         deadline = time.monotonic() + session.config.battle.deploy_timeout_sec
-        frame = _preflight(session, frame, steps, definition, receipt, deadline)
+        frame = _preflight(session, frame, active_steps, definition, receipt, deadline)
         terrain = None
-        needed_edges = _needed_edges(steps)
+        needed_edges = _needed_edges(active_steps)
         destroyed = set()
         for index, step in enumerate(steps):
             _check(session, deadline)
+            if index in skipped:
+                receipt["actions"].append({"action": step.action, "unit_id": step.unit_id,
+                    "status": "skipped", "reason": "optional_unit_absent_in_verified_army",
+                    "army_frame": preparation_frame, "verified": True})
+                continue
             if step.action in {"deploy_troop", "deploy_hero", "deploy_siege"}:
                 if terrain is None:
                     if definition.army_mode != "captured" and not _has_current_terrain(frame, needed_edges):
@@ -841,7 +913,8 @@ def execute_strategy(session, scout: SceneSnapshot, definition: StrategyDefiniti
                 if frame.scene != "settlement" or frame.confidence < .8:
                     raise FlowError("Early battle ending did not reach verified settlement")
                 receipt["actions"][-1]["verified"] = True
-            if frame.scene == "settlement" and index < len(steps) - 1:
+            if frame.scene == "settlement" and any(next_index not in skipped
+                    for next_index in range(index + 1, len(steps))):
                 raise FlowError("Battle settled before remaining strategy actions")
         _check(session, deadline)
         if receipt["offensive_actions"] < 1 or not receipt["verified"]:

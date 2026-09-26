@@ -57,7 +57,20 @@ def run_battle(session: GameSession) -> TaskResult:
     custom_mode = bool(session.config.battle.strategy_file)
     line_mode = custom_mode or is_line_strategy(session.config.battle.strategy)
     definition = None
-    required_buildings = {session.config.battle.target_building} if session.config.battle.target_building else set()
+    prepared_army = None
+    task_buildings = {session.config.battle.target_building} if session.config.battle.target_building else set()
+    required_buildings = set(task_buildings)
+    def building_types(targets):
+        if "" in targets:
+            raise CapabilityUnavailable("Targeted strategy needs an explicit building objective")
+        return {name.split(":", 1)[0] for name in targets if not name.startswith("relative:")}
+    def check_building_coverage(targets):
+        if targets:
+            from .building_vision import building_coverage
+            coverage = building_coverage(client_version=getattr(session, "client_version", "unknown"))
+            for target in targets:
+                if coverage.get(target, {}).get("recognition", "unavailable") == "unavailable":
+                    raise CapabilityUnavailable(f"Building recognition samples unavailable: {target}")
     def progress(phase):
         callback = getattr(session, "progress_callback", None)
         if callable(callback):
@@ -71,17 +84,7 @@ def run_battle(session: GameSession) -> TaskResult:
                 path = session.config.source_path.resolve().parent / path
             definition = load_strategy(path)
             metrics["strategy"] = definition.id
-            targets = {step.target for step in definition.steps if step.action == "cast_spell"}
-            targets = {session.config.battle.target_building if name == "objective" else name for name in targets}
-            if "" in targets:
-                raise CapabilityUnavailable("Targeted strategy needs an explicit building objective")
-            required_buildings.update(name.split(":", 1)[0] for name in targets if not name.startswith("relative:"))
-        if required_buildings:
-            from .building_vision import building_coverage
-            coverage = building_coverage(client_version=getattr(session, "client_version", "unknown"))
-            for target in required_buildings:
-                if coverage.get(target, {}).get("recognition", "unavailable") == "unavailable":
-                    raise CapabilityUnavailable(f"Building recognition samples unavailable: {target}")
+        check_building_coverage(required_buildings)
         needs_terrain = definition is None or any(step.action in {"deploy_troop", "deploy_hero", "deploy_siege"}
                           or step.action == "cast_spell" and step.target.startswith("relative:") for step in definition.steps)
         if (line_mode and needs_terrain or required_buildings) and session.native is None:
@@ -99,7 +102,18 @@ def run_battle(session: GameSession) -> TaskResult:
                 if prepared.status == "not_supported":
                     raise CapabilityUnavailable(prepared.reason)
                 raise FlowError(prepared.reason)
+            prepared_army = {"status": prepared.status,
+                             "observed": prepared.metrics.get("observed"),
+                             "frame": str(prepared.evidence[-1])}
             home = return_to_village(session)
+        if definition is not None:
+            from .strategy_execution import declared_building_targets
+            targets = declared_building_targets(definition, session.config.battle.target_building,
+                                                prepared_army=prepared_army)
+            required_buildings = building_types(task_buildings | targets)
+            check_building_coverage(required_buildings)
+            if required_buildings and session.native is None:
+                raise FlowError("Targeted strategy minimum zoom requires the MuMu native transport")
         evidence.append(home.screenshot_path)
         metrics["resources_before"] = home.observations.get("resources")
         before = home.observations.get("resources", {}) if line_mode else _inventory(home)
@@ -121,6 +135,23 @@ def run_battle(session: GameSession) -> TaskResult:
         progress("正在筛选对手")
         scout = _next_candidate(session)
         while True:
+            if definition is not None and prepared_army is not None:
+                targets = declared_building_targets(definition, session.config.battle.target_building,
+                                                    prepared_army=prepared_army, scout=scout)
+                try:
+                    required_buildings = building_types(task_buildings | targets)
+                    check_building_coverage(required_buildings)
+                    if required_buildings and session.native is None:
+                        raise CapabilityUnavailable("Targeted strategy minimum zoom requires the MuMu native transport")
+                except CapabilityUnavailable as exc:
+                    # A battle-only card can contradict the earlier home-army
+                    # absence proof. Leave this unstarted match before reporting it.
+                    _leave_scout(session, scout)
+                    home = return_to_village(session)
+                    evidence.append(home.screenshot_path)
+                    metrics["returned_home"] = True
+                    return TaskResult("battle", "not_supported", str(exc),
+                                      started_at, time.monotonic() - started, evidence, metrics)
             if required_buildings:
                 scout = _prepare_building_view(session, scout)
             evidence.append(scout.screenshot_path)
@@ -177,7 +208,8 @@ def run_battle(session: GameSession) -> TaskResult:
                 deployed = deploy_army(session, scout)
             else:
                 from .strategy_execution import execute_strategy
-                deployed = execute_strategy(session, scout, definition)
+                deployed = execute_strategy(session, scout, definition,
+                                            prepared_army=prepared_army)
         except DeploymentError as exc:
             last = session.last_snapshot
             units = exc.partial_receipt.get("deployed_units")

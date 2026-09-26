@@ -7,6 +7,7 @@ from autococ.errors import ConfigError, DeploymentError, FlowError, StopRequeste
 from autococ.scene import SceneSnapshot
 from autococ.strategy_config import StrategyDefinition, StrategyStep, load_strategy, planned_steps
 from autococ.strategy_execution import (_battle_bar_viewport, _end_battle_confirmation,
+                                         declared_building_targets,
                                          _find_named_card, _match_card, _points,
                                          _same_battle_bar_view,
                                          _terrain, _wait_step, execute_strategy)
@@ -285,6 +286,153 @@ def _troop_frame(name, slots, counts, *, terrain=False, manifest=False):
 def _troop(unit_id, point):
     return {"unit_id": unit_id, "kind": "troop", "source": "army", "count": 1,
             "confidence": .99, "point": list(point), "bbox": [point[0]-40, 600, point[0]+40, 710]}
+
+
+def _prepared(observed):
+    return {"status": "succeeded", "frame": "army-verified.png", "observed": observed}
+
+
+def test_verified_absent_optional_spell_skips_target_preflight_and_records_receipt(monkeypatch):
+    scout = _troop_frame("optional-spell", [_troop("barbarian", (100, 650))], {}, terrain=True)
+    definition = StrategyDefinition("optional", "optional", ArmyRecipe((
+        ArmyRequirement("barbarian", 1), ArmyRequirement("lightning_spell", 1, optional=True))),
+        (StrategyStep("cast_spell", "lightning_spell", target="spell_factory"),
+         StrategyStep("deploy_troop", "barbarian")))
+    used = []
+
+    def consume(session, frame, card, points, receipt, deadline, *, kind):
+        used.append(card["unit_id"])
+        receipt["deployed_units"] += 1
+        receipt["offensive_actions"] += 1
+        receipt["verified"] = True
+        return frame
+
+    monkeypatch.setattr("autococ.strategy_execution._consume", consume)
+    session = _Session([])
+    receipt = execute_strategy(session, scout, definition,
+        prepared_army=_prepared({"troop": {"barbarian": 1}, "spell": {}})).observations["deployment"]
+    assert used == ["barbarian"]
+    assert receipt["completed"] is True
+    assert receipt["actions"][0] == {"action": "cast_spell", "unit_id": "lightning_spell",
+        "status": "skipped", "reason": "optional_unit_absent_in_verified_army",
+        "army_frame": "army-verified.png", "verified": True}
+    assert session.taps == []
+
+
+def test_declared_building_requirement_returns_when_battle_card_contradicts_absence():
+    definition = StrategyDefinition("optional", "optional", ArmyRecipe((
+        ArmyRequirement("barbarian", 1), ArmyRequirement("lightning_spell", 1, optional=True))),
+        (StrategyStep("cast_spell", "lightning_spell", target="spell_factory"),
+         StrategyStep("deploy_troop", "barbarian")))
+    proof = _prepared({"troop": {"barbarian": 1}, "spell": {}})
+    assert declared_building_targets(definition, "", prepared_army=proof) == set()
+    spell = {"unit_id": "lightning_spell", "kind": "spell", "source": "army",
+             "count": 1, "confidence": .99, "point": [200, 650]}
+    scout = _troop_frame("contrary-spell", [_troop("barbarian", (100, 650)), spell], {})
+    assert declared_building_targets(definition, "", prepared_army=proof,
+                                     scout=scout) == {"spell_factory"}
+    anonymous = dict(spell, unit_id=None)
+    scout = _troop_frame("unknown-spell", [_troop("barbarian", (100, 650)), anonymous], {})
+    assert declared_building_targets(definition, "", prepared_army=proof,
+                                     scout=scout) == {"spell_factory"}
+
+
+def test_planner_static_building_capability_stays_declared_when_optional_card_absent():
+    definition = StrategyDefinition("planned", "planned", ArmyRecipe((
+        ArmyRequirement("barbarian", 1), ArmyRequirement("lightning_spell", 1, optional=True))),
+        (StrategyStep("cast_spell", "lightning_spell", target="spell_factory"),),
+        planner=Path("local-planner.py"))
+    proof = _prepared({"troop": {"barbarian": 1}, "spell": {}})
+    assert declared_building_targets(definition, "", prepared_army=proof) == {"spell_factory"}
+
+
+def test_verified_absent_optional_hero_skips_deploy_wait_and_ability(monkeypatch):
+    scout = _troop_frame("optional-hero", [_troop("barbarian", (100, 650))], {}, terrain=True)
+    definition = StrategyDefinition("optional-hero", "optional-hero", ArmyRecipe((
+        ArmyRequirement("barbarian", 1), ArmyRequirement("grand_warden", 1, optional=True))),
+        (StrategyStep("deploy_hero", "grand_warden"),
+         StrategyStep("wait", "grand_warden", target="hero_ready"),
+         StrategyStep("activate_ability", "grand_warden"),
+         StrategyStep("deploy_troop", "barbarian")))
+
+    def consume(session, frame, card, points, receipt, deadline, *, kind):
+        receipt["deployed_units"] += 1
+        receipt["offensive_actions"] += 1
+        receipt["verified"] = True
+        return frame
+
+    monkeypatch.setattr("autococ.strategy_execution._consume", consume)
+    receipt = execute_strategy(_Session([]), scout, definition,
+        prepared_army=_prepared({"troop": {"barbarian": 1}, "hero": {}})).observations["deployment"]
+    assert receipt["completed"] is True
+    assert [action["action"] for action in receipt["actions"]] == [
+        "deploy_hero", "wait", "activate_ability"]
+    assert all(action["status"] == "skipped" for action in receipt["actions"])
+    assert receipt["hero_abilities"] == 0
+
+
+@pytest.mark.parametrize("scenario", ["unknown_card", "required_unit", "clan_source",
+                                      "no_proof", "unknown_army_kind"])
+def test_optional_absence_never_hides_unknown_required_or_clan_card(monkeypatch, scenario):
+    required = scenario == "required_unit"
+    recipe = ArmyRecipe((ArmyRequirement("barbarian", 1),
+                         ArmyRequirement("archer", 1, optional=not required)))
+    source = "clan_reinforcement" if scenario == "clan_source" else "auto"
+    definition = StrategyDefinition("guard", "guard", recipe,
+        (StrategyStep("deploy_troop", "archer", source=source),))
+    cards = [_troop("barbarian", (100, 650))]
+    if scenario == "unknown_card":
+        cards.append(dict(_troop("archer", (200, 650)), unit_id=None))
+    scout = _troop_frame("guard", cards, {}, terrain=True)
+    checked = []
+
+    def find(*args, **kwargs):
+        checked.append(args[2])
+        raise FlowError("Named card identity not independently verified")
+
+    monkeypatch.setattr("autococ.strategy_execution._find_named_card", find)
+    session = _Session([])
+    proof = None if scenario == "no_proof" else _prepared(
+        {} if scenario == "unknown_army_kind" else {"troop": {"barbarian": 1}})
+    with pytest.raises(DeploymentError, match="Named card identity not independently verified"):
+        execute_strategy(session, scout, definition, prepared_army=proof)
+    assert checked == ["archer"]
+    assert session.taps == [] and session.swipes == []
+
+
+def test_visible_optional_card_contradicts_preparation_absence(monkeypatch):
+    scout = _troop_frame("visible-optional", [_troop("archer", (100, 650))], {}, terrain=True)
+    definition = StrategyDefinition("present", "present", ArmyRecipe((
+        ArmyRequirement("barbarian", 1), ArmyRequirement("archer", 1, optional=True))),
+        (StrategyStep("deploy_troop", "archer"),))
+    used = []
+
+    def consume(session, frame, card, points, receipt, deadline, *, kind):
+        used.append(card["unit_id"])
+        receipt["deployed_units"] += 1
+        receipt["offensive_actions"] += 1
+        receipt["verified"] = True
+        return frame
+
+    monkeypatch.setattr("autococ.strategy_execution._consume", consume)
+    receipt = execute_strategy(_Session([]), scout, definition,
+        prepared_army=_prepared({"troop": {"barbarian": 1}})).observations["deployment"]
+    assert used == ["archer"]
+    assert receipt["skipped_actions"] == []
+
+
+def test_all_optional_offensive_actions_absent_never_complete(monkeypatch):
+    scout = _troop_frame("none", [], {}, terrain=True)
+    definition = StrategyDefinition("none", "none", ArmyRecipe((
+        ArmyRequirement("barbarian", 1), ArmyRequirement("archer", 1, optional=True))),
+        (StrategyStep("deploy_troop", "archer"),))
+    session = _Session([])
+    with pytest.raises(DeploymentError, match="no deployable offensive action") as exc:
+        execute_strategy(session, scout, definition,
+            prepared_army=_prepared({"troop": {"barbarian": 1}}))
+    assert exc.value.partial_receipt["completed"] is False
+    assert exc.value.partial_receipt["skipped_actions"][0]["unit_id"] == "archer"
+    assert session.taps == [] and session.swipes == []
 
 
 def test_named_cards_rebind_after_reordering(monkeypatch):
