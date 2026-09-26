@@ -111,3 +111,7 @@
 欢迎页恢复修复后的全量回归：**801 passed、126 skipped、404 subtests passed**，`reports/verification/pytest-20260926-214645.json`，运行代码指纹保持一致。
 
 组合第四轮结束后，`reports/final-home-7e35fe1b/result.json` 以 0 次输入连续观察三帧确认稳定主村；库存为金币 27,000,000、圣水 26,200,455、黑油 200,542、宝石 41。库存快照不等同于净战斗收益。
+
+英雄跟进续作：TOML 执行器重验当帧英雄头像，以选中边框、闭合血条及独立技能前后样本分别判断状态；完整观察层补上部署／技能后英雄卡定位。原目录 9 张历史实图的完整命名卡链回放 9/9，记录 `reports/verification/hero-phase-replay.json`，不是本轮实机验收。龙公爵技能仍未知，部署仍待新实机。
+
+对应全量回归 **806 passed、126 skipped、408 subtests passed**（`reports/verification/pytest-20260926-224017.json`），运行代码指纹不变。

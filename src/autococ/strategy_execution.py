@@ -404,7 +404,8 @@ def _hero(session, frame: SceneSnapshot, card: dict, receipt: dict, point: list[
     def read(current: SceneSnapshot) -> dict:
         _check(session, deadline)
         state = recognize_hero_state(current.screenshot_path, card["bbox"],
-                                     baseline_resolution=session.config.game.baseline_resolution)
+                                     baseline_resolution=session.config.game.baseline_resolution,
+                                     unit_id=card["unit_id"], client_version=session.client_version)
         receipt["hero_states"].append(state)
         _check(session, deadline)
         return state
@@ -515,7 +516,8 @@ def _wait_step(session, frame: SceneSnapshot, step: StrategyStep, receipt: dict,
             _check(session, deployment_deadline)
             card = _match_card(frame, step.unit_id, "hero", source=step.source)
             state = recognize_hero_state(frame.screenshot_path, card["bbox"],
-                                         baseline_resolution=session.config.game.baseline_resolution)
+                                         baseline_resolution=session.config.game.baseline_resolution,
+                                         unit_id=card["unit_id"], client_version=session.client_version)
             receipt["hero_states"].append(state)
             _check(session, deployment_deadline)
             if state.get("deployed") is True and state.get("ability_ready") is True:

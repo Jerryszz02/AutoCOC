@@ -67,6 +67,7 @@ def _frame(name, *, scene="battle", count=2, building_state="alive"):
 
 class _Session:
     def __init__(self, frames):
+        self.client_version = "18.600.7"
         self.frames = list(frames)
         self.taps = []
         self.clicks = []

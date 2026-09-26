@@ -1066,6 +1066,41 @@ class ScreenshotRecognizer:
                 if not any(min(right, box[2]) > max(left, box[0]) for box in boxes):
                     boxes.append(event_box)
 
+        # Deployed or used hero cards can lose the coloured header and their
+        # pet icon. A versioned, hero-specific face proposes a card, but its
+        # own opposing side edges and bottom boundary must also be present.
+        from .hero_state import HERO_PHASE_TEMPLATE_IDS
+        from .unit_catalog import template_manifest
+
+        phase_cards = []
+        if self.client_version == template_manifest()["client"]:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            for hero_id, template_hero in HERO_PHASE_TEMPLATE_IDS.items():
+                for phase in ("ready", "used"):
+                    portrait = _match(
+                        image, Path(__file__).resolve().parents[2] / "assets/templates" /
+                        f"hero_{template_hero}_{phase}_portrait.png", (20, 590, 1250, 650))
+                    if portrait is None or not 590 <= portrait["bbox"][1] <= 599:
+                        continue
+                    left = portrait["bbox"][0] - 40
+                    right = left + 89
+                    if not (3 <= left < right <= 1277
+                            and max(edge_direction[left - 2:left + 3]) >= 150
+                            and min(edge_direction[right - 4:right]) <= -150
+                            and gray[709:711, left + 8:right - 8].mean()
+                            - gray[712, left + 8:right - 8].mean() >= 40):
+                        continue
+                    phase_cards.append({"hero": hero_id, "phase": phase,
+                                        "portrait": portrait, "box": (left, 595, right, 711)})
+            for candidate in phase_cards:
+                left, _, right, _ = candidate["box"]
+                if any(abs(left - other["box"][0]) <= 4 and other["hero"] != candidate["hero"]
+                       for other in phase_cards):
+                    continue
+                if not any(abs(left - box[0]) <= 4 and abs(right - box[2]) <= 4 for box in boxes):
+                    if not any(min(right, box[2]) > max(left, box[0]) for box in boxes):
+                        boxes.append(candidate["box"])
+
         # An unresolved overlap is not two independently located cards.
         boxes = [box for index, box in enumerate(boxes) if not any(
             min(box[2], other[2]) > max(box[0], other[0])
@@ -1128,6 +1163,18 @@ class ScreenshotRecognizer:
                     kind, identity = "spell", spell_identity
                 elif hero_identity["unit_id"] is not None:
                     kind, identity = "hero", hero_identity
+            phases = [candidate for candidate in phase_cards
+                      if abs(box[0] - candidate["box"][0]) <= 4
+                      and abs(box[2] - candidate["box"][2]) <= 4]
+            if (count is None and clan_evidence is None and not is_event and phases
+                    and len({candidate["hero"] for candidate in phases}) == 1
+                    and (identity["unit_id"] is None or identity["unit_id"] == phases[0]["hero"])):
+                phase = max(phases, key=lambda candidate: candidate["portrait"]["confidence"])
+                kind = "hero"
+                identity = {"unit_id": phase["hero"],
+                            "confidence": phase["portrait"]["confidence"],
+                            "reason": "versioned_hero_phase_portrait",
+                            "evidence": [phase["portrait"]], "version_verified": True}
             if is_event and identity["unit_id"] is None:
                 # The legacy event portrait is not in the versioned unit
                 # manifest. It can classify a card as event-sourced, but must

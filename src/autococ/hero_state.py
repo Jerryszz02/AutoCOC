@@ -25,6 +25,7 @@ WARDEN_USED_TEMPLATE_CROPS = {
     "hero_warden_used_book.png": (600, 526, 642, 568),
     "hero_warden_used_card.png": (603, 631, 685, 680),
 }
+WARDEN_PORTRAIT_CROP = (639, 594, 681, 646)
 SIEGE_TEMPLATE_SOURCE = "reports/20260923-021847-763016-3632dc81/frames/00015-deploy-support-selected.png"
 SIEGE_TEMPLATE_CROP = (531, 658, 576, 701)
 HERO_ABILITY_SAMPLE_DIRECTORY = "reports/hero-ability-samples-20260924-015325-792650/frames"
@@ -37,6 +38,10 @@ HERO_ABILITY_SAMPLES = {
 HERO_ABILITY_SAMPLE_CROPS = {
     "ready_equipment": (0, 528, 42, 569), "ready_portrait": (40, 594, 82, 646),
     "used_portrait": (40, 594, 82, 646), "used_weapon": (35, 647, 82, 679),
+}
+HERO_PHASE_TEMPLATE_IDS = {
+    "grand_warden": "warden", "barbarian_king": "barbarian_king",
+    "minion_prince": "minion_prince", "archer_queen": "archer_queen",
 }
 
 
@@ -78,12 +83,15 @@ def recognize_hero_state(
     slot_bbox: tuple[int, int, int, int] | list[int],
     *,
     baseline_resolution: tuple[int, int] = (1280, 720),
+    unit_id: str | None = None,
+    client_version: str | None = None,
 ) -> dict[str, object]:
     """Inspect a known hero slot; absent evidence is unknown, never consumption.
 
     Ability evidence covers only the sampled hero portraits and equipment layouts.
     Defeated has no positive fixture: visible HP proves alive; otherwise unknown.
     A selected white border alone never proves deployment or ability readiness.
+    When unit_id is supplied, its portrait must match again in this frame.
     """
     import cv2
     import numpy as np
@@ -105,14 +113,31 @@ def recognize_hero_state(
             and 550 <= top <= 605 and 695 <= bottom <= 720):
         evidence["reason"] = "unrecognized_hero_slot_geometry"
         return result
+    if unit_id is not None:
+        from .unit_catalog import recognize_card_identity
+
+        identity = recognize_card_identity(image, box, "hero", surface="battle",
+                                           client_version=client_version)
+        evidence["portrait_identity"] = identity
+        if not identity["version_verified"] or (identity["unit_id"] is not None
+                                                and identity["unit_id"] != unit_id):
+            evidence["reason"] = "current_frame_hero_identity_unverified"
+            return result
+        if identity["unit_id"] is None:
+            phase_portrait = _hero_phase_portrait(image, box, unit_id)
+            evidence["phase_portrait"] = phase_portrait
+            if phase_portrait is None:
+                evidence["reason"] = "current_frame_hero_identity_unverified"
+                return result
     roi = (max(0, left - 15), 560, min(1280, left + 50), 650)
     pets = [_match(image, TEMPLATES / f"battle_hero_pet_{index}.png", roi, (1.0, 1.05, 1.1), mask_kind="pet")
             for index in range(4)]
     pet = max((item for item in pets if item is not None), key=lambda item: item["confidence"], default=None)
-    if pet is None:
+    if pet is None and unit_id is None:
         evidence["reason"] = "hero_card_identity_anchor_missing"
         return result
-    evidence["pet_anchor"] = pet
+    if pet is not None:
+        evidence["pet_anchor"] = pet
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     x0, x1 = max(0, left - 12), min(1280, right + 12)
     white = cv2.inRange(hsv[565:720, x0:x1], np.array([0, 0, 220]), np.array([180, 35, 255]))
@@ -128,7 +153,20 @@ def recognize_hero_state(
             break
     result["selected"] = selected is not None
     evidence["selected_border"] = selected
-    health = _health_bar(hsv, cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), pet["bbox"])
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    health = _health_bar(hsv, gray, pet["bbox"]) if pet is not None else None
+    if health is None and unit_id is not None:
+        # A deployed card's enclosed HP frame is anchored to the card, while
+        # the pet icon may be absent or reassigned. Search only inside this card.
+        for py in range(592, 606):
+            for offset, width in ((5, 78), (8, 72)):
+                if left + offset + 1 + width > right + 2:
+                    continue
+                health = _health_bar(hsv, gray, [left + offset, py], frame_width=width)
+                if health is not None:
+                    break
+            if health is not None:
+                break
     evidence["health_bar"] = health
     if health is not None:
         result.update(state="deployed", deployed=True, defeated=False)
@@ -136,7 +174,7 @@ def recognize_hero_state(
         result["state"] = "selected"
     # A pet can be reassigned: the Warden-specific lower-card and book images must
     # both match before interpreting this pet-equipped card as this ready layout.
-    if health is not None and Path(pet["template"]).name == "battle_hero_pet_0.png":
+    if health is not None and pet is not None and Path(pet["template"]).name == "battle_hero_pet_0.png" and (unit_id is None or unit_id == "grand_warden"):
         active = _match(image, TEMPLATES / "hero_warden_active_book.png", (x0, 510, x1, 573))
         glows = [_match(image, TEMPLATES / name, (x0, 620, x1, 690))
                  for name in ("hero_warden_ready_card.png", "hero_warden_ready_card_phase.png")]
@@ -158,8 +196,10 @@ def recognize_hero_state(
                 "gray_equipment": used_book, "gray_card_book": used_card,
                 "template_source": WARDEN_USED_TEMPLATE_SOURCE,
             }
-    elif health is not None and Path(pet["template"]).name in HERO_ABILITY_SAMPLES:
+    elif health is not None and pet is not None and Path(pet["template"]).name in HERO_ABILITY_SAMPLES:
         hero, _, ready_frame, used_frame = HERO_ABILITY_SAMPLES[Path(pet["template"]).name]
+        if unit_id is not None and unit_id != hero:
+            return result
         # Pets are only a search hint. Independent hero-specific portrait and
         # equipment/weapon evidence must agree; gray cards without HP stay unknown.
         regions = {"ready_equipment": (x0, 510, x1, 573), "ready_portrait": (x0, 585, x1, 657),
@@ -185,6 +225,20 @@ def recognize_hero_state(
                 "template_source": f"{HERO_ABILITY_SAMPLE_DIRECTORY}/{used_frame}",
             }
     return result
+
+
+def _hero_phase_portrait(image, box: tuple[int, int, int, int], unit_id: str) -> dict | None:
+    """Match a hero-specific deployed/used face in this card, never its pet."""
+    if unit_id not in HERO_PHASE_TEMPLATE_IDS:
+        return None
+    left, _, right, _ = box
+    roi = (left + 35, 590, right - 5, 650)
+    template_hero = HERO_PHASE_TEMPLATE_IDS[unit_id]
+    for phase in ("ready", "used"):
+        match = _match(image, TEMPLATES / f"hero_{template_hero}_{phase}_portrait.png", roi)
+        if match is not None:
+            return {"hero": unit_id, "phase": phase, **match}
+    return None
 
 
 def _match(image, template_path: Path, roi: tuple[int, int, int, int], scales=(1.0,), *,

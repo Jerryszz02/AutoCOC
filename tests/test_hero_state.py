@@ -12,6 +12,62 @@ class HeroStateTests(unittest.TestCase):
     root = Path(__file__).resolve().parents[1]
     slot = [599, 595, 688, 711]
 
+    def duke_card_image(self) -> np.ndarray:
+        # Redacted 100x150 card crop from daily-combined-4 scout frame 00039.
+        crop = cv2.imdecode(np.fromfile(self.root / "tests/fixtures/hero-duke-undeployed-20260926.png",
+                                          dtype=np.uint8), cv2.IMREAD_COLOR)
+        image = np.zeros((720, 1280, 3), dtype=np.uint8)
+        image[565:715, 595:695] = crop
+        return image
+
+    def test_current_frame_portrait_allows_petless_duke_but_not_stale_identity(self) -> None:
+        slot = [599, 595, 690, 711]
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "duke.png"
+            cv2.imwrite(str(path), self.duke_card_image())
+            state = recognize_hero_state(path, slot, unit_id="dragon_duke", client_version="18.600.7")
+            self.assertEqual(state["evidence"]["portrait_identity"]["unit_id"], "dragon_duke")
+            self.assertNotIn("pet_anchor", state["evidence"])
+            self.assertFalse(state["selected"])
+            self.assertIsNone(state["deployed"])
+            self.assertIsNone(state["ability_ready"])
+            for unit_id, version in (("archer_queen", "18.600.7"), ("dragon_duke", "unknown")):
+                with self.subTest(unit_id=unit_id, version=version):
+                    mismatch = recognize_hero_state(path, slot, unit_id=unit_id, client_version=version)
+                    self.assertEqual(mismatch["state"], "unknown")
+                    self.assertIsNone(mismatch["selected"])
+                    self.assertIsNone(mismatch["deployed"])
+                    self.assertEqual(mismatch["evidence"]["reason"], "current_frame_hero_identity_unverified")
+
+    def test_petless_duke_requires_enclosed_hp_and_never_infers_ability(self) -> None:
+        image = self.duke_card_image()
+        slot = [599, 595, 690, 711]
+        # Controlled counterfactual: only the HP-frame pixels are changed. This
+        # exercises the geometry without claiming a live Duke deployment sample.
+        image[575:588, 605:684] = 25
+        image[579:585, 608:650] = (0, 240, 0)
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "hp.png"
+            cv2.imwrite(str(path), image)
+            state = recognize_hero_state(path, slot, unit_id="dragon_duke", client_version="18.600.7")
+            self.assertTrue(state["deployed"])
+            self.assertFalse(state["defeated"])
+            self.assertIsNone(state["ability_ready"])
+            self.assertIsNone(state["ability_used"])
+            image[575:579, 605:684] = 220
+            cv2.imwrite(str(path), image)
+            no_frame = recognize_hero_state(path, slot, unit_id="dragon_duke", client_version="18.600.7")
+            self.assertIsNone(no_frame["deployed"])
+
+    def test_selected_border_still_needs_fresh_hero_portrait(self) -> None:
+        path = self.root / "tests/fixtures/hero-border-selected.png"
+        slot = [502, 592, 591, 711]
+        selected = recognize_hero_state(path, slot, unit_id="grand_warden", client_version="18.600.7")
+        self.assertTrue(selected["selected"])
+        self.assertIsNone(selected["deployed"])
+        wrong = recognize_hero_state(path, slot, unit_id="dragon_duke", client_version="18.600.7")
+        self.assertIsNone(wrong["selected"])
+
     def test_selected_border_with_shaded_segment_requires_a_closed_outline(self) -> None:
         folder = self.root / "tests/fixtures"
         slot = [502, 592, 591, 711]

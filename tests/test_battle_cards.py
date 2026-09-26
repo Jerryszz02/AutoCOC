@@ -10,11 +10,41 @@ import cv2
 import numpy as np
 
 from autococ.ocr import OCRText
+from autococ.scene import SceneSnapshot
+from autococ.strategy_execution import _match_card
 from autococ.vision import ScreenshotRecognizer
 
 
 class BattleCardTests(unittest.TestCase):
     root = Path(__file__).resolve().parents[1]
+
+    def test_deployed_and_used_hero_cards_keep_named_strategy_binding(self) -> None:
+        # Redacted card crops from the controlled Warden deploy/ability frames.
+        for phase in ("deployed", "used"):
+            with self.subTest(phase=phase):
+                crop = cv2.imdecode(np.fromfile(
+                    self.root / f"tests/fixtures/hero-warden-{phase}-card-20260922.png",
+                    dtype=np.uint8), cv2.IMREAD_COLOR)
+                image = np.zeros((720, 1280, 3), dtype=np.uint8)
+                image[565:715, 595:695] = crop
+                with TemporaryDirectory() as directory:
+                    path = Path(directory) / "battle.png"
+                    cv2.imwrite(str(path), image)
+                    vision = ScreenshotRecognizer(provider=Mock())
+                    vision.client_version = "18.600.7"
+                    observation = vision._battle_observation(path, [], "battle")
+                    frame = SceneSnapshot("battle", .99, path, {"battle": observation})
+                    card = _match_card(frame, "grand_warden", "hero")
+                    self.assertEqual(card["bbox"], [599, 595, 688, 711])
+                    self.assertGreaterEqual(card["confidence"], .9)
+                    vision.client_version = "18.600.8"
+                    wrong_version = vision._battle_observation(path, [], "battle")["slots"]
+                    self.assertFalse(any(slot["unit_id"] == "grand_warden" for slot in wrong_version))
+                    vision.client_version = "18.600.7"
+                    image[708:714, 607:680] = 0
+                    cv2.imwrite(str(path), image)
+                    no_bottom = vision._battle_observation(path, [], "battle")["slots"]
+                    self.assertFalse(any(slot["unit_id"] == "grand_warden" for slot in no_bottom))
 
     def fixture(self, directory: str, number: int) -> tuple[Path, list[OCRText], str]:
         folder = self.root / directory
