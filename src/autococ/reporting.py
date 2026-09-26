@@ -6,10 +6,13 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 import hashlib
+from importlib.metadata import PackageNotFoundError, version
 import json
 import logging
 import math
+import platform
 import time
+import tomllib
 from typing import Literal
 from uuid import uuid4
 
@@ -30,7 +33,7 @@ class DecisionTrace:
 @dataclass
 class TaskResult:
     task: str
-    status: Literal["succeeded", "skipped", "failed", "simulated"]
+    status: Literal["succeeded", "skipped", "failed", "simulated", "not_supported", "cancelled", "limited"]
     reason: str
     started_at: datetime = field(default_factory=datetime.now)
     elapsed_sec: float = 0.0
@@ -38,7 +41,7 @@ class TaskResult:
     metrics: dict[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.status not in {"succeeded", "skipped", "failed", "simulated"}:
+        if self.status not in {"succeeded", "skipped", "failed", "simulated", "not_supported", "cancelled", "limited"}:
             raise ValueError(f"Unknown task status: {self.status}")
         if self.status == "succeeded" and not self.evidence:
             raise ValueError("A succeeded task requires verification evidence")
@@ -71,6 +74,9 @@ class RunStats:
     events_path: Path | None = None
     run_id: str = field(default_factory=_new_run_id)
     provenance: dict[str, object] = field(default_factory=dict)
+    battles_completed: int = 0
+    battles_won: int = 0
+    goals_completed: int = 0
 
     def record_task(self, result: TaskResult) -> None:
         if self.mode != "live" and result.status == "succeeded":
@@ -112,6 +118,43 @@ def capture_run_provenance(config: AppConfig, profile_name: str) -> dict[str, ob
                     errors[name] = type(exc).__name__
         except OSError as exc:
             errors[relative] = type(exc).__name__
+    # Catalog samples and declarative actions change what can be clicked, too.
+    # These optional directories also keep provenance compatible with old installs.
+    for relative in ("assets/catalogs", "strategies"):
+        for path in sorted((root / relative).rglob("*")):
+            if path.is_file() and path.suffix in {".json", ".toml", ".png", ".py"}:
+                name = path.relative_to(root).as_posix()
+                try:
+                    files[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+                except OSError as exc:
+                    files[name] = None
+                    errors[name] = type(exc).__name__
+    configured_paths = [config.battle.strategy_file]
+    if config.routine:
+        for task in config.routine.tasks:
+            if task.enabled:
+                configured_paths.extend((task.strategy_file, task.goal.adapter_path))
+    pending = [(config.source_path.resolve().parent, path) for path in configured_paths if path]
+    visited = set()
+    while pending:
+        base, configured = pending.pop()
+        path = (base / configured).resolve()
+        if path in visited:
+            continue
+        visited.add(path)
+        name = path.relative_to(root).as_posix() if path.is_relative_to(root) else f"configured/{path.as_posix()}"
+        try:
+            raw = path.read_bytes()
+            files[name] = hashlib.sha256(raw).hexdigest()
+            if path.suffix == ".toml":
+                fields = tomllib.loads(raw.decode("utf-8"))
+                if isinstance(fields.get("planner"), str) and fields["planner"]:
+                    pending.append((path.parent, fields["planner"]))
+                if isinstance(fields.get("entry_template"), str) and fields["entry_template"]:
+                    pending.append((config.vision.template_dir, f"{fields['entry_template']}.png"))
+        except (OSError, ValueError) as exc:
+            files[name] = None
+            errors[name] = type(exc).__name__
     # Hash the sorted path/hash manifest, so adding or removing a file also
     # changes the fingerprint. An incomplete manifest has no aggregate hash.
     fingerprint = (hashlib.sha256(json.dumps(files, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
@@ -125,15 +168,24 @@ def capture_run_provenance(config: AppConfig, profile_name: str) -> dict[str, ob
         config_hash = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
     except (TypeError, ValueError) as exc:
         errors["effective_config"] = type(exc).__name__
+    dependencies = {}
+    for package in ("opencv-python", "rapidocr", "onnxruntime", "numpy"):
+        try:
+            dependencies[package] = version(package)
+        except PackageNotFoundError:
+            dependencies[package] = None
     return {
         "captured_at": datetime.now().isoformat(timespec="microseconds"),
-        "scope": "on-disk files at run_profile start; not loaded module bytecode",
-        "file_scope": ["src/autococ/*.py", "assets/templates/* (files only)"],
+        "scope": "on-disk files at run start; not loaded module bytecode",
+        "file_scope": ["src/autococ/*.py", "assets/templates/* (files only)",
+                       "assets/catalogs/**", "strategies/**", "configured strategy, planner and adapter files"],
         "source_fingerprint_sha256": fingerprint,
         "files_sha256": files,
         "effective_config_sha256": config_hash,
         "package_name": config.game.package_name,
         "client_version": "unknown",
+        "python_version": platform.python_version(),
+        "dependencies": dependencies,
         "baseline_resolution": list(config.game.baseline_resolution),
         "profile": profile_name,
         "tasks": list(config.profiles[profile_name].enabled_tasks),
@@ -179,8 +231,14 @@ def write_report(report_dir: Path, stats: RunStats, *, save_decision_trace: bool
         f"- Attempts: {payload['attempts']}",
         f"- Profile cycles: {stats.cycles}",
         f"- Successes: {payload['successes']}",
+        f"- Verified battles completed: {payload['battles_completed']}",
+        f"- Verified battles won: {payload['battles_won']}",
+        f"- Goals completed: {payload['goals_completed']}",
         f"- Failures: {payload['failures']}",
         f"- Skipped: {payload['skipped']}",
+        f"- Unsupported: {payload['not_supported']}",
+        f"- Reached limits: {payload['limited']}",
+        f"- Cancelled: {payload['cancelled']}",
         f"- Simulated: {payload['simulated']}",
         f"- Elapsed seconds: {payload['elapsed_sec']:.2f}",
         f"- Stop reason: {stats.stop_reason or 'not set'}",
@@ -290,6 +348,12 @@ def summarize_run(stats: RunStats, *, save_decision_trace: bool = True) -> dict[
         "simulated": counts["simulated"],
         "task_results": [asdict(result) for result in results],
         "resource_metrics": resource_metrics(stats, elapsed_sec=elapsed_sec),
+        "battles_completed": stats.battles_completed if stats.mode == "live" else 0,
+        "battles_won": stats.battles_won if stats.mode == "live" else 0,
+        "goals_completed": stats.goals_completed if stats.mode == "live" else 0,
+        "not_supported": sum(r.status == "not_supported" for r in results),
+        "cancelled": sum(r.status == "cancelled" for r in results),
+        "limited": sum(r.status == "limited" for r in results),
     })
     if not save_decision_trace:
         payload.pop("decision_traces")
@@ -299,11 +363,18 @@ def summarize_run(stats: RunStats, *, save_decision_trace: bool = True) -> dict[
 def resource_metrics(stats: RunStats, *, elapsed_sec: float | None = None) -> dict[str, object]:
     elapsed = stats.elapsed_sec if elapsed_sec is None else elapsed_sec
     live = stats.task_results if stats.mode == "live" else []
-    successful = [result for result in live if result.status == "succeeded"]
-    battles = [result for result in successful if result.task == "battle"]
-    collections = [result for result in live if result.task == "collect" and result.status in {"succeeded", "failed"}]
-    donations = [result for result in live if result.task in {"donate", "donation"} and result.status in {"succeeded", "failed"}]
-    searches = [result for result in live if result.task == "battle" and result.status in {"succeeded", "failed"}]
+    battles = [result for result in live if
+               (result.status == "succeeded" and result.task == "battle") or
+               (result.metrics.get("receipt_kind") == "battle" and
+                result.metrics.get("returned_home") is True and
+                type(result.metrics.get("rounds_completed")) is int and
+                result.metrics["rounds_completed"] == 1)]
+    collections = [result for result in live if (result.task == "collect" or result.metrics.get("receipt_kind") == "collect")
+                   and result.status in {"succeeded", "failed"}]
+    donations = [result for result in live if (result.task in {"donate", "donation"} or result.metrics.get("receipt_kind") == "donate")
+                 and result.status in {"succeeded", "failed"}]
+    searches = [result for result in live if (result.task == "battle" or result.metrics.get("receipt_kind") == "battle")
+                and result.status in {"succeeded", "failed", "limited"}]
     resources: dict[str, dict[str, int | float | None]] = {}
     for resource in ("gold", "elixir", "dark_elixir"):
         values = {

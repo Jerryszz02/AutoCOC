@@ -13,15 +13,20 @@ from uuid import uuid4
 
 from .config import AppConfig, ProfileConfig, load_config
 from .device import DeviceManager
+from .strategies import STRATEGIES
 from .errors import ConfigError, StopRequested
 from .flow import FlowRunner
 from .reporting import RunStats, TaskResult, summarize_run, write_report
+from .routine_config import RoutineConfig, default_routine, routine_from_dict, routine_to_dict
 
 
 TASK_LABELS = {"launch": "连接与启动", "collect": "收集资源", "request": "请求增援",
-               "donate": "部落捐兵", "train": "检查军队", "battle": "自动对战", "recover": "恢复连接"}
+               "donate": "部落捐兵", "train": "检查军队", "battle": "自动对战", "recover": "恢复连接",
+               "resources": "刷资源", "event": "刷活动", "clan_games": "部落竞赛"}
 STATUS_LABELS = {"succeeded": "成功", "failed": "失败", "skipped": "跳过", "simulated": "预演",
-                 "running": "进行中", "pending": "等待"}
+                 "running": "进行中", "pending": "等待", "not_supported": "未支持",
+                 "cancelled": "已停止", "limited": "达到限额"}
+STRATEGY_LABELS = {name: entry.label for name, entry in STRATEGIES.items()}
 
 
 def display_reason(reason: str) -> str:
@@ -32,6 +37,18 @@ def display_reason(reason: str) -> str:
             "request_record_and_cooldown_verified": "请求记录与冷却已核验",
             "request_cooldown": "增援请求仍在冷却",
             "no_donation_requests_in_scanned_chat": "已扫描范围内没有可捐请求",
+            "donation_interaction_not_supported": "捐兵窗口尚未完成实机适配",
+            "goal_reached": "游戏中的目标已达成",
+            "goal_progress_observed": "已读取游戏中的目标进度",
+            "task_limit_reached": "已达到场数或时长上限，目标尚未达成",
+            "search_limit_reached_without_target": "搜索上限内未找到符合条件的对手",
+            "daily task queue finished": "本次任务已全部处理",
+            "event_inactive": "当前活动已结束或不适用",
+            "no_accepted_clan_challenge": "尚未接受支持的部落竞赛任务",
+            "No calibrated progress adapter selected for this task": "请先配置当前活动或竞赛的进度识别",
+            "strategy_actions_settlement_and_return_verified": "打法动作、结算及回村已确认",
+            "edrag_line_troops_settlement_and_return_verified": "单边部队、英雄投放、结算及回村已确认",
+            "two_edge_troops_settlement_and_return_verified": "两边部队投放、结算及回村已确认",
             "Game village and navigation controls recognized": "村庄及导航入口已确认"}.get(reason, reason)
 
 
@@ -44,12 +61,15 @@ class RunOptions:
     max_searches: int
     serial: str
     dry_run: bool = True
+    strategy: str = "verified"
+    routine: RoutineConfig | None = None
 
     @classmethod
     def from_config(cls, config: AppConfig) -> "RunOptions":
         profile = config.profiles.get("core-loop", next(iter(config.profiles.values())))
         return cls(profile.enabled_tasks, config.stop.max_runs, config.stop.max_duration_sec,
-                   config.battle.min_expected_resources, config.battle.max_searches, config.adb.manual_serial)
+                   config.battle.min_expected_resources, config.battle.max_searches, config.adb.manual_serial,
+                   strategy=config.battle.strategy, routine=config.routine)
 
     def validate(self) -> None:
         if not self.tasks or self.tasks[0] != "launch":
@@ -62,6 +82,10 @@ class RunOptions:
                 raise ConfigError(f"{name}必须为不小于 {minimum} 的整数")
         if type(self.dry_run) is not bool or not isinstance(self.serial, str):
             raise ConfigError("运行模式或设备地址无效")
+        if self.strategy not in STRATEGY_LABELS:
+            raise ConfigError("对战策略无效")
+        if self.routine is not None:
+            self.routine.validate()
 
 
 def desktop_config(path: Path, options: RunOptions) -> AppConfig:
@@ -79,9 +103,11 @@ def desktop_config(path: Path, options: RunOptions) -> AppConfig:
                    vision=replace(config.vision, template_dir=absolute(config.vision.template_dir)),
                    stop=replace(config.stop, max_runs=options.max_runs, max_duration_sec=options.max_duration_sec),
                    battle=replace(config.battle, min_expected_resources=options.min_expected_resources,
-                                  max_searches=options.max_searches),
+                                  max_searches=options.max_searches, strategy=options.strategy),
                    reporting=replace(config.reporting, write_markdown=True),
-                   profiles={"desktop": ProfileConfig(options.tasks)})
+                   profiles={"desktop": ProfileConfig(tuple(task for task in options.tasks if task in
+                                                             {"launch", "collect", "request", "donate", "train", "battle", "recover"}))},
+                   routine=options.routine)
 
 
 def settings_path(config_path: Path) -> Path:
@@ -92,6 +118,8 @@ def save_options(path: Path, options: RunOptions) -> None:
     options.validate()
     # Opening the application must never restore a previous live-run choice.
     payload = asdict(replace(options, dry_run=True))
+    if options.routine is not None:
+        payload["routine"] = routine_to_dict(options.routine)
     temporary = path.with_name(path.name + "." + uuid4().hex + ".tmp")
     try:
         temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -109,8 +137,12 @@ def load_options(path: Path, config: AppConfig) -> RunOptions:
             raise ValueError("方案格式无效")
         payload["tasks"] = tuple(payload["tasks"])
         payload["dry_run"] = True
+        if payload.get("routine") is not None:
+            payload["routine"] = routine_from_dict(payload["routine"])
         options = RunOptions(**payload)
         options.validate()
+        if options.routine is None:
+            options = replace(options, routine=default_routine(desktop_config(config.source_path, options)))
         return options
     except (TypeError, ValueError) as exc:
         raise ConfigError(f"无法读取界面方案：{exc}") from exc
@@ -147,6 +179,11 @@ def report_text(payload: dict) -> str:
             lines.extend([f"{TASK_LABELS.get(result.get('task'), result.get('task'))} · "
                           f"{STATUS_LABELS.get(result.get('status'), result.get('status'))}",
                           display_reason(str(result.get("reason", "未知"))), ""])
+    if payload.get("mode") == "live":
+        lines.append("战斗：完成 {battles_completed} / 胜利 {battles_won} / 目标达成 {goals_completed}".format(
+            battles_completed=payload.get("battles_completed", 0),
+            battles_won=payload.get("battles_won", 0),
+            goals_completed=payload.get("goals_completed", 0)))
     metrics = payload.get("resource_metrics") or {}
     for name, field in (("金币与圣水战斗毛产出 / 小时", "battle_gold_elixir_per_hour"),
                         ("金币与圣水经营净产出 / 小时", "net_gold_elixir_per_hour")):
@@ -180,6 +217,11 @@ class DesktopController:
         if self.running:
             raise RuntimeError("已有任务正在运行")
         config = desktop_config(path, options)
+        if config.routine is not None:
+            from .daily import validate_routine_files
+            validate_routine_files(config, config.routine)
+            if not any(task.enabled for task in config.routine.tasks):
+                raise ConfigError("请至少勾选一项本次任务")
         self.stop_event.clear()
         self.thread = Thread(target=self._run, args=(config,), name="AutoCOC-runner", daemon=False)
         self.thread.start()
@@ -211,13 +253,13 @@ class DesktopController:
                 adb, serial = manager.adb, device.serial
             runner = FlowRunner(config, adb, serial, logger=logger, stop_event=self.stop_event,
                                 progress=self.events.put)
-            stats = runner.run_profile("desktop")
+            stats = runner.run_routine(config.routine) if config.routine is not None else runner.run_profile("desktop")
             report = config.runtime.report_dir / f"run-{stats.run_id}.json"
         except (Exception, KeyboardInterrupt) as exc:
             stats = RunStats(profile="desktop", mode="dry-run" if config.runtime.dry_run else "live")
             interrupted = isinstance(exc, KeyboardInterrupt)
             stats.stop_reason = "interrupted by user" if interrupted else f"initialization failed: {exc}"
-            stats.record_task(TaskResult("initialization", "failed", stats.stop_reason,
+            stats.record_task(TaskResult("initialization", "cancelled" if interrupted else "failed", stats.stop_reason,
                                          metrics={"interrupted": interrupted}))
             try:
                 report = write_report(config.runtime.report_dir, stats).with_suffix(".json")

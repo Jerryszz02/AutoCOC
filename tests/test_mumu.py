@@ -168,6 +168,26 @@ class MuMuRendererTests(unittest.TestCase):
         self.lib.nemu_input_event_key_down.assert_called_once_with(7, 2, 158)
         self.lib.nemu_input_event_key_up.assert_called_once_with(7, 2, 158)
 
+    def test_zoom_moves_two_fingers_inward_and_releases_both(self):
+        self.dimensions = (1280, 720)
+        renderer = self.renderer()
+        with patch("autococ.mumu.time.monotonic", side_effect=[0, 0, 1.2]), patch("autococ.mumu.time.sleep"):
+            renderer.zoom_out()
+        calls = self.lib.nemu_input_event_finger_touch_down.call_args_list
+        self.assertEqual(calls[0].args, (7, 2, 1, 320, 350))
+        self.assertEqual(calls[1].args, (7, 2, 2, 960, 350))
+        self.assertEqual(calls[-2].args, (7, 2, 1, 610, 350))
+        self.assertEqual(calls[-1].args, (7, 2, 2, 670, 350))
+        self.assertEqual([c.args for c in self.lib.nemu_input_event_finger_touch_up.call_args_list], [(7, 2, 1), (7, 2, 2)])
+
+    def test_zoom_failure_still_releases_both_fingers(self):
+        self.dimensions = (1280, 720)
+        renderer = self.renderer()
+        self.lib.nemu_input_event_finger_touch_down.side_effect = [0, 5]
+        with self.assertRaisesRegex(FlowError, "code 5"):
+            renderer.zoom_out()
+        self.assertEqual([c.args for c in self.lib.nemu_input_event_finger_touch_up.call_args_list], [(7, 2, 1), (7, 2, 2)])
+
 
 class MuMuWorkerTests(unittest.TestCase):
     def client(self):

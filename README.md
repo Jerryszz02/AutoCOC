@@ -4,6 +4,33 @@
 
 AutoCOC 是 Windows + MuMu 上的本地《部落冲突》自动化项目，通过 ADB 或可选的 MuMu 原生 SDK 截图和模拟输入运行任务。当前正在重构、迭代和现场验证，**完整自动对战、资源收集、部落捐兵、请求增援的组合目标尚未通过完整验收**。单元测试、截图回放和某一次任务成功都不能替代持续现场验收。
 
+## 日常助手（2026-09-26）
+
+新版桌面界面分「运行」「配置」两页：左侧勾选并排序收集资源、请求增援、部落捐兵、刷资源、刷活动和部落竞赛；右侧分别显示完成战斗、游戏胜利、目标达成、库存与已核验收益。三个对战任务可分别保存打法、资源筛选、目标和限额，按清单顺序运行。打开界面不连接设备，默认离线预演；未校准的单位、建筑、活动或捐兵窗口会给出未支持/失败结果，不根据兵栏位置猜单位。
+
+```powershell
+# 图形界面：默认只预演，不会自动开始
+.\.venv\Scripts\python.exe -m autococ.gui --config config.toml
+# TOML/JSON 日常任务：先离线检查，再由用户决定是否去掉 --dry-run
+.\.venv\Scripts\python.exe -m autococ.cli run --config config.toml --routine routine.example.toml --dry-run
+.\.venv\Scripts\python.exe -m autococ.cli run --config config.toml --routine routine.example.toml --strategy-file strategies\two_edge.toml --once --dry-run
+```
+
+任务示例见 [routine.example.toml](routine.example.toml)，活动/竞赛适配格式见 [活动示例](docs/examples/event.adapter.toml)和[竞赛示例](docs/examples/clan-games.adapter.toml)，打法示例在 `strategies/`。适配示例只是格式示范，必须依据当前游戏截图校准后才可用于实机。具体配置和能力边界见[日常助手说明](docs/DAILY_ASSISTANT.md)、[桌面操作](docs/DESKTOP.md)；已支持的识别素材可用 `.\.venv\Scripts\python.exe -m autococ.cli capabilities` 查看。**新版目标及连续 10 场、至少 60 分钟组合运行仍待实机证据**，没有当前活动或竞赛机会时对应验收保持待验证。本次各条执行路径与真实观察见[日常助手验收记录](docs/DAILY_ACCEPTANCE.md)。
+
+2026-09-25 的**两边一字划单场实测**：MuMu 双指缩到最小后，固定两条边投放普通/活动部队，等结算并回村。该次雷龙编队 12/12 个兵投放核验，40% / 0 星，正常结算回村；40 个活动兵的识别和 20+20 分配有回放/单元测试，尚未完成 40 兵实际投放。范围、耗时和证据见[两边一字划实测](docs/TWO_EDGE.md)。这只是旧打法的单场证据；下述 9 月 24 日统计也是旧资源模式的历史结果。
+
+旧版 Profile 仍保留 `two_edge`、`edrag_line` 和 `verified` 策略入口。原有两边划/雷龙一字划按历史行为默认不筛资源；新版日常任务可显式启用筛选，并可换用各自的 TOML 打法。旧策略接口、快速识别和该次验证见[策略与识别说明](docs/STRATEGIES.md)。兼容命令：
+
+```powershell
+.\.venv\Scripts\python.exe -m autococ.cli run --config config.toml --profile battle-only --strategy two_edge --once
+.\.venv\Scripts\python.exe -m autococ.cli run --config config.toml --profile battle-only --strategy edrag_line --once
+# 只测截图和识别耗时，不操作游戏：
+.\.venv\Scripts\python.exe scripts/benchmark_observation.py --config config.toml --frames 3
+```
+
+该模式需要配置 `[mumu]` 原生通道，以支持双指缩放；未配置时会在进入对战前停止。`--strategy verified` 保留原有资源模式。
+
 量化目标、成功定义和证据要求见 [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md)。初始收益目标包括金币与圣水战斗毛收益合计至少 2,000,000 / 小时、扣除已核验经营支出后的净产出至少 1,000,000 / 小时；这些是目标，不是当前已取得的成绩。
 
 截至 2026-09-24 04:55 启动且已结束的 35 份正式 `live` 报告，收集 6 次成功、请求 4 次成功，完整自动战斗 0 成功/23 失败、真实捐兵 0 次。启动原始状态为 32 成功/1 失败，其中[历史审查](reports/idle-disconnect-audit-20260924.json)已证实 3 次是断线弹窗假阳性。最新社交任务确认发送一次请求、宝石 331 不变，有限扫描无可捐按钮；上一场战斗仍失败，批量回执修复尚待新实战。[运行诊断](reports/render-timing-evaluation-20260924.json)记录游戏图层约每秒 1～1.5 条帧记录及冷却停滞，重启游戏和模拟器后均未确认恢复正常速度。累计统计及限制见[运行检查点](reports/runtime-checkpoint-20260924.json)和[开发进度](docs/PROGRESS.md)。全量离线测试为 559 tests、423 subtests 通过，不能替代现场验收。
@@ -32,8 +59,8 @@ AutoCOC 是 Windows + MuMu 上的本地《部落冲突》自动化项目，通�
 - 搜敌等待上限为 60 秒，仍受任务总期限限制。 敌方资源可读后，还须云层消散及相邻截图确认镜头稳定，再读取最新资源并选敌；云层下读到文字不算可执行画面。卡片短暂漏检最多补两张新图，不重复落兵。平移优先采用新图中的空草地起点及 1,200 ms 时长。平移后没有边界时，用地图特征核对位移；只有确认未移动才补一次 1,200 ms 平移。边界仍不可读时允许至多 3 个明确空草地候选逐个单兵试探，只有兵数确实减少才继续部署；草地外观不代表已验证可落兵，花纹石地等无候选时停止。
 - 结算行 OCR 漏读时，可按资源图标左侧的实际白色字符收紧裁剪，再要求高置信数字；空白、字母、冲突或位置错误不作零值。已有金币零值原图回放，原失败任务不追溯改写。
 - 黑油结算图标、宠物角标和攻城器释放图标只比较不透明内容，避免地图背景污染模板；选中动画覆盖中间缩放和缩小卡框，仍要求独立完整边框。黑油修复已实机对账，其余最新支援修复仍待实机验证。部署复用刚取得的有效截图，动作后验证和时效检查保留。
-- 已提供本地 Tk 桌面界面：任务勾选、运行参数、离线预演、实机执行入口、停止、日志、报告与截图预览。默认离线，打开界面不连接模拟器。旧规则骨架、训练成本参数等兼容字段不代表已有相应游戏策略。
-- 捐兵新增请求窗口采样及逐单位核验执行器；生产识别器尚缺真实窗口读取器，所以当前实机路径会在打开请求后明确报告 `donation_layout_unverified`，不会点击未校准的兵种按钮。合成观察测试不代表真实捐兵已经完成。
+- 已提供本地 Tk 日常助手：可排序任务与独立目标配置、离线预演/实机入口、停止、战斗/胜利/目标计数、日志、报告与截图预览。默认离线，打开界面不连接模拟器。旧规则骨架、训练成本参数等兼容字段不代表已有相应游戏策略。
+- 捐兵有请求窗口采样及逐单位核验执行器；生产识别器尚缺真实窗口读取器，所以当前实机路径无法核验捐兵交互时会报告 `donation_interaction_not_supported`，不会点击未校准的兵种按钮。合成观察测试不代表真实捐兵已经完成。
 
 ## 图形界面
 
@@ -43,7 +70,7 @@ AutoCOC 是 Windows + MuMu 上的本地《部落冲突》自动化项目，通�
 .\.venv\Scripts\python.exe -m autococ.gui --config config.toml
 ```
 
-界面默认“离线预演”。选择任务组合、轮次、时长、资源门槛后即可查看计划和报告；游戏可测试时再手动选择“实机执行”。保存界面方案不会改写基础 TOML 或模拟器设置。完整操作说明与实测清单见 [docs/DESKTOP.md](docs/DESKTOP.md)。
+界面默认“离线预演”。运行页勾选、排序任务；任务旁「设置」定位到配置页，分别设置资源、活动和部落竞赛的打法、门槛、目标与限额。游戏可测试时再手动选择“实机执行”。保存桌面方案不会改写基础 TOML 或模拟器设置。完整操作和能力边界见[docs/DESKTOP.md](docs/DESKTOP.md)。
 
 ## 安装
 
@@ -73,7 +100,7 @@ RapidOCR、ONNX Runtime 和 OpenCV 已列在项目主依赖中，安装项目会
 
 基准坐标为 `1280 × 720`；实际截图可缩放换算，但额外分辨率仍需独立验证。现有现场样本使用中文界面。
 
-默认任务组合：
+旧版 Profile 的默认任务组合（使用 `--routine` 或桌面日常助手时按各自任务清单执行）：
 
 | Profile | 顺序 |
 | --- | --- |

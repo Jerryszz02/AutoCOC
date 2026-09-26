@@ -16,11 +16,57 @@ from .session import GameSession
 RETRY_REGION = (300, 270, 980, 460)
 
 
+def welcome_back_point(snapshot: SceneSnapshot) -> list[int] | None:
+    """Locate only the observed welcome summary's bottom confirmation."""
+    if snapshot.scene != "popup" or not _confident(snapshot.confidence):
+        return None
+    ocr = snapshot.observations.get("ocr")
+    if not isinstance(ocr, list):
+        return None
+
+    def anchored(text_test, region, minimum):
+        left, top, right, bottom = region
+        matches = []
+        for item in ocr:
+            if not isinstance(item, dict) or not text_test(str(item.get("text", "")).strip()):
+                continue
+            box, confidence = item.get("bbox"), item.get("confidence")
+            if (type(confidence) not in (int, float) or not math.isfinite(confidence)
+                    or confidence < minimum or not isinstance(box, (list, tuple))
+                    or len(box) != 4 or not all(type(value) is int for value in box)):
+                continue
+            if left <= box[0] < box[2] <= right and top <= box[1] < box[3] <= bottom:
+                matches.append(box)
+        return matches[0] if len(matches) == 1 else None
+
+    title = anchored(lambda text: text == "首领，欢迎回来！", (500, 55, 780, 130), .95)
+    explanation = anchored(lambda text: text.startswith("您离开村庄的这段时间里"),
+                           (490, 125, 800, 190), .9)
+    confirms = [item for item in ocr if isinstance(item, dict)
+                and str(item.get("text", "")).strip() == "确定"]
+    confirm = anchored(lambda text: text == "确定", (600, 560, 710, 640), .95)
+    if title is None or explanation is None or len(confirms) != 1 or confirm is None:
+        return None
+    return [(confirm[0] + confirm[2]) // 2, (confirm[1] + confirm[3]) // 2]
+
+
+def confirm_welcome_back(session: GameSession, snapshot: SceneSnapshot) -> bool:
+    """Dismiss one fresh, narrowly identified welcome summary."""
+    point = welcome_back_point(snapshot)
+    if point is None:
+        return False
+    if snapshot is not session.last_snapshot:
+        raise FlowError("Welcome confirmation refers to an obsolete observation")
+    session.check_deadline()
+    session.tap(snapshot, point, reason="Dismiss observed welcome-back summary")
+    return True
+
+
 def recover_connection(session: GameSession, *, initial_snapshot: SceneSnapshot | None = None) -> TaskResult:
     started_at, started = datetime.now(), time.monotonic()
     evidence: list[Path] = []
     metrics: dict[str, object] = {
-        "retry_actions": 0, "village_verified": False,
+        "retry_actions": 0, "welcome_confirm_actions": 0, "village_verified": False,
         "before_frame": None, "after_frame": None,
         "gems_before": None, "gems_after": None, "gems_delta": None,
     }
@@ -37,6 +83,7 @@ def recover_connection(session: GameSession, *, initial_snapshot: SceneSnapshot 
         session.click(before, "retry", region=RETRY_REGION)
         metrics["retry_actions"] = 1
         deadline = min(time.monotonic() + 60, session.deadline, session.task_deadline)
+        welcome_confirmed = False
         while True:
             session.check_deadline()
             if time.monotonic() >= deadline:
@@ -52,6 +99,10 @@ def recover_connection(session: GameSession, *, initial_snapshot: SceneSnapshot 
                 raise FlowError("Connection recovery timed out before village verification")
             if after.scene == "maintenance":
                 raise FlowError("Game interruption: maintenance")
+            if not welcome_confirmed and confirm_welcome_back(session, after):
+                welcome_confirmed = True
+                metrics["welcome_confirm_actions"] = 1
+                continue
             if after.scene == "village" and _confident(after.confidence):
                 if any(len(session.buttons(after, name)) != 1 for name in ("attack", "shop")):
                     raise FlowError("Recovered village is missing unique attack/shop controls")

@@ -63,7 +63,9 @@ def recognize_earned_stars(image) -> dict:
             valid = False
             continue
         solidity = area / cv2.contourArea(cv2.convexHull(contour))
-        polygon = cv2.approxPolyDP(contour, .018 * cv2.arcLength(contour, True), True)
+        # Antialiased highlights can add small vertices to a complete star.
+        # A slightly coarser outline keeps its five deep concavities intact.
+        polygon = cv2.approxPolyDP(contour, .02 * cv2.arcLength(contour, True), True)
         if not 10 <= len(polygon) <= 12:
             shape.update(solidity=solidity, polygon_vertices=len(polygon))
             valid = False

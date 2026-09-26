@@ -42,6 +42,107 @@ class CloudCoverTests(unittest.TestCase):
 
 
 class TerrainTests(unittest.TestCase):
+    def test_thin_antialiased_boundary_can_use_two_pixel_support(self):
+        from autococ.terrain import find_line_deployment_edges
+
+        edges = find_line_deployment_edges(Path(__file__).parent / "fixtures/line-boundary-antialias.png")
+        self.assertEqual(len(edges), 4)
+        for edge in edges:
+            self.assertLess(edge["evidence"]["intercept"], 510 if edge["edge"] == 0 else 215)
+            self.assertGreater(edge["evidence"]["intercept"], 460 if edge["edge"] == 0 else 180)
+
+    def test_purple_scenery_uses_wrapped_red_boundary_instead_of_inner_roofs(self):
+        from autococ.terrain import find_line_deployment_edges
+
+        edges = find_line_deployment_edges(Path(__file__).parent / "fixtures/line-boundary-purple.png")
+        self.assertEqual(len(edges), 4)
+        for edge in edges:
+            self.assertLess(edge["evidence"]["intercept"], 490 if edge["edge"] == 0 else 260)
+            self.assertGreater(edge["evidence"]["intercept"], 455 if edge["edge"] == 0 else 220)
+
+    def test_shifted_live_boundary_moves_the_single_line_outside_red(self):
+        from autococ.terrain import find_line_deployment_edges
+
+        path = Path(__file__).parent / "fixtures/line-boundary-shifted.png"
+        edges = find_line_deployment_edges(path)
+        self.assertEqual(len(edges), 4)
+        for item in edges[:2]:
+            x, y = item["point"]
+            self.assertLess(x, (445 - y) / .75 - 20)
+        self.assertLess(edges[0]["point"][0], 450)
+
+    def test_short_sunlit_boundary_is_not_replaced_by_long_interior_roofs(self):
+        from autococ.terrain import find_line_deployment_edges
+
+        edges = find_line_deployment_edges(Path(__file__).parent / "fixtures/line-boundary-short.png")
+        self.assertEqual(len(edges), 4)
+        self.assertLess(edges[0]["evidence"]["intercept"], 505)
+        self.assertGreater(edges[0]["evidence"]["intercept"], 470)
+
+    def test_lower_flank_stays_outside_short_western_boundary(self):
+        from autococ.terrain import find_line_deployment_edges
+
+        # Redacted from the live battle in which the old lower-flank point
+        # landed inside the red deployment boundary and consumed no troop.
+        path = Path(__file__).parent / "fixtures/line-boundary-western-outside.png"
+        edges = find_line_deployment_edges(path)
+        self.assertEqual(len(edges), 4)
+        for edge in edges[2:]:
+            x, y = edge["point"]
+            outer_x = 186 + (y - 390) * 54 / 40
+            self.assertLess(x + 13, outer_x)
+
+    def test_short_visible_outer_edge_vetoes_inner_lower_line(self):
+        import cv2
+        import numpy as np
+        from autococ.terrain import find_line_deployment_edges
+
+        image = np.full((720, 1280, 3), (50, 115, 77), dtype=np.uint8)
+        cv2.line(image, (300, 275), (500, 125), (25, 40, 180), 2)
+        cv2.line(image, (250, 368), (410, 488), (25, 40, 180), 2)
+        with TemporaryDirectory() as temp:
+            path = Path(temp) / "boundary.png"
+            cv2.imwrite(str(path), image)
+            self.assertEqual(len(find_line_deployment_edges(path)), 4)
+            # Too short to be proposed as a flank itself, but enough to show
+            # that the otherwise valid lower line lies inside the perimeter.
+            cv2.line(image, (185, 389), (215, 411), (25, 40, 180), 2)
+            cv2.imwrite(str(path), image)
+            self.assertEqual(find_line_deployment_edges(path), [])
+
+    def test_line_edges_follow_current_boundary_translation(self):
+        import cv2
+        import numpy as np
+        from autococ.terrain import find_line_deployment_edges
+
+        with TemporaryDirectory() as directory:
+            results = []
+            for shift in (0, 40):
+                image = np.zeros((720, 1280, 3), np.uint8)
+                for start, end in (((300, 275), (500, 125)), ((250, 368), (410, 488))):
+                    cv2.line(image, (start[0] + shift, start[1]), (end[0] + shift, end[1]), (25, 40, 180), 2)
+                path = Path(directory) / f"{shift}.png"
+                cv2.imencode(".png", image)[1].tofile(path)
+                result = find_line_deployment_edges(path)
+                self.assertEqual(len(result), 4)
+                for point in result:
+                    proof = point["evidence"]
+                    x, y = point["point"]
+                    boundary = (y - proof["intercept"]) / proof["slope"]
+                    self.assertGreater(boundary - x, 30)
+                results.append(result)
+            self.assertAlmostEqual(results[1][0]["point"][0] - results[0][0]["point"][0], 40, delta=3)
+
+    def test_missing_red_edges_do_not_produce_fixed_coordinates(self):
+        import cv2
+        import numpy as np
+        from autococ.terrain import find_line_deployment_edges
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "blank.png"
+            cv2.imencode(".png", np.zeros((720, 1280, 3), np.uint8))[1].tofile(path)
+            self.assertEqual(find_line_deployment_edges(path), [])
+
     def assert_geometry_only(self, candidates: list[dict]) -> None:
         self.assertGreater(len(candidates), 0)
         self.assertLessEqual(len(candidates), 3)

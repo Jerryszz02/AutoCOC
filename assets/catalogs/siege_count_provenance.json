@@ -1,0 +1,13 @@
+{
+  "client": "18.600.7",
+  "version_code": 180600008,
+  "surface": "army",
+  "source_frame": "reports/live-army-probe/frames/00002-verify-current-army-after.png",
+  "crop_at_1280x720": [
+    1017,
+    376,
+    1041,
+    402
+  ],
+  "meaning": "observed x1 count-header anchor, not a siege identity"
+}

@@ -10,8 +10,115 @@ import cv2
 import numpy as np
 
 from autococ.ocr import OCRText
+from autococ.combat import _settlement
+from autococ.scene import SceneSnapshot
 from autococ.settlement import BONUS_TEMPLATE_CROPS, locate_number_line, recognize_earned_stars
 from autococ.vision import ScreenshotRecognizer
+
+
+class EarnedStarShapeTests(unittest.TestCase):
+    root = Path(__file__).resolve().parents[1]
+
+    def star_region(self, name: str) -> np.ndarray:
+        crop = cv2.imdecode(np.fromfile(self.root / "tests/fixtures" / name, dtype=np.uint8),
+                            cv2.IMREAD_COLOR)
+        image = np.zeros((720, 1280, 3), np.uint8)
+        image[65:220, 430:845] = crop
+        return image
+
+    def test_two_real_complete_one_star_outlines(self):
+        # Crops from hero-follow-1 frame 00060 and the earlier 20260924
+        # victory reread frame 00061; neither needs victory text for counting.
+        for name in ("settlement-star-hero-follow-20260926.png",
+                     "settlement-star-old-victory-20260924.png"):
+            with self.subTest(source=name):
+                result = recognize_earned_stars(self.star_region(name))
+                self.assertEqual(result["count"], 1)
+                self.assertEqual(len(result["evidence"]["shapes"]), 1)
+                self.assertEqual(len(result["evidence"]["shapes"][0]["concavity_depths"]), 5)
+
+    def test_complete_two_and_three_star_outlines(self):
+        for count in (2, 3):
+            with self.subTest(count=count):
+                image = np.zeros((720, 1280, 3), np.uint8)
+                for index in range(count):
+                    points = []
+                    for vertex in range(10):
+                        angle = -math.pi / 2 + vertex * math.pi / 5 + (index - 1) * .12
+                        radius = 60 if vertex % 2 == 0 else 27
+                        points.append([round(510 + 135 * index + math.cos(angle) * radius),
+                                       round(143 + math.sin(angle) * radius)])
+                    cv2.fillPoly(image, [np.array(points, np.int32)], (240, 240, 240))
+                self.assertEqual(recognize_earned_stars(image)["count"], count)
+
+    def test_occlusion_and_decorations_do_not_become_earned_stars(self):
+        for mode in ("covered_tip", "extra_rectangle", "extra_circle", "blank"):
+            with self.subTest(mode=mode):
+                image = self.star_region("settlement-star-hero-follow-20260926.png")
+                if mode == "covered_tip":
+                    image[80:116, 495:546] = 0
+                elif mode == "extra_rectangle":
+                    image[90:205, 610:705] = 240
+                elif mode == "extra_circle":
+                    cv2.circle(image, (660, 148), 50, (240, 240, 240), -1)
+                else:
+                    image[65:220, 430:845] = 0
+                self.assertIsNone(recognize_earned_stars(image)["count"])
+
+    def test_old_three_star_screen_with_clipped_middle_star_stays_unknown(self):
+        # The 20260926-004627 frame shows three stars, but the middle contour
+        # touches this detector's top ROI and overlaps the percent label.
+        result = recognize_earned_stars(self.star_region("settlement-star-clipped-three-20260926.png"))
+        self.assertEqual(len(result["evidence"]["shapes"]), 3)
+        self.assertEqual(sum(shape["verified"] for shape in result["evidence"]["shapes"]), 2)
+        self.assertIsNone(result["count"])
+
+
+class DefeatSettlementLayoutTests(unittest.TestCase):
+    root = Path(__file__).resolve().parents[1]
+
+    def test_received_short_label_allows_verified_no_bonus_layout(self):
+        # Redacted resource-row crop from hero-follow-2 settlement frame 00061.
+        crop = cv2.imdecode(np.fromfile(
+            self.root / "tests/fixtures/settlement-defeat-rows-hero-follow-2-20260926.png",
+            dtype=np.uint8), cv2.IMREAD_COLOR)
+        image = np.zeros((720, 1280, 3), dtype=np.uint8)
+        image[290:457, 340:940] = crop
+        readings = [OCRText(text, confidence, bbox) for text, confidence, bbox in (
+            ("20%", .99481, (610, 102, 672, 132)),
+            ("失败", .9986, (608, 196, 671, 236)),
+            ("您得到", .99985, (600, 289, 652, 310)),
+            ("159286", .99997, (549, 313, 671, 348)),
+            ("221064", .99967, (540, 358, 670, 397)),
+            ("1085", .9999, (579, 408, 670, 444)),
+            ("损耗的部队", .99984, (592, 462, 678, 485)),
+            ("回营", .99636, (623, 608, 660, 631)),
+        )]
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "defeat.png"
+            cv2.imwrite(str(path), image)
+            recognizer = ScreenshotRecognizer(provider=Mock())
+            for label in ("您得到", "您得到了"):
+                with self.subTest(label=label):
+                    texts = [replace(item, text=label) if item.text == "您得到" else item for item in readings]
+                    result = recognizer._settlement_observation(path, texts, (1280, 720))
+                    self.assertEqual(result["loot"], {"gold": 159286, "elixir": 221064, "dark_elixir": 1085})
+                    self.assertEqual(result["bonus"], {"gold": 0, "elixir": 0, "dark_elixir": 0})
+                    self.assertEqual(result["stars"], 0)
+                    self.assertEqual(result["evidence"]["layout"], "regular_defeat_three_rows_v1")
+                    self.assertEqual(result["evidence"]["bonus"]["source"], "verified_no_bonus_layout")
+                    self.assertEqual(_settlement(SceneSnapshot("settlement", .99, path,
+                                                                 {"settlement": result})), result)
+            for name, texts in (
+                ("missing_received", [item for item in readings if item.text != "您得到"]),
+                ("wrong_received_roi", [replace(item, bbox=(300, 289, 352, 310))
+                                        if item.text == "您得到" else item for item in readings]),
+                ("bonus_marker", readings + [OCRText("奖励", .99, (900, 320, 940, 345))]),
+            ):
+                with self.subTest(negative=name):
+                    result = recognizer._settlement_observation(path, texts, (1280, 720))
+                    self.assertIsNone(result["evidence"]["layout"])
+                    self.assertTrue(all(value is None for value in result["bonus"].values()))
 
 
 class SparseSettlementNumberTests(unittest.TestCase):

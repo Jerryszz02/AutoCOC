@@ -1,12 +1,13 @@
-"""Independent numeric-card manifest for the observed Chinese My Army row layout.
+"""Independent My Army card evidence for the observed Chinese client layout.
 
-This checks visible contiguous troop/spell rows, not troop identity, housing space,
-siege machines, clan reinforcements, or heroes. Scrolled/clipped rows are incomplete.
+Troop and spell numeric rows, large hero portraits, and overlapping siege cards
+have separate readers. Scrolled/clipped rows and unidentified cards are incomplete.
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict
+import json
 import math
 from pathlib import Path
 import re
@@ -17,20 +18,199 @@ import numpy as np
 
 from .locator import scale_box
 from .ocr import OCRProvider, OCRText
+from .unit_catalog import recognize_card_identity, recognize_large_hero_identity
+from .unit_catalog import CATALOG_ROOT, template_manifest
 
 
 _BASE = (1280, 720)
 _ROWS = {"troops": (545, 188, 1255, 305), "spells": (545, 365, 995, 483)}
 
 
+def recognize_army_siege(
+    screenshot_path: str | Path, provider: OCRProvider,
+    capacity: dict[str, object] | None, *,
+    baseline_resolution: tuple[int, int] = _BASE, client_version: str | None = None,
+) -> dict[str, object]:
+    """Read overlapping siege cards using visible count headers and portraits.
+
+    The 18.600.7 My Army cards overlap, so their outer contours cannot be
+    counted as separate rectangles. The sampled ``x1`` header only locates
+    cards; local OCR verifies that quantity, and a separate portrait sample
+    names each machine. Other quantity appearances remain unsupported.
+    """
+    path = Path(screenshot_path)
+    result: dict[str, object] = {"frame": str(path), "cards": [], "complete": False,
+                                  "unknowns": [], "layout": "my_army_siege_overlap_v1"}
+    try:
+        image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+    except OSError:
+        image = None
+    if image is None or abs(image.shape[1] / image.shape[0] - 16 / 9) > .01:
+        result["unknowns"].append("siege_image_unreadable_or_aspect_changed")
+        return result
+    if not isinstance(capacity, dict) or type(capacity.get("used")) is not int or type(capacity.get("capacity")) is not int:
+        result["unknowns"].append("siege_capacity_unreadable")
+        return result
+    used, total = capacity["used"], capacity["capacity"]
+    if not (0 <= used <= total <= 9):
+        result["unknowns"].append("siege_capacity_invalid")
+        return result
+    if used == 0:
+        result["unknowns"].append("empty_siege_row_not_calibrated")
+        return result
+    provenance_path = CATALOG_ROOT / "siege_count_provenance.json"
+    try:
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        provenance = {}
+    if (not client_version or client_version != template_manifest().get("client")
+            or client_version != provenance.get("client")):
+        result["unknowns"].append("siege_client_version_unverified")
+        return result
+    image = cv2.resize(image, _BASE, interpolation=cv2.INTER_AREA)
+    sample_path = CATALOG_ROOT / "siege_count_x1_18_600_7.png"
+    sample = cv2.imdecode(np.fromfile(sample_path, dtype=np.uint8), cv2.IMREAD_COLOR) if sample_path.is_file() else None
+    if sample is None:
+        result["unknowns"].append("siege_count_header_sample_missing")
+        return result
+    search = cv2.matchTemplate(image[372:410, 1005:1250], sample, cv2.TM_CCOEFF_NORMED)
+    matches = []
+    for _ in range(9):
+        _, score, _, (x, y) = cv2.minMaxLoc(search)
+        if score < .79:
+            break
+        absolute_x, absolute_y = x + 1005, y + 372
+        search[max(0, y - 8):min(search.shape[0], y + 9),
+               max(0, x - 30):min(search.shape[1], x + 31)] = -1
+        if 374 <= absolute_y <= 378:
+            matches.append((absolute_x, absolute_y, float(score)))
+    matches.sort()
+    result["count_header_matches"] = [{"point": [x, y], "score": round(score, 5)}
+                                      for x, y, score in matches]
+    if len(matches) != used:
+        result["unknowns"].append("siege_card_count_disagrees_with_capacity")
+    for x, y, score in matches:
+        crop = image[y:y + 27, x:x + 25]
+        reader = getattr(provider, "recognize_line_image", None)
+        readings = reader(crop) if callable(reader) else []
+        if not isinstance(readings, (list, tuple)):
+            readings = []
+        valid = [item for item in readings if isinstance(item, OCRText)
+                 and _confident(item) and re.fullmatch(r"[xX×]\s*[0-9]+", item.text.strip())]
+        counts = {int(re.sub(r"\D", "", item.text)) for item in valid}
+        count = next(iter(counts)) if counts == {1} else None
+        if count is None:
+            result["unknowns"].append("siege_quantity_unverified")
+        box = (x - 1, 372, x + 94, 470)
+        identity = recognize_card_identity(image, box, "siege", surface="army",
+                                           client_version=client_version)
+        if identity["unit_id"] is None:
+            result["unknowns"].append("siege_identity_unavailable")
+        card_box = list(scale_box(box, from_resolution=_BASE, to_resolution=baseline_resolution))
+        result["cards"].append({"unit_id": identity["unit_id"], "kind": "siege",
+                                "source": "army", "count": count, "level": None,
+                                "available": None, "confidence": identity["confidence"],
+                                "bbox": card_box,
+                                "point": [(card_box[0] + card_box[2]) // 2,
+                                          (card_box[1] + card_box[3]) // 2],
+                                "evidence": {"header_score": round(score, 5),
+                                             "count_reads": [asdict(item) for item in valid],
+                                             "identity": identity}})
+    result["complete"] = not result["unknowns"]
+    return result
+
+
+def recognize_army_heroes(
+    screenshot_path: str | Path, capacity: dict[str, object] | None, *,
+    baseline_resolution: tuple[int, int] = _BASE, client_version: str | None = None,
+) -> dict[str, object]:
+    """Read independently bordered large hero cards on the My Army page.
+
+    Card geometry establishes that a card exists. Portrait evidence establishes
+    its ID separately; the same hero may appear in any visible column.
+    """
+    path = Path(screenshot_path)
+    result: dict[str, object] = {"frame": str(path), "cards": [], "complete": False,
+                                  "unknowns": [], "layout": "my_army_large_heroes_v1"}
+    try:
+        image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+    except OSError:
+        image = None
+    if image is None or abs(image.shape[1] / image.shape[0] - 16 / 9) > .01:
+        result["unknowns"].append("hero_image_unreadable_or_aspect_changed")
+        return result
+    image = cv2.resize(image, _BASE, interpolation=cv2.INTER_AREA)
+    if not isinstance(capacity, dict) or type(capacity.get("used")) is not int or type(capacity.get("capacity")) is not int:
+        result["unknowns"].append("hero_capacity_unreadable")
+        return result
+    used, total = capacity["used"], capacity["capacity"]
+    if not (0 <= used <= total <= 6):
+        result["unknowns"].append("hero_capacity_invalid")
+        return result
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    # The 18.600.7 large-card frame has two long, separate side edges. Locate
+    # those edges afresh on every frame; a column number never supplies an ID.
+    edge = np.abs(gray[220:650, 1:] - gray[220:650, :-1]).mean(axis=0)
+    detected = []
+    for group in range(4):
+        first = 17 + 130 * group
+        candidates = []
+        for left in range(first, first + 14):
+            for right in range(left + 122, left + 128):
+                if right >= edge.size:
+                    continue
+                left_score, right_score = float(edge[left - 1]), float(edge[right - 1])
+                if left_score >= 28 and right_score >= 35:
+                    candidates.append((min(left_score, right_score), left, right,
+                                       left_score, right_score))
+        if not candidates:
+            continue
+        strongest = max(item[0] for item in candidates)
+        # The two pixels of one bevel can have virtually identical edge
+        # strength. Anchor the outer edge consistently so pet/equipment icon
+        # crops remain aligned across fresh observations.
+        _, left, right, left_score, right_score = min(
+            (item for item in candidates if item[0] >= strongest - 2),
+            key=lambda item: item[1])
+        box = (left, 185, right, 668)
+        identity = recognize_large_hero_identity(image, box, client_version=client_version)
+        card_box = list(scale_box(box, from_resolution=_BASE, to_resolution=baseline_resolution))
+        card = {"unit_id": identity["unit_id"], "kind": "hero", "source": "army",
+                "count": 1, "level": None, "available": None,
+                "confidence": identity["confidence"], "card_bbox": card_box,
+                "bbox": card_box,
+                "point": [(card_box[0] + card_box[2]) // 2, (card_box[1] + card_box[3]) // 2],
+                "evidence": {"geometry": {"method": "observed_long_card_edges",
+                                          "left_score": round(left_score, 5),
+                                          "right_score": round(right_score, 5)},
+                             "identity": identity}}
+        detected.append(card)
+        if identity["unit_id"] is None:
+            result["unknowns"].append("hero_identity_unavailable")
+    result["cards"] = detected
+    if len(detected) != used:
+        result["unknowns"].append("hero_card_count_disagrees_with_capacity")
+    ids = [card["unit_id"] for card in detected if card["unit_id"] is not None]
+    if len(set(ids)) != len(ids):
+        result["unknowns"].append("duplicate_hero_identity")
+    result["complete"] = not result["unknowns"]
+    return result
+
+
 def recognize_army_manifest(
     screenshot_path: str | Path, provider: OCRProvider, texts: Sequence[OCRText], *,
-    baseline_resolution: tuple[int, int] = _BASE,
+    baseline_resolution: tuple[int, int] = _BASE, client_version: str | None = None,
+    capacities: dict[str, object] | None = None,
+    groups: Sequence[str] = ("troops", "spells"),
 ) -> dict[str, object]:
     """`texts` and returned card boxes use `baseline_resolution`; provider boxes are native."""
+    if not groups or any(group not in _ROWS for group in groups):
+        raise ValueError("groups must contain troops and/or spells")
+    selected = tuple(dict.fromkeys(groups))
     path = Path(screenshot_path)
     result = {"frame": str(path), "layout": "my_army_rows_v1", "supported_layout": False,
               "complete": False, "troops": [], "spells": [], "unknowns": [],
+              "complete_kinds": {"troop": False, "spell": False},
               "source_resolution": None, "baseline_resolution": list(baseline_resolution),
               "layout_evidence": {"anchors": {}, "rows": {}}}
     unknowns = result["unknowns"]
@@ -45,6 +225,7 @@ def recognize_army_manifest(
     result["source_resolution"] = [width, height]
     if abs(width / height - 1280 / 720) > .01:
         unknowns.append({"reason": "unsupported_aspect_ratio"})
+    native_image = image
     image = cv2.resize(image, _BASE, interpolation=cv2.INTER_AREA)
     canonical = [OCRText(item.text, item.confidence, None if item.bbox is None else scale_box(
         item.bbox, from_resolution=baseline_resolution, to_resolution=_BASE)) for item in texts]
@@ -63,7 +244,8 @@ def recognize_army_manifest(
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     foreground = (((hsv[:, :, 0] >= 40) & (hsv[:, :, 1] >= 40) & (hsv[:, :, 2] >= 100))
                   | ((hsv[:, :, 1] <= 90) & (hsv[:, :, 2] >= 190))).astype(np.uint8)
-    for group, roi in _ROWS.items():
+    for group in selected:
+        roi = _ROWS[group]
         left, top, right, bottom = roi
         mask = foreground[top:bottom, left:right]
         uncovered = mask.copy()
@@ -83,8 +265,14 @@ def recognize_army_manifest(
             uncovered[y:y + h, x:x + w] = 0
         boxes.sort(key=lambda item: item[0][0])
         row_unknowns = []
-        if not boxes:
+        header = capacities.get(group) if isinstance(capacities, dict) else None
+        explicit_zero = (isinstance(header, dict) and type(header.get("used")) is int
+                         and header["used"] == 0 and type(header.get("capacity")) is int
+                         and header["capacity"] >= 0)
+        if not boxes and not explicit_zero:
             row_unknowns.append("no_complete_card_borders")
+        if boxes and explicit_zero:
+            row_unknowns.append("visible_cards_conflict_with_zero_capacity")
         expected_top = 194 if group == "troops" else 373
         for index, (box, _) in enumerate(boxes):
             if abs(box[1] - expected_top) > 3:
@@ -101,18 +289,32 @@ def recognize_army_manifest(
         result["layout_evidence"]["rows"][group] = {
             "roi_at_1280x720": list(roi), "detected_card_count": len(boxes),
             "uncovered_foreground_pixels": residual, "complete": not row_unknowns,
+            "zero_capacity_header": header if explicit_zero else None,
         }
         unknowns.extend({"group": group, "reason": reason} for reason in dict.fromkeys(row_unknowns))
         for box, sides in boxes:
-            count, count_evidence = _read_count(path, provider, canonical, box, (width, height), baseline_resolution)
+            count, count_evidence = _read_count(path, provider, canonical, box, (width, height), baseline_resolution,
+                                                image, native_image, client_version)
             card_box = list(scale_box(box, from_resolution=_BASE, to_resolution=baseline_resolution))
-            result[group].append({"bbox": card_box, "count": count, "evidence": {
+            identity = recognize_card_identity(image, box, "troop" if group == "troops" else "spell",
+                                               surface="army", client_version=client_version)
+            result[group].append({"bbox": card_box, "point": [(card_box[0] + card_box[2]) // 2,
+                                                                    (card_box[1] + card_box[3]) // 2],
+                                  "kind": "troop" if group == "troops" else "spell", "source": "army",
+                                  "unit_id": identity["unit_id"], "identity_confidence": identity["confidence"],
+                                  "level": None, "available": None,
+                                  "count": count, "evidence": {
                 "geometry": {"method": "independent_card_border", "side_support": sides,
                              "bbox_at_1280x720": list(box)}, "count": count_evidence,
+                "identity": identity,
             }})
             if count is None:
                 unknowns.append({"group": group, "bbox": card_box, "reason": "missing_or_ambiguous_exact_quantity"})
+        result["complete_kinds"]["troop" if group == "troops" else "spell"] = not any(
+            item.get("group") == group for item in unknowns)
     result["complete"] = not unknowns
+    result["identity_complete"] = result["complete"] and all(
+        card["unit_id"] is not None for group in ("troops", "spells") for card in result[group])
     return result
 
 
@@ -127,7 +329,8 @@ def _inside(item: OCRText, roi: tuple[int, int, int, int]) -> bool:
     return roi[0] <= (left + right) / 2 <= roi[2] and roi[1] <= (top + bottom) / 2 <= roi[3]
 
 
-def _read_count(path, provider, texts, box, native_resolution, baseline_resolution):
+def _read_count(path, provider, texts, box, native_resolution, baseline_resolution,
+                canonical_image, native_image, client_version):
     roi = (box[0], box[1], box[0] + 70, box[1] + 28)
     candidates = [item for item in texts if _confident(item) and _inside(item, roi)
                   and re.fullmatch(r"[xX×]\s*[0-9]+", item.text.strip())]
@@ -144,6 +347,61 @@ def _read_count(path, provider, texts, box, native_resolution, baseline_resoluti
         asdict(OCRText(item.text, item.confidence, None if item.bbox is None else scale_box(
             item.bbox, from_resolution=_BASE, to_resolution=baseline_resolution))) for item in candidates]}
     if len(candidates) != 1:
+        local_values: set[int] = set()
+        # The spell cards' purple/icy background can defeat full-frame and
+        # native line OCR. Re-read only the quantity glyphs with several
+        # contrast transforms, retaining the exact text and confidence. This
+        # never guesses from card order, capacity, or the neighboring cards.
+        reader = getattr(provider, "recognize_line_image", None)
+        if callable(reader) and len(candidates) == 0:
+            left, top = box[:2]
+            tiny = canonical_image[top + 1:top + 27, left:left + 40]
+            gray = cv2.cvtColor(tiny, cv2.COLOR_BGR2GRAY)
+            variants = {"gray": gray, "inverted": 255 - gray,
+                        "threshold": cv2.threshold(gray, 170, 255, cv2.THRESH_BINARY)[1]}
+            native_box = scale_box((left, top + 1, left + 40, top + 27),
+                                   from_resolution=_BASE, to_resolution=native_resolution)
+            nl, nt, nr, nb = native_box
+            native_gray = cv2.cvtColor(native_image[nt:nb, nl:nr], cv2.COLOR_BGR2GRAY)
+            variants.update({"native_gray": native_gray, "native_inverted": 255 - native_gray,
+                             "native_threshold": cv2.threshold(native_gray, 170, 255, cv2.THRESH_BINARY)[1]})
+            reads = []
+            for variant, sample in variants.items():
+                output = reader(sample)
+                if isinstance(output, (list, tuple)):
+                    reads.extend({"variant": variant, "text": item.text,
+                                  "confidence": item.confidence} for item in output
+                                 if isinstance(item, OCRText))
+            evidence["contrast_reads"] = reads
+            valid = [item for item in reads if math.isfinite(item["confidence"])
+                     and item["confidence"] >= .9
+                     and re.fullmatch(r"[xX×]\s*[0-9]+", item["text"].strip())]
+            values = {int(re.sub(r"\D", "", item["text"])) for item in valid}
+            local_values = values
+            if len(values) == 1 and next(iter(values)) > 0:
+                evidence["source"] = "contrast_line_roi"
+                return next(iter(values)), evidence
+        # The siege x1 glyph is independent evidence for its shape. A second
+        # troop sample includes the space after the digit, so x11 cannot match
+        # merely by sharing an x1 prefix. Both must agree after OCR fails.
+        if not candidates and not local_values and client_version == template_manifest().get("client"):
+            sample_path = CATALOG_ROOT / "siege_count_x1_18_600_7.png"
+            sample = cv2.imdecode(np.fromfile(sample_path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE) if sample_path.is_file() else None
+            full_path = CATALOG_ROOT / "army_count_x1_18_600_7.png"
+            full = cv2.imdecode(np.fromfile(full_path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE) if full_path.is_file() else None
+            if sample is not None and full is not None:
+                left, top = box[:2]
+                header = cv2.cvtColor(canonical_image[top:top + 31, left:left + 55], cv2.COLOR_BGR2GRAY)
+                whole = cv2.cvtColor(canonical_image[top:top + 28, left + 1:left + 46], cv2.COLOR_BGR2GRAY)
+                if (header.shape[0] >= sample.shape[0] and header.shape[1] >= sample.shape[1]
+                        and whole.shape[0] >= full.shape[0] and whole.shape[1] >= full.shape[1]):
+                    score = float(cv2.matchTemplate(header, sample, cv2.TM_CCOEFF_NORMED).max())
+                    full_score = float(cv2.matchTemplate(whole, full, cv2.TM_CCOEFF_NORMED).max())
+                    evidence["x1_header_scores"] = {"independent_glyph": round(score, 5),
+                                                     "whole_header": round(full_score, 5)}
+                    if score >= .85 and full_score >= .94:
+                        evidence["source"] = "sampled_x1_header"
+                        return 1, evidence
         return None, evidence
     count = int(re.sub(r"\D", "", candidates[0].text))
     return count if count > 0 else None, evidence

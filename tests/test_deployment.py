@@ -5,10 +5,11 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from autococ.deployment import _remaining, deploy_army
-from autococ.errors import CaptureError, DeploymentError, FlowError
+from autococ.deployment import _prepare_two_edge_view, _remaining, deploy_army, spread_along_edges
+from autococ.errors import CaptureError, DeploymentError, FlowError, StopRequested
 from autococ.scene import SceneSnapshot
 from autococ.session import GameSession
+from autococ.vision import ScreenshotRecognizer
 
 
 def card(kind: str = "troop", count: int | None = 10, left: int = 180) -> dict:
@@ -55,7 +56,7 @@ class FakeSession:
     def check_deadline(self) -> None:
         pass
 
-    def observe(self, label: str) -> SceneSnapshot:
+    def observe(self, label: str, **options) -> SceneSnapshot:
         captured_at = self.clock.now
         self.clock.advance(self.capture_seconds)
         slots, ocr = [], []
@@ -142,6 +143,238 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(_remaining(frame, original), count)
         self.assertEqual(frame.observations["battle"]["slots"], [])
         self.assertEqual(original["count"], 10)
+
+    def test_selected_gray_zero_uses_verified_old_glyph_box_only_as_roi_anchor(self) -> None:
+        path = Path(__file__).resolve().parent / "fixtures/battle_gray_electro_selected_x0.png"
+        slot = {"kind": "troop", "unit_id": "electro_dragon", "count": 10,
+                "bbox": [90, 589, 184, 709], "point": [137, 649],
+                "evidence": {"count": {"count": 10, "confidence": .99, "portrait_score": .99,
+                                        "frame": "selected.png", "slot_bbox": [93, 595, 181, 711]},
+                             "count_roi_anchor": {
+                                 "bbox": [130, 593, 180, 622], "source_frame": "before-selection.png",
+                                 "source_slot_bbox": [93, 595, 181, 711],
+                                 "source_text": "x10", "source_confidence": .99,
+                                 "verified_frame": "selected.png", "verified_count": 10,
+                                 "verified_portrait_score": .99,
+                                 "verified_slot_bbox": [90, 589, 184, 709],
+                                 "unit_id": "electro_dragon"}}}
+
+        def frame():
+            return SceneSnapshot("battle", .95, path, {"ocr": []})
+
+        recognizer = ScreenshotRecognizer()
+        unanchored = deepcopy(slot)
+        del unanchored["evidence"]["count_roi_anchor"]
+        self.assertIsNone(_remaining(frame(), unanchored, recognizer=recognizer))
+        current = frame()
+        self.assertEqual(_remaining(current, slot, recognizer=recognizer), 0)
+        reading = current.observations["deployment_count_reads"][0]
+        self.assertEqual(reading["count_bbox"], [130, 593, 180, 622])
+        self.assertEqual(reading["frame"], str(path))
+        self.assertGreaterEqual(reading["confidence"], .9)
+
+    def test_roi_anchor_rejects_changed_identity_count_and_geometry(self) -> None:
+        slot = {"kind": "troop", "unit_id": "electro_dragon", "count": 10,
+                "bbox": [90, 589, 184, 709], "point": [137, 649],
+                "evidence": {"count": {"count": 10, "portrait_score": .99, "frame": "selected.png",
+                                        "slot_bbox": [93, 595, 181, 711]}, "count_roi_anchor": {
+                    "bbox": [130, 593, 180, 622], "source_frame": "before-selection.png",
+                    "source_slot_bbox": [93, 595, 181, 711], "source_text": "x10",
+                    "source_confidence": .99, "verified_frame": "selected.png",
+                    "verified_count": 10, "verified_portrait_score": .99,
+                    "verified_slot_bbox": [90, 589, 184, 709], "unit_id": "electro_dragon"}}}
+        for key, value in (("source_text", "x9"), ("source_confidence", .89),
+                           ("verified_count", 9), ("verified_portrait_score", .91),
+                           ("verified_slot_bbox", [90, 589, 185, 709]), ("unit_id", "balloon"),
+                           ("bbox", [130, 593, 185, 622])):
+            with self.subTest(key=key):
+                candidate = deepcopy(slot)
+                candidate["evidence"]["count_roi_anchor"][key] = value
+                recognizer = Mock()
+                recognizer.recognize_slot_count.return_value = {"count": None, "confidence": 0,
+                    "frame": "current.png", "slot_bbox": candidate["bbox"]}
+                _remaining(SceneSnapshot("battle", .95, Path("current.png"), {"ocr": []}),
+                           candidate, recognizer=recognizer)
+                recognizer.recognize_slot_count.assert_called_once_with(Path("current.png"),
+                                                                          tuple(candidate["bbox"]))
+
+    def line_session(self, cards=None):
+        session = FakeSession(self.clock, cards or [card(count=40)])
+        session.config.battle.strategy = "two_edge"
+        terrain = [{"point": point, "edge": edge} for edge, points in (
+            (0, ([450, 210], [300, 320])), (1, ([300, 370], [440, 470]))) for point in points]
+        patcher = patch("autococ.deployment._prepare_two_edge_view", side_effect=lambda session, current, receipt: (current, terrain))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return session, terrain
+
+    def test_line_distributes_forty_troops_twenty_per_edge_without_per_unit_observations(self):
+        session, terrain = self.line_session()
+        result = deploy_army(session, session.scout).observations["deployment"]
+        points = [tap[1] for tap in session.placements]
+        self.assertTrue(result["completed"])
+        self.assertEqual(result["deployed_units"], 40)
+        self.assertEqual(len(points), 40)
+        self.assertEqual(sum(point[1] < 340 for point in points), 20)
+        self.assertEqual(sum(point[1] > 340 for point in points), 20)
+        self.assertEqual(len({tuple(point) for point in points}), 40)
+        self.assertLessEqual(len(session.frames), 3)
+        self.assertEqual(len(session.taps) - len(session.placements), 1)
+
+    def test_line_handles_odd_and_single_stacks_and_excludes_support(self):
+        session, terrain = self.line_session([card(count=11), card("hero", None, 280), card("spell", 5, 380)])
+        result = deploy_army(session, session.scout).observations["deployment"]
+        self.assertTrue(result["completed"])
+        self.assertEqual(result["deployed_units"], 11)
+        self.assertEqual(session.counts[415], 5)
+        self.assertFalse(any(tap[1] in ([315, 645], [415, 645]) for tap in session.taps))
+        self.assertEqual(len(spread_along_edges(terrain, 1)), 1)
+
+    def test_line_delayed_render_is_reobserved_without_replaying_placements(self):
+        session, _ = self.line_session()
+        reads = []
+
+        def observed(label, snapshot):
+            if label == "line-consumption":
+                reads.append(len(session.placements))
+                if len(reads) == 1:
+                    snapshot.observations["ocr"][0]["text"] = "x20"
+            return snapshot
+
+        session.observe_hook = observed
+        result = deploy_army(session, session.scout).observations["deployment"]
+        self.assertEqual(reads, [40, 40])
+        self.assertEqual(result["deployed_units"], 40)
+        self.assertEqual(result["consumption_events"][0]["consumed"], 40)
+
+    def test_line_partial_consumption_retains_failure_without_replaying(self):
+        session, terrain = self.line_session()
+        session.blocked_points = {tuple(point) for point in spread_along_edges(terrain, 40)[20:]}
+        with self.assertRaisesRegex(DeploymentError, "left troops unverified") as error:
+            deploy_army(session, session.scout)
+        self.assertEqual(len(session.placements), 40)
+        self.assertEqual(error.exception.partial_receipt["deployed_units"], 20)
+        self.assertFalse(error.exception.partial_receipt["completed"])
+
+    def test_line_stop_propagates_before_another_click(self):
+        session, _ = self.line_session()
+
+        def check():
+            if len(session.placements) == 5:
+                raise StopRequested()
+
+        session.check_deadline = check
+        with self.assertRaises(StopRequested):
+            deploy_army(session, session.scout)
+        self.assertEqual(len(session.placements), 5)
+
+    def test_edrag_line_places_all_troops_before_heroes_without_abilities(self):
+        session, terrain = self.line_session([card(count=3), card("hero", None, 280),
+                                              card("spell", 2, 380), card("siege", None, 480)])
+        session.config.battle.strategy = "edrag_line"
+        self.hero_state.side_effect = [
+            {"selected": True, "deployed": None},
+            {"selected": False, "deployed": None},
+            {"selected": False, "deployed": True, "ability_ready": True}]
+        result = deploy_army(session, session.scout).observations["deployment"]
+        self.assertTrue(result["completed"])
+        self.assertEqual(result["deployed_units"], 3)
+        self.assertEqual([tap[1] for tap in session.placements], [[450, 210], [375, 265], [300, 320], [375, 265]])
+        self.assertEqual(result["support_attempts"][0]["ability_clicks"], 0)
+        self.assertFalse(any("ability" in tap[2].lower() for tap in session.taps))
+        self.assertEqual(session.counts[415], 2)
+        self.assertFalse(any(tap[1] == [515, 645] for tap in session.taps))
+
+    def test_edrag_unverified_hero_is_not_replayed_or_marked_complete(self):
+        session, _ = self.line_session([card(count=1), card("hero", None, 280)])
+        session.config.battle.strategy = "edrag_line"
+        self.hero_state.side_effect = [{"selected": True, "deployed": None}] + [{"deployed": None}] * 3
+        with self.assertRaisesRegex(DeploymentError, "will not be replayed") as raised:
+            deploy_army(session, session.scout)
+        self.assertEqual(raised.exception.partial_receipt["deployed_units"], 1)
+        self.assertFalse(raised.exception.partial_receipt["completed"])
+        self.assertEqual(len(session.placements), 2)
+
+    def test_edrag_unknown_selection_never_places_hero(self):
+        session, _ = self.line_session([card(count=1), card("hero", None, 280)])
+        session.config.battle.strategy = "edrag_line"
+        self.hero_state.return_value = {"selected": False, "deployed": None}
+        with self.assertRaisesRegex(DeploymentError, "selection is unverified"):
+            deploy_army(session, session.scout)
+        self.assertEqual(len(session.placements), 1)
+
+    def test_line_boundary_selection_reacquires_neighbor_from_fresh_portrait_and_count(self):
+        session = FakeSession(self.clock, [card(count=10), card(count=1, left=280)])
+        session.config.battle.strategy = "edrag_line"
+        session.native = Mock()
+        session.recognizer = Mock()
+        def read(path, bbox):
+            original = next(slot for slot in session.cards if tuple(slot["bbox"]) == bbox)
+            return {"portrait_score": .99, "count": original["count"],
+                    "readings": [{"text": f"x{original['count']}", "confidence": .99,
+                                  "bbox": [bbox[0]+5, 590, bbox[2]-5, 618]}]}
+        session.recognizer.recognize_slot_count.side_effect = read
+        def hide_borders(label, frame):
+            if label == "line-boundary":
+                frame.observations["battle"]["slots"] = []
+            return frame
+        session.observe_hook = hide_borders
+        self.camera_motion.return_value = {"stationary": True}
+        terrain = [{"edge": edge, "point": point} for edge, points in
+                   ((0, ([450, 210], [300, 320])), (1, ([300, 370], [440, 470]))) for point in points]
+        with patch("autococ.battle_vision.selected_card_bbox", return_value=session.cards[0]["bbox"]), \
+             patch("autococ.terrain.find_line_deployment_edges", return_value=terrain):
+            receipt = deploy_army(session, session.scout).observations["deployment"]
+        self.assertTrue(receipt["completed"])
+        self.assertEqual(receipt["deployed_units"], 11)
+
+    def test_boundary_selection_keeps_only_reidentified_card_glyph_roi(self):
+        original = {**card(count=10), "unit_id": "electro_dragon",
+                    "evidence": {"count": {"text": "x10", "confidence": .99,
+                                            "bbox": [205, 590, 245, 618]}}}
+        session = FakeSession(self.clock, [original])
+        session.native = Mock()
+        session.recognizer = Mock()
+        session.recognizer.recognize_slot_count.side_effect = lambda path, bbox: {
+            "frame": str(path), "slot_bbox": list(bbox), "count": 10, "portrait_score": .99,
+        }
+        self.camera_motion.return_value = {"stationary": True}
+        selected_box = [177, 587, 253, 703]
+        terrain = [{"edge": edge, "point": point} for edge, points in
+                   ((0, ([450, 210], [300, 320])), (1, ([300, 370], [440, 470]))) for point in points]
+        with patch("autococ.battle_vision.selected_card_bbox", return_value=selected_box), \
+             patch("autococ.terrain.find_line_deployment_edges", return_value=terrain):
+            current, observed = _prepare_two_edge_view(session, session.scout, {"evidence": []})
+        self.assertEqual(observed, terrain)
+        slot = current.observations["battle"]["slots"][0]
+        anchor = slot["evidence"]["count_roi_anchor"]
+        self.assertEqual(anchor["bbox"], [205, 590, 245, 618])
+        self.assertEqual(anchor["source_frame"], str(session.frames[2].screenshot_path))
+        self.assertEqual(anchor["verified_frame"], str(current.screenshot_path))
+        self.assertEqual(anchor["verified_slot_bbox"], selected_box)
+        self.assertEqual(anchor["unit_id"], "electro_dragon")
+        self.assertNotIn("bbox", slot["evidence"]["count"], "Fast count ROI is not a glyph box")
+
+    def test_edrag_waits_for_selection_animation_without_clicking_again(self):
+        session, _ = self.line_session([card(count=1), card("hero", None, 280)])
+        session.config.battle.strategy = "edrag_line"
+        self.hero_state.side_effect = [{"selected": False, "deployed": None},
+                                      {"selected": True, "deployed": None}, {"deployed": True}]
+        result = deploy_army(session, session.scout).observations["deployment"]
+        self.assertTrue(result["completed"])
+        self.assertEqual(sum(tap[1] == [315, 645] for tap in session.taps), 1)
+
+    def test_edrag_stop_after_hero_selection_prevents_placement(self):
+        session, _ = self.line_session([card(count=1), card("hero", None, 280)])
+        session.config.battle.strategy = "edrag_line"
+        self.hero_state.return_value = {"selected": True, "deployed": None}
+        def check():
+            if any(tap[1] == [315, 645] for tap in session.taps):
+                raise StopRequested()
+        session.check_deadline = check
+        with self.assertRaises(StopRequested):
+            deploy_army(session, session.scout)
+        self.assertEqual(len(session.placements), 1)
 
     def test_missing_ambiguous_or_unreliable_header_is_unknown_not_zero(self) -> None:
         session = FakeSession(self.clock)

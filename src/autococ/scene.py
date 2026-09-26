@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import math
 import re
 
 from .errors import SceneError
@@ -32,6 +33,39 @@ class SceneSnapshot:
     confidence: float
     screenshot_path: Path
     observations: dict[str, object] = field(default_factory=dict)
+
+
+def surrender_dialog_evidence(ocr: list[dict]) -> dict | None:
+    """Recognize the observed Chinese surrender dialog using only its own text.
+
+    Battle HUD text remains visible behind this dialog. Neither that text nor
+    an unrelated confirmation button is sufficient evidence to surrender.
+    Coordinates are in the shared 1280 x 720 baseline.
+    """
+    regions = {"title": (550, 180, 730, 270), "body": (350, 270, 930, 400),
+               "cancel": (420, 400, 590, 520), "confirm": (690, 400, 870, 520)}
+    found: dict[str, list[dict]] = {name: [] for name in regions}
+    for item in ocr:
+        if not isinstance(item, dict):
+            continue
+        box, confidence = item.get("bbox"), item.get("confidence")
+        if (not isinstance(box, (tuple, list)) or len(box) != 4 or
+                not all(type(value) in (int, float) and math.isfinite(value) for value in box) or
+                box[2] <= box[0] or box[3] <= box[1] or
+                type(confidence) not in (int, float) or not math.isfinite(confidence) or confidence < .9):
+            continue
+        text = re.sub(r"\s+", "", str(item.get("text", "")))
+        for name, (left, top, right, bottom) in regions.items():
+            if left <= box[0] and top <= box[1] and box[2] <= right and box[3] <= bottom:
+                found[name].append({**item, "text": text})
+    titles = [item for item in found["title"] if item["text"] in {"放弃？", "放弃?", "投降？", "投降?"}]
+    cancel = [item for item in found["cancel"] if item["text"] == "取消"]
+    confirm = [item for item in found["confirm"] if item["text"] == "确定"]
+    body = "".join(item["text"] for item in sorted(found["body"], key=lambda item: item["bbox"][1]))
+    if (len(titles) != 1 or len(cancel) != 1 or len(confirm) != 1 or
+            not all(phrase in body for phrase in ("战斗", "奖杯", "确定", "撤退命令"))):
+        return None
+    return {"title": titles[0], "body": found["body"], "cancel": cancel[0], "confirm": confirm[0]}
 
 
 def detect_scene_from_xml(

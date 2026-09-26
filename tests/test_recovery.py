@@ -1,11 +1,13 @@
 from copy import deepcopy
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from autococ.errors import FlowError
-from autococ.recovery import recover_connection
+from autococ.flow import return_to_village
+from autococ.recovery import confirm_welcome_back, recover_connection, welcome_back_point
 from autococ.reporting import RunStats, TaskResult
 from autococ.scene import SceneSnapshot
 from autococ.session import GameSession
@@ -13,6 +15,8 @@ from autococ.session import GameSession
 
 RETRY = {"name": "retry", "text": "重试", "confidence": 0.99988,
          "bbox": [335, 406, 375, 430], "point": [355, 418]}
+WELCOME_OCR = json.loads((Path(__file__).parent / "fixtures" /
+                          "welcome_back_ocr_20260926.json").read_text(encoding="utf-8"))
 
 
 def frame(index: int, scene: str, *, gems: int | None = None, confidence: float = 0.95) -> SceneSnapshot:
@@ -21,6 +25,14 @@ def frame(index: int, scene: str, *, gems: int | None = None, confidence: float 
     ] if scene == "village" else []
     return SceneSnapshot(scene, confidence, Path(f"recovery-{index}.png"), {
         "buttons": buttons, "resources": {"gems": gems},
+    })
+
+
+def welcome(index: int = 1) -> SceneSnapshot:
+    return SceneSnapshot("popup", WELCOME_OCR["confidence"], Path(f"recovery-{index}.png"), {
+        "ocr": deepcopy(WELCOME_OCR["ocr"]),
+        "buttons": [{"name": "confirm", "point": [655, 601], "text": "确定",
+                     "bbox": [637, 590, 673, 612], "confidence": .99999}],
     })
 
 
@@ -77,6 +89,59 @@ def recover(frames: list[SceneSnapshot], *, capture_seconds: float = 0, deadline
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_real_welcome_ocr_is_confirmed_once_after_retry(self) -> None:
+        popup = welcome()
+        result, session, _ = recover([frame(0, "disconnected"), popup, popup,
+                                      frame(3, "village")])
+        self.assertEqual(result.status, "succeeded", result.reason)
+        self.assertEqual(result.metrics["welcome_confirm_actions"], 1)
+        self.assertTrue(result.metrics["village_verified"])
+        self.assertEqual(session.taps, [(Path("recovery-0.png"), [355, 418]),
+                                        (popup.screenshot_path, [655, 601])])
+
+    def test_welcome_title_description_and_unique_ocr_button_are_required(self) -> None:
+        for change in ("upgrade_title", "missing_description", "duplicate_confirm",
+                       "low_title_confidence", "confirm_outside_bottom", "wrong_scene"):
+            with self.subTest(change=change):
+                popup = welcome()
+                ocr = popup.observations["ocr"]
+                if change == "upgrade_title":
+                    ocr[0]["text"] = "将部落城堡升至 13 级？"
+                elif change == "missing_description":
+                    ocr.pop(1)
+                elif change == "duplicate_confirm":
+                    ocr.append(deepcopy(ocr[2]))
+                elif change == "low_title_confidence":
+                    ocr[0]["confidence"] = .7
+                elif change == "confirm_outside_bottom":
+                    ocr[2]["bbox"] = [637, 400, 673, 422]
+                else:
+                    popup = SceneSnapshot("village", .95, popup.screenshot_path, popup.observations)
+                self.assertIsNone(welcome_back_point(popup))
+                result, session, _ = recover([frame(0, "disconnected"), popup])
+                self.assertEqual(result.status, "failed")
+                self.assertEqual(len(session.taps), 1)
+                self.assertEqual(result.metrics["welcome_confirm_actions"], 0)
+
+    def test_obsolete_welcome_frame_cannot_authorize_click(self) -> None:
+        popup = welcome()
+        session = FakeSession([], FakeClock())
+        session.last_snapshot = frame(2, "unknown")
+        with self.assertRaisesRegex(FlowError, "obsolete"):
+            confirm_welcome_back(session, popup)
+        self.assertEqual(session.taps, [])
+
+    def test_return_to_village_uses_narrow_welcome_confirmation(self) -> None:
+        popup, village = welcome(), frame(2, "village")
+        session = Mock()
+        session.last_snapshot = popup
+        session.wait_for.return_value = village
+        self.assertIs(return_to_village(session, initial_snapshot=popup), village)
+        session.tap.assert_called_once_with(popup, [655, 601],
+                                             reason="Dismiss observed welcome-back summary")
+        session.back.assert_not_called()
+        self.assertNotIn("popup", session.wait_for.call_args.args[0])
+
     def test_current_initial_snapshot_is_reused_without_recapture(self) -> None:
         clock = FakeClock()
         before, after = frame(0, "disconnected"), frame(1, "village")

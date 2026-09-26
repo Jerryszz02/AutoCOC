@@ -1,0 +1,9 @@
+id = "single_edge"
+label = "普通兵单边投放"
+army_mode = "captured"
+
+[[steps]]
+action = "deploy_troop"
+unit_id = "*"
+count = "all"
+edge = "first"

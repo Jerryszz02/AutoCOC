@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from autococ.capture import CaptureClient, ScreenshotCapture
+from autococ.adb import ADBResult
 from autococ.config import MuMuConfig, load_config
 from autococ.device import DisplayTarget
 from autococ.errors import AdbError, CaptureError, DeviceConnectionError, FlowError, MuMuDisplayUnavailable, StopRequested
@@ -60,6 +61,14 @@ class SessionTests(unittest.TestCase):
     def events(self) -> list[dict]:
         return [json.loads(line) for line in self.session.events_path.read_text(encoding="utf-8").splitlines()]
 
+    def launch_calls(self):
+        return [call for call in self.adb.run.call_args_list
+                if call.args and call.args[0] != ["shell", "dumpsys", "package", self.config.game.package_name]]
+
+    def package_calls(self):
+        return [call for call in self.adb.run.call_args_list
+                if call.args and call.args[0] == ["shell", "dumpsys", "package", self.config.game.package_name]]
+
     def test_unknown_or_low_confidence_observation_cannot_click(self) -> None:
         for scene, confidence in (("unknown", 0.99), ("village", 0.79)):
             with self.subTest(scene=scene, confidence=confidence):
@@ -107,6 +116,21 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(snapshot.observations["capture_method"], "unknown")
         self.assertEqual(snapshot.observations["capture_elapsed_sec"], .01)
 
+    def test_observation_times_capture_and_recognition_separately(self):
+        def capture(path):
+            self.clock.advance(.4)
+            return ScreenshotCapture(path, 2560, 1440, .4)
+
+        def recognize(path):
+            self.clock.advance(4.7)
+            return SceneSnapshot("village", .95, path)
+
+        self.capture.capture_screenshot_artifact.side_effect = capture
+        self.recognizer.recognize.side_effect = recognize
+        snapshot = self.session.observe()
+        self.assertAlmostEqual(snapshot.observations["recognition_elapsed_sec"], 4.7)
+        self.assertAlmostEqual(snapshot.observations["observation_elapsed_sec"], 5.1)
+
     def test_nonfinite_confidence_cannot_click(self) -> None:
         for confidence in (float("nan"), float("inf")):
             with self.subTest(confidence=confidence):
@@ -115,6 +139,17 @@ class SessionTests(unittest.TestCase):
                 with self.assertRaises(FlowError):
                     self.session.tap(snapshot, (100, 200), reason="invalid confidence")
         self.adb.run.assert_not_called()
+
+    def test_explicit_battle_purpose_preserves_previous_snapshot_and_new_capture_age(self):
+        previous = self.session.observe("before")
+        slot = {"bbox": [100, 590, 190, 710]}
+        self.recognizer.recognize_battle.side_effect = lambda path, **kwargs: SceneSnapshot("battle", .95, path)
+        self.clock.advance(2)
+        snapshot = self.session.observe("any-label", purpose="troop_count", slot=slot)
+        self.recognizer.recognize_battle.assert_called_once_with(snapshot.screenshot_path,
+            purpose="troop_count", slot=slot, previous=previous)
+        self.assertEqual(snapshot.observations["observed_at_monotonic"], self.clock.now)
+        self.assertIs(self.session.last_snapshot, snapshot)
 
     def test_stale_or_noncurrent_snapshot_cannot_click(self) -> None:
         previous = self.session.observe("previous")
@@ -147,6 +182,66 @@ class SessionTests(unittest.TestCase):
             snapshot = self.session.observe()
             self.session.tap(snapshot, point, reason="valid")
         self.assertEqual(self.adb.run.call_args.args[0], ["shell", "input", "-d", "2", "tap", "2558", "1438"])
+
+    def battle_bar_frame(self):
+        snapshot = self.session.observe("battle-toolbar")
+        snapshot = replace(snapshot, scene="battle")
+        snapshot.observations["battle"] = {"slots": [
+            {"kind": "troop", "bbox": [x, 595, x + 89, 711], "point": [x + 44, 653],
+             "count": 2, "confidence": 0, "evidence": {
+                 "method": "independent_card_border", "count": {"confidence": .99}}}
+            for x in (112, 208)]}
+        self.session.last_snapshot = snapshot
+        return snapshot
+
+    def test_battle_bar_swipe_stays_in_toolbar_and_invalidates_old_coordinates(self):
+        with patch.object(self.session.context, "swipe") as swipe:
+            first = self.battle_bar_frame()
+            self.session.swipe_battle_bar(first, direction="left", reason="Find a hidden spell")
+            x1, y1, x2, y2, duration = swipe.call_args.args
+            self.assertTrue(1280 > x1 > x2 > 0)
+            self.assertTrue(595 < y1 == y2 < 711)
+            self.assertTrue(300 <= duration <= 1000)
+            self.assertIsNone(self.session.last_snapshot)
+            with self.assertRaisesRegex(FlowError, "obsolete"):
+                self.session.tap(first, (156, 653), reason="Old viewport must not be used")
+            second = self.battle_bar_frame()
+            self.session.swipe_battle_bar(second, direction="right", reason="Find own unit")
+            self.assertLess(swipe.call_args.args[0], swipe.call_args.args[2])
+        self.assertEqual(self.session.action_count, 2)
+        self.assertEqual(len([e for e in self.events() if e["kind"] == "swipe_battle_bar"]), 2)
+        self.adb.run.assert_not_called()
+
+    def test_battle_bar_swipe_rejects_unverified_scene_anchor_and_stale_frame(self):
+        for case in ("scene", "missing", "one_card", "map_card", "unknown", "direction", "stale", "stop"):
+            with self.subTest(case=case):
+                snapshot = self.battle_bar_frame()
+                slots = snapshot.observations["battle"]["slots"]
+                direction = "left"
+                if case == "scene":
+                    snapshot = replace(snapshot, scene="unknown")
+                    self.session.last_snapshot = snapshot
+                elif case == "missing":
+                    snapshot.observations["battle"] = {}
+                elif case == "one_card":
+                    slots.pop()
+                elif case == "map_card":
+                    slots[0]["bbox"][1] = 450
+                elif case == "unknown":
+                    for card in slots:
+                        card["evidence"]["count"]["confidence"] = .5
+                elif case == "direction":
+                    direction = "up"
+                elif case == "stale":
+                    self.clock.advance(31)
+                else:
+                    self.session.stop_event = Event()
+                    self.session.stop_event.set()
+                with self.assertRaises((FlowError, StopRequested)):
+                    self.session.swipe_battle_bar(snapshot, direction=direction, reason="Unverified")
+                self.session.stop_event = None
+        self.adb.run.assert_not_called()
+        self.assertEqual(self.session.action_count, 0)
 
     def test_template_point_uses_screenshot_scale_exactly_once(self) -> None:
         snapshot = self.session.observe()
@@ -320,7 +415,8 @@ class SessionTests(unittest.TestCase):
 
     def test_launch_resolves_actual_display_after_start(self) -> None:
         order = []
-        self.adb.run.side_effect = lambda *args, **kwargs: order.append("launch")
+        self.adb.run.side_effect = lambda args, **kwargs: order.append(
+            "metadata" if args[:3] == ["shell", "dumpsys", "package"] else "launch")
 
         def actual_display(*args, **kwargs):
             order.append("resolve")
@@ -328,7 +424,7 @@ class SessionTests(unittest.TestCase):
 
         with patch("autococ.session.resolve_game_display", side_effect=actual_display), patch("autococ.session.ScreenshotRecognizer"):
             session = GameSession.connect(self.config, self.adb, "test-device", self.root / "connected", launch=True)
-        self.assertEqual(order, ["launch", "resolve"])
+        self.assertEqual(order, ["launch", "resolve", "metadata"])
         self.assertEqual(session.capture.input_display_id, 2)
         self.assertEqual(session.capture.screenshot_display_id, "physical-two")
         self.assertTrue(session.capture.prefer_raw)
@@ -338,7 +434,8 @@ class SessionTests(unittest.TestCase):
             with patch("autococ.session.ScreenshotRecognizer"):
                 session = GameSession.connect(self.config, self.adb, "test-device", self.root / "connected", launch=True)
         self.assertEqual(resolve.call_count, 2)
-        self.assertEqual(self.adb.run.call_count, 1)
+        self.assertEqual(len(self.launch_calls()), 1)
+        self.assertEqual(len(self.package_calls()), 1)
         self.assertEqual(session.capture.input_display_id, 2)
 
     def test_session_duration_includes_launch_time(self) -> None:
@@ -354,7 +451,8 @@ class SessionTests(unittest.TestCase):
         with patch("autococ.session.resolve_game_display", return_value=DisplayTarget(2, "physical-two")) as resolve:
             with patch("autococ.session.ScreenshotRecognizer"):
                 session = GameSession.connect(self.config, self.adb, "test-device", self.root / "connected", launch=True)
-        self.adb.run.assert_not_called()
+        self.assertEqual(self.launch_calls(), [])
+        self.assertEqual(len(self.package_calls()), 1)
         resolve.assert_called_once()
         self.assertEqual(session.capture.input_display_id, 2)
         event = json.loads(session.events_path.read_text(encoding="utf-8").splitlines()[0])
@@ -367,8 +465,9 @@ class SessionTests(unittest.TestCase):
         with patch("autococ.session.resolve_game_display", return_value=DisplayTarget(2, "physical-two")):
             with patch("autococ.session.ScreenshotRecognizer"):
                 session = GameSession.connect(self.config, self.adb, "test-device", self.root / "connected", launch=True)
-        self.assertEqual(self.adb.run.call_count, 1)
-        self.assertIn("monkey", self.adb.run.call_args.args[0])
+        self.assertEqual(len(self.launch_calls()), 1)
+        self.assertIn("monkey", self.launch_calls()[0].args[0])
+        self.assertEqual(len(self.package_calls()), 1)
         event = json.loads(session.events_path.read_text(encoding="utf-8").splitlines()[0])
         self.assertTrue(event["launch_issued"])
         self.assertFalse(event["reused_foreground"])
@@ -378,7 +477,30 @@ class SessionTests(unittest.TestCase):
             with patch("autococ.session.ScreenshotRecognizer"):
                 GameSession.connect(self.config, self.adb, "test-device", self.root / "connected", launch=False)
         self.foreground_package.assert_not_called()
-        self.adb.run.assert_not_called()
+        self.assertEqual(self.launch_calls(), [])
+        self.assertEqual(len(self.package_calls()), 1)
+
+    def test_client_package_version_is_recorded_without_raw_dump(self) -> None:
+        dump = "Package [com.supercell.clashofclans]\n    versionCode=180600008 minSdk=23\n    versionName=18.600.7\n"
+        self.adb.run.return_value = ADBResult(("adb",), 0, dump, "")
+        with patch("autococ.session.resolve_game_display", return_value=DisplayTarget(2, "physical-two")), \
+                patch("autococ.session.ScreenshotRecognizer"):
+            session = GameSession.connect(self.config, self.adb, "test-device", self.root / "versioned", launch=False)
+        self.assertEqual(session.client_version, "18.600.7")
+        self.assertEqual(session.client_version_code, 180600008)
+        event = json.loads(session.events_path.read_text(encoding="utf-8").splitlines()[0])
+        self.assertEqual(event["client_version"], "18.600.7")
+        self.assertEqual(event["client_version_code"], 180600008)
+        self.assertNotIn("Package [", str(event))
+
+    def test_client_package_query_failure_does_not_block_connection(self) -> None:
+        self.adb.run.side_effect = AdbError("package service busy")
+        with patch("autococ.session.resolve_game_display", return_value=DisplayTarget(2, "physical-two")), \
+                patch("autococ.session.ScreenshotRecognizer"):
+            session = GameSession.connect(self.config, self.adb, "test-device", self.root / "unknown-version", launch=False)
+        self.assertEqual(session.client_version, "unknown")
+        self.assertIsNone(session.client_version_code)
+        self.assertEqual(len(self.package_calls()), 1)
 
     def test_native_startup_reresolves_display_after_renderer_attachment_delay(self) -> None:
         config = replace(self.config, mumu=MuMuConfig(self.root, 1))
@@ -392,7 +514,8 @@ class SessionTests(unittest.TestCase):
         self.assertEqual([c.args[4] for c in connect.call_args_list], [2, 3])
         self.assertEqual(session.capture.screenshot_display_id, "new")
         self.assertIs(session.native, native)
-        self.assertEqual(self.adb.run.call_count, 1)
+        self.assertEqual(len(self.launch_calls()), 1)
+        self.assertEqual(len(self.package_calls()), 1)
         native.tap.assert_not_called()
 
     def test_native_startup_does_not_retry_configuration_or_other_sdk_failures(self) -> None:

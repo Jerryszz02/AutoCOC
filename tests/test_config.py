@@ -76,7 +76,16 @@ class ConfigTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.toml"
             path.write_text('[battle]\nobjective = "trophies"\n', encoding="utf-8")
-            with self.assertRaisesRegex(ConfigError, "only 'resources'"):
+            with self.assertRaisesRegex(ConfigError, "resources, event or clan_games"):
+                load_config(path)
+
+    def test_two_edge_strategy_loads_and_unknown_strategy_is_rejected(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text('[battle]\nstrategy = "two_edge"\n', encoding="utf-8")
+            self.assertEqual(load_config(path).battle.strategy, "two_edge")
+            path.write_text('[battle]\nstrategy = "guess"\n', encoding="utf-8")
+            with self.assertRaises(ConfigError):
                 load_config(path)
 
     def test_legacy_weights_are_explicitly_ignored_for_existing_local_configs(self) -> None:
@@ -89,7 +98,8 @@ class ConfigTests(unittest.TestCase):
 
     def test_direct_battle_config_validates_supported_goal_and_limits(self) -> None:
         for kwargs in ({"objective": "win_rate"}, {"min_expected_resources": -1},
-                       {"max_searches": 0}, {"deploy_timeout_sec": False}):
+                       {"max_searches": 0}, {"deploy_timeout_sec": False},
+                       {"settlement_timeout_sec": 0}, {"settlement_timeout_sec": True}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ConfigError):
                 BattleConfig(**kwargs)
 

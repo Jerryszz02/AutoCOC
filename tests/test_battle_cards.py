@@ -10,11 +10,122 @@ import cv2
 import numpy as np
 
 from autococ.ocr import OCRText
+from autococ.scene import SceneSnapshot
+from autococ.strategy_execution import _match_card
+from autococ.unit_catalog import recognize_card_identity
 from autococ.vision import ScreenshotRecognizer
 
 
 class BattleCardTests(unittest.TestCase):
     root = Path(__file__).resolve().parents[1]
+
+    def test_deployed_duke_keeps_named_binding_only_with_own_card_and_hp(self) -> None:
+        # Held-out 00076 card from the same observed select/tap/deploy chain
+        # that produced the 00075 portrait catalog variant.
+        image = cv2.imdecode(np.fromfile(
+            self.root / "tests/fixtures/hero-duke-deployed-20260926.png",
+            dtype=np.uint8), cv2.IMREAD_COLOR)
+        with TemporaryDirectory() as directory:
+            for mode in ("complete", "wrong_version", "missing_left", "missing_right",
+                         "missing_bottom", "missing_hp"):
+                with self.subTest(mode=mode):
+                    changed = image.copy()
+                    if mode == "missing_left":
+                        changed[625:695, 597:603] = 0
+                    elif mode == "missing_right":
+                        changed[625:695, 685:691] = 0
+                    elif mode == "missing_bottom":
+                        changed[703:715, 607:681] = 0
+                    elif mode == "missing_hp":
+                        changed[567:581, 605:683] = 0
+                    path = Path(directory) / f"duke-{mode}.png"
+                    cv2.imencode(".png", changed)[1].tofile(path)
+                    vision = ScreenshotRecognizer(provider=Mock())
+                    vision.client_version = "18.600.8" if mode == "wrong_version" else "18.600.7"
+                    observation = vision._battle_observation(path, [], "battle")
+                    duke = [card for card in observation["slots"] if card["unit_id"] == "dragon_duke"]
+                    if mode == "complete":
+                        self.assertEqual(len(duke), 1)
+                        card = _match_card(SceneSnapshot("battle", .99, path, {"battle": observation}),
+                                           "dragon_duke", "hero")
+                        self.assertEqual(card["bbox"], [599, 595, 689, 711])
+                        self.assertGreaterEqual(card["confidence"], .97)
+                    else:
+                        self.assertEqual(duke, [])
+
+    def test_unequipped_duke_card_needs_versioned_face_and_both_borders(self) -> None:
+        # Redacted card crop from hero-only-1 scout frame 00011. The top-left
+        # icon is absent, so the old whole-colour contour omits this hero.
+        crop = cv2.imdecode(np.fromfile(
+            self.root / "tests/fixtures/hero-duke-no-icon-scout-20260926.png",
+            dtype=np.uint8), cv2.IMREAD_COLOR)
+        with TemporaryDirectory() as directory:
+            for mode in ("complete", "wrong_version", "missing_left", "missing_right", "missing_bottom"):
+                with self.subTest(mode=mode):
+                    image = np.zeros((720, 1280, 3), dtype=np.uint8)
+                    image[565:715, 590:700] = crop
+                    if mode == "missing_left":
+                        image[625:695, 597:603] = 0
+                    elif mode == "missing_right":
+                        image[625:695, 685:691] = 0
+                    elif mode == "missing_bottom":
+                        image[703:715, 607:681] = 0
+                    path = Path(directory) / f"{mode}.png"
+                    cv2.imwrite(str(path), image)
+                    vision = ScreenshotRecognizer(provider=Mock())
+                    vision.client_version = "18.600.8" if mode == "wrong_version" else "18.600.7"
+                    observation = vision._battle_observation(path, [], "enemy_village")
+                    frame = SceneSnapshot("enemy_village", .99, path, {"battle": observation})
+                    if mode == "complete":
+                        card = _match_card(frame, "dragon_duke", "hero")
+                        self.assertEqual(card["bbox"], [599, 595, 689, 711])
+                        self.assertGreaterEqual(card["confidence"], .97)
+                    else:
+                        self.assertFalse(any(card["unit_id"] == "dragon_duke"
+                                             for card in observation["slots"]))
+                        if mode != "wrong_version":
+                            identity = recognize_card_identity(
+                                image, (599, 595, 689, 711), "hero", client_version="18.600.7")
+                            self.assertEqual(identity["unit_id"], "dragon_duke")
+            portrait = cv2.imdecode(np.fromfile(
+                self.root / "assets/catalogs/units/dragon_duke_battle_18_600_7.png",
+                dtype=np.uint8), cv2.IMREAD_COLOR)
+            edge = np.zeros((720, 1280, 3), dtype=np.uint8)
+            edge[636:636 + portrait.shape[0], 2:2 + portrait.shape[1]] = portrait
+            path = Path(directory) / "edge-face-without-card.png"
+            cv2.imwrite(str(path), edge)
+            vision = ScreenshotRecognizer(provider=Mock())
+            vision.client_version = "18.600.7"
+            self.assertFalse(any(card["unit_id"] == "dragon_duke" for card in
+                                 vision._battle_observation(path, [], "enemy_village")["slots"]))
+
+    def test_deployed_and_used_hero_cards_keep_named_strategy_binding(self) -> None:
+        # Redacted card crops from the controlled Warden deploy/ability frames.
+        for phase in ("deployed", "used"):
+            with self.subTest(phase=phase):
+                crop = cv2.imdecode(np.fromfile(
+                    self.root / f"tests/fixtures/hero-warden-{phase}-card-20260922.png",
+                    dtype=np.uint8), cv2.IMREAD_COLOR)
+                image = np.zeros((720, 1280, 3), dtype=np.uint8)
+                image[565:715, 595:695] = crop
+                with TemporaryDirectory() as directory:
+                    path = Path(directory) / "battle.png"
+                    cv2.imwrite(str(path), image)
+                    vision = ScreenshotRecognizer(provider=Mock())
+                    vision.client_version = "18.600.7"
+                    observation = vision._battle_observation(path, [], "battle")
+                    frame = SceneSnapshot("battle", .99, path, {"battle": observation})
+                    card = _match_card(frame, "grand_warden", "hero")
+                    self.assertEqual(card["bbox"], [599, 595, 688, 711])
+                    self.assertGreaterEqual(card["confidence"], .9)
+                    vision.client_version = "18.600.8"
+                    wrong_version = vision._battle_observation(path, [], "battle")["slots"]
+                    self.assertFalse(any(slot["unit_id"] == "grand_warden" for slot in wrong_version))
+                    vision.client_version = "18.600.7"
+                    image[708:714, 607:680] = 0
+                    cv2.imwrite(str(path), image)
+                    no_bottom = vision._battle_observation(path, [], "battle")["slots"]
+                    self.assertFalse(any(slot["unit_id"] == "grand_warden" for slot in no_bottom))
 
     def fixture(self, directory: str, number: int) -> tuple[Path, list[OCRText], str]:
         folder = self.root / directory
@@ -38,6 +149,58 @@ class BattleCardTests(unittest.TestCase):
             left, top, right, bottom = slot["bbox"]
             self.assertGreaterEqual(right - left, 80)
             self.assertGreaterEqual(bottom - top, 105)
+
+    def test_live_scout_recovers_leftmost_meteor_card_at_screen_edge(self) -> None:
+        # The real 18.600.7 scout frame's first card has only .724 cyan side
+        # support where it meets the map. Its own x8 label, edge gradients and
+        # bottom border must locate it without inferring a missing army slot.
+        path = self.root / "tests/fixtures/scout_battle_bar_20260926.png"
+        texts = [OCRText(value, .98, bbox) for value, bbox in (
+            ("x8", (61, 592, 104, 622)), ("x2", (160, 592, 200, 621)),
+            ("x1", (264, 594, 295, 621)), ("x1", (358, 592, 392, 622)),
+        )]
+        slots = self.observe((path, texts, "enemy_village"))
+        self.assert_independent(slots)
+        self.assertEqual([slot["count"] for slot in slots if slot["kind"] == "troop"], [8, 2, 1, 1])
+        self.assertEqual(slots[0]["bbox"], [16, 595, 104, 711])
+
+    def test_zoomed_battle_bar_refines_header_overlap_without_losing_neighbors(self) -> None:
+        path = self.root / "tests/fixtures/zoomed_battle_bar_20260926.png"
+        texts = [OCRText(value, .99, bbox) for value, bbox in (
+            ("x8", (61, 592, 104, 622)), ("x2", (161, 592, 200, 621)),
+            ("x1", (264, 594, 295, 621)), ("x1", (360, 594, 392, 621)),
+        )]
+        vision = ScreenshotRecognizer(provider=Mock())
+        vision.client_version = "18.600.7"
+        slots = vision._battle_observation(path, texts, "enemy_village")["slots"]
+        self.assert_independent(slots)
+        troops = [slot for slot in slots if slot["kind"] == "troop"]
+        self.assertEqual([(slot["count"], slot["unit_id"]) for slot in troops],
+                         [(8, "meteor_golem"), (2, "bowler"), (1, "wall_breaker"), (1, "archer")])
+
+    def test_swiped_real_bar_recovers_all_four_spell_cards_without_guessing_low_ocr(self) -> None:
+        expected = ["totem_spell", "overgrowth_spell", "revival_spell", "freeze_spell"]
+        for label, revival_confidence, revival_count in (("first", .99878, 1),
+                                                          ("middle", .82878, None),
+                                                          ("last", .99878, 1)):
+            with self.subTest(frame=label):
+                path = self.root / f"tests/fixtures/swiped_battle_bar_{label}_20260926.png"
+                texts = [OCRText(value, confidence, bbox) for value, confidence, bbox in (
+                    ("x3", .9988, (930, 592, 970, 622)),
+                    ("x2", .99802, (1027, 592, 1066, 622)),
+                    ("x1", revival_confidence, (1128, 593, 1164, 622)),
+                    ("x2", .9984, (1221, 592, 1260, 622)),
+                )]
+                vision = ScreenshotRecognizer(provider=Mock())
+                vision.client_version = "18.600.7"
+                slots = vision._battle_observation(path, texts, "enemy_village")["slots"]
+                spells = [slot for slot in slots if slot["kind"] == "spell"]
+                self.assertEqual([slot["unit_id"] for slot in spells], expected)
+                self.assertEqual([slot["count"] for slot in spells], [3, 2, revival_count, 2])
+                self.assert_independent(slots)
+                vision.client_version = "18.600.8"
+                mismatched = vision._battle_observation(path, texts, "enemy_village")["slots"]
+                self.assertFalse(any(slot["unit_id"] in expected for slot in mismatched))
 
     def test_background_bridges_do_not_duplicate_siege_or_split_last_spell(self) -> None:
         fixtures = (("reports/live-20260922/terrain-stop-check-015411", 1),

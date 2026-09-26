@@ -12,6 +12,167 @@ class HeroStateTests(unittest.TestCase):
     root = Path(__file__).resolve().parents[1]
     slot = [599, 595, 688, 711]
 
+    low_health_slot = [499, 588, 594, 713]
+
+    def low_health_fixture(self, phase: str) -> Path:
+        return self.root / f"tests/fixtures/hero-warden-low-hp-{phase}-20260926.png"
+
+    def test_current_low_health_warden_requires_three_ready_anchors(self) -> None:
+        state = recognize_hero_state(self.low_health_fixture("ready"), self.low_health_slot,
+                                     unit_id="grand_warden", client_version="18.600.7")
+        self.assertEqual(state["state"], "ability_ready")
+        self.assertTrue(state["deployed"])
+        self.assertTrue(state["ability_ready"])
+        self.assertFalse(state["ability_used"])
+        self.assertIsNone(state["defeated"])
+        self.assertIsNone(state["evidence"]["health_bar"])
+        ready = state["evidence"]["ability_ready"]
+        self.assertEqual(ready["phase_portrait"]["phase"], "ready")
+        self.assertGreaterEqual(ready["phase_portrait"]["confidence"], .9)
+        self.assertGreaterEqual(ready["active_equipment"]["confidence"], .9)
+        self.assertGreaterEqual(ready["card_book_glow"]["confidence"], .9)
+        self.assertIsNone(ready["gray_equipment"])
+        self.assertIsNone(ready["gray_card_book"])
+        for unit_id, version in (("archer_queen", "18.600.7"), ("grand_warden", "unknown"),
+                                 ("grand_warden", None), (None, "18.600.7")):
+            with self.subTest(unit_id=unit_id, version=version):
+                wrong = recognize_hero_state(self.low_health_fixture("ready"), self.low_health_slot,
+                                             unit_id=unit_id, client_version=version)
+                self.assertIsNone(wrong["deployed"])
+                self.assertIsNone(wrong["ability_ready"])
+
+    def test_gray_low_health_card_and_undeployed_card_are_not_ready_or_used(self) -> None:
+        for path, slot in ((self.low_health_fixture("gray"), self.low_health_slot),
+                           (self.root / "tests/fixtures/hero-border-before.png", [502, 592, 591, 711])):
+            with self.subTest(path=path.name):
+                state = recognize_hero_state(path, slot, unit_id="grand_warden", client_version="18.600.7")
+                self.assertEqual(state["state"], "unknown")
+                self.assertIsNone(state["deployed"])
+                self.assertIsNone(state["ability_ready"])
+                self.assertIsNone(state["ability_used"])
+                self.assertIsNone(state["defeated"])
+        gray = recognize_hero_state(self.low_health_fixture("gray"), self.low_health_slot,
+                                    unit_id="grand_warden", client_version="18.600.7")
+        self.assertEqual(gray["evidence"]["phase_portrait"]["phase"], "used")
+        self.assertIsNone(gray["evidence"]["health_bar"])
+
+    def test_low_health_ready_fails_when_any_independent_anchor_is_destroyed(self) -> None:
+        original = cv2.imdecode(np.fromfile(self.low_health_fixture("ready"), dtype=np.uint8), cv2.IMREAD_COLOR)
+        regions = {"phase_portrait": (545, 598, 581, 627),
+                   "active_equipment": (507, 532, 541, 563),
+                   "card_book_glow": (520, 651, 580, 677)}
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "one-anchor-missing.png"
+            for name, (left, top, right, bottom) in regions.items():
+                with self.subTest(anchor=name):
+                    image = original.copy()
+                    image[top:bottom, left:right] = (30, 30, 30)
+                    cv2.imencode(".png", image)[1].tofile(path)
+                    state = recognize_hero_state(path, self.low_health_slot,
+                                                 unit_id="grand_warden", client_version="18.600.7")
+                    self.assertIsNone(state["deployed"])
+                    self.assertIsNone(state["ability_ready"])
+                    self.assertIsNone(state["ability_used"])
+                    self.assertIsNone(state["defeated"])
+
+    def duke_card_image(self) -> np.ndarray:
+        # Redacted 100x150 card crop from daily-combined-4 scout frame 00039.
+        crop = cv2.imdecode(np.fromfile(self.root / "tests/fixtures/hero-duke-undeployed-20260926.png",
+                                          dtype=np.uint8), cv2.IMREAD_COLOR)
+        image = np.zeros((720, 1280, 3), dtype=np.uint8)
+        image[565:715, 595:695] = crop
+        return image
+
+    def test_current_frame_portrait_allows_petless_duke_but_not_stale_identity(self) -> None:
+        slot = [599, 595, 690, 711]
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "duke.png"
+            cv2.imwrite(str(path), self.duke_card_image())
+            state = recognize_hero_state(path, slot, unit_id="dragon_duke", client_version="18.600.7")
+            self.assertEqual(state["evidence"]["portrait_identity"]["unit_id"], "dragon_duke")
+            self.assertNotIn("pet_anchor", state["evidence"])
+            self.assertFalse(state["selected"])
+            self.assertIsNone(state["deployed"])
+            self.assertIsNone(state["ability_ready"])
+            for unit_id, version in (("archer_queen", "18.600.7"), ("dragon_duke", "unknown")):
+                with self.subTest(unit_id=unit_id, version=version):
+                    mismatch = recognize_hero_state(path, slot, unit_id=unit_id, client_version=version)
+                    self.assertEqual(mismatch["state"], "unknown")
+                    self.assertIsNone(mismatch["selected"])
+                    self.assertIsNone(mismatch["deployed"])
+                    self.assertEqual(mismatch["evidence"]["reason"], "current_frame_hero_identity_unverified")
+
+    def test_petless_duke_requires_enclosed_hp_and_never_infers_ability(self) -> None:
+        image = self.duke_card_image()
+        slot = [599, 595, 690, 711]
+        # Controlled counterfactual: only the HP-frame pixels are changed. This
+        # exercises the geometry without claiming a live Duke deployment sample.
+        image[575:588, 605:684] = 25
+        image[579:585, 608:650] = (0, 240, 0)
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "hp.png"
+            cv2.imwrite(str(path), image)
+            state = recognize_hero_state(path, slot, unit_id="dragon_duke", client_version="18.600.7")
+            self.assertTrue(state["deployed"])
+            self.assertFalse(state["defeated"])
+            self.assertIsNone(state["ability_ready"])
+            self.assertIsNone(state["ability_used"])
+            image[575:579, 605:684] = 220
+            cv2.imwrite(str(path), image)
+            no_frame = recognize_hero_state(path, slot, unit_id="dragon_duke", client_version="18.600.7")
+            self.assertIsNone(no_frame["deployed"])
+
+    def test_real_duke_deployed_phase_requires_fresh_portrait_and_enclosed_hp(self) -> None:
+        # Source and held-out frames are consecutive real battle observations;
+        # the fixture retains only the Duke card and its HP frame.
+        path = self.root / "tests/fixtures/hero-duke-deployed-20260926.png"
+        slot = [599, 595, 690, 711]
+        state = recognize_hero_state(path, slot, unit_id="dragon_duke", client_version="18.600.7")
+        self.assertEqual(state["state"], "deployed")
+        self.assertTrue(state["deployed"])
+        self.assertEqual(state["evidence"]["portrait_identity"]["unit_id"], "dragon_duke")
+        self.assertIn("dragon_duke_battle_deployed", state["evidence"]["portrait_identity"]["evidence"][0]["template"])
+        self.assertGreaterEqual(min(state["evidence"]["health_bar"]["frame_support"]), .85)
+        self.assertIsNone(state["ability_ready"])
+        self.assertIsNone(state["ability_used"])
+        for unit_id, version in (("archer_queen", "18.600.7"), ("dragon_duke", "unknown")):
+            with self.subTest(unit_id=unit_id, version=version):
+                wrong = recognize_hero_state(path, slot, unit_id=unit_id, client_version=version)
+                self.assertEqual(wrong["state"], "unknown")
+                self.assertIsNone(wrong["deployed"])
+        image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        with TemporaryDirectory() as directory:
+            modified = Path(directory) / "modified.png"
+            for region in ((638, 636, 683, 678), (605, 567, 683, 581)):
+                with self.subTest(region=region):
+                    changed = image.copy()
+                    left, top, right, bottom = region
+                    changed[top:bottom, left:right] = (20, 20, 20)
+                    cv2.imencode(".png", changed)[1].tofile(modified)
+                    result = recognize_hero_state(modified, slot, unit_id="dragon_duke",
+                                                  client_version="18.600.7")
+                    self.assertIsNone(result["deployed"])
+
+    def test_selected_border_still_needs_fresh_hero_portrait(self) -> None:
+        path = self.root / "tests/fixtures/hero-border-selected.png"
+        slot = [502, 592, 591, 711]
+        selected = recognize_hero_state(path, slot, unit_id="grand_warden", client_version="18.600.7")
+        self.assertTrue(selected["selected"])
+        self.assertIsNone(selected["deployed"])
+        wrong = recognize_hero_state(path, slot, unit_id="dragon_duke", client_version="18.600.7")
+        self.assertIsNone(wrong["selected"])
+
+    def test_selected_border_with_shaded_segment_requires_a_closed_outline(self) -> None:
+        folder = self.root / "tests/fixtures"
+        slot = [502, 592, 591, 711]
+        before = recognize_hero_state(folder / "hero-border-before.png", slot)
+        selected = recognize_hero_state(folder / "hero-border-selected.png", slot)
+        self.assertFalse(before["selected"])
+        self.assertTrue(selected["selected"])
+        self.assertEqual(selected["state"], "selected")
+        self.assertIsNone(selected["deployed"])
+        self.assertIsNone(selected["ability_ready"])
+
     def fixture(self, number: int) -> Path:
         folder = self.root / "reports/live-20260922/hero-state-023106/frames"
         matches = list(folder.glob(f"{number:05d}-*.png"))

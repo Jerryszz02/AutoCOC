@@ -1,0 +1,88 @@
+{
+  "source_run": "20260926-191908-280941-2dc82804",
+  "source_frame": "00077-strategy-end-battle.png",
+  "source_sha256": "7f0a56a6ef1ae10ade4bd261e43b7621c0850b01b51bfa69b5f5b492e6714c0f",
+  "note": "Actual frame resized to baseline; only surrender dialog, timer and end control retained. All other areas blacked out.",
+  "ocr": [
+    {
+      "text": "离战斗结束还有：",
+      "confidence": 0.99915,
+      "bbox": [
+        565,
+        14,
+        722,
+        40
+      ]
+    },
+    {
+      "text": "2分钟40秒",
+      "confidence": 0.99984,
+      "bbox": [
+        552,
+        36,
+        728,
+        80
+      ]
+    },
+    {
+      "text": "放弃？",
+      "confidence": 0.99757,
+      "bbox": [
+        592,
+        204,
+        685,
+        248
+      ]
+    },
+    {
+      "text": "首领，我们还没有取得战斗的胜利，现在撤退我",
+      "confidence": 0.9997,
+      "bbox": [
+        369,
+        292,
+        912,
+        324
+      ]
+    },
+    {
+      "text": "们将丢失奖杯，您确定要下达撤退命令吗？",
+      "confidence": 0.99335,
+      "bbox": [
+        394,
+        328,
+        881,
+        360
+      ]
+    },
+    {
+      "text": "取消",
+      "confidence": 0.99984,
+      "bbox": [
+        468,
+        446,
+        528,
+        484
+      ]
+    },
+    {
+      "text": "确定",
+      "confidence": 1.0,
+      "bbox": [
+        746,
+        446,
+        810,
+        486
+      ]
+    },
+    {
+      "text": "放弃",
+      "confidence": 0.99856,
+      "bbox": [
+        74,
+        528,
+        110,
+        551
+      ]
+    }
+  ]
+}

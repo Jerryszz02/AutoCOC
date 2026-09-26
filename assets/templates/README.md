@@ -1,5 +1,12 @@
 # Resource collection templates
 
+`battle_event_super_pekka.png` is the observed extra gray event troop portrait from
+`reports/20260925-155528-356263-da52437c/frames/00012-deploy-west-edge.png`.
+The 1280x720 `INTER_AREA` baseline crop is `(98, 627, 176, 679)`; it excludes the
+quantity. A separate high-confidence `xN` reading is required. The battle-bar
+regression fixture is cropped from the same calibration frame, not an independent
+live deployment validation. This event card is not present in the My Army manifest.
+
 These templates are cropped from the observed Chinese home village screenshot
 `reports/live-20260922/request-open.png` captured on 2026-09-22. Despite that
 exploration filename, the frame shows the village with a selected wall; it is

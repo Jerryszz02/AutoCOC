@@ -1,0 +1,58 @@
+# Named-unit example, not a promise that this account has all required samples/unlocks.
+id = "mixed-air-example"
+label = "气球雷龙混合示例"
+army_mode = "recipe"
+
+[[army.units]]
+unit_id = "balloon"
+count = 12
+[[army.units]]
+unit_id = "electro_dragon"
+count = 8
+[[army.units]]
+unit_id = "grand_warden"
+count = 1
+[[army.units]]
+unit_id = "rage_spell"
+count = 2
+
+[[steps]]
+action = "deploy_troop"
+unit_id = "balloon"
+count = 6
+edge = "first"
+[[steps]]
+action = "deploy_troop"
+unit_id = "electro_dragon"
+count = 8
+edge = "two"
+[[steps]]
+action = "deploy_troop"
+unit_id = "balloon"
+count = 6
+edge = "second"
+[[steps]]
+action = "deploy_hero"
+unit_id = "grand_warden"
+edge = "midpoint"
+[[steps]]
+action = "wait"
+unit_id = "grand_warden"
+target = "hero_ready"
+timeout_sec = 15
+[[steps]]
+action = "activate_ability"
+unit_id = "grand_warden"
+[[steps]]
+action = "cast_spell"
+unit_id = "rage_spell"
+count = 1
+target = "relative:first_midpoint"
+[[steps]]
+action = "wait"
+delay_sec = 2
+[[steps]]
+action = "cast_spell"
+unit_id = "rage_spell"
+count = 1
+target = "relative:second_midpoint"

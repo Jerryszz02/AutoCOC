@@ -1,0 +1,12 @@
+{
+  "client": "18.600.7",
+  "version_code": 180600008,
+  "source_frame": "reports/live-army-editor-probe/frames/00002-resume-army-after.png",
+  "source_bbox_1280": [
+    662,
+    195,
+    704,
+    221
+  ],
+  "meaning": "observed troop x1 count glyph and following empty header area; independent siege x1 glyph corroborates number one"
+}

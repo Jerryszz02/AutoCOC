@@ -127,6 +127,9 @@ class MuMuClient:
     def back(self) -> None:
         self._request("back")
 
+    def zoom_out(self) -> None:
+        self._request("zoom_out")
+
     def close(self) -> None:
         if self.closed:
             return
@@ -256,6 +259,35 @@ class _Renderer:
             self.checked(self.lib.nemu_input_event_key_up(self.handle, self.display, 158))
         return {}
 
+    def zoom_out(self) -> dict:
+        """Pinch both fingers toward the map center using the native pointer IDs."""
+        self.check_display()
+        paths = [(round(x1 * self.width / 1280), round(350 * self.height / 720),
+                  round(x2 * self.width / 1280)) for x1, x2 in ((320, 610), (960, 670))]
+        for x1, y, x2 in paths:
+            self.point(x1, y)
+            self.point(x2, y)
+        try:
+            for finger, (x1, y, _) in enumerate(paths, 1):
+                self.checked(self.lib.nemu_input_event_finger_touch_down(self.handle, self.display, finger, x1, y))
+            time.sleep(.35)
+            started = time.monotonic()
+            while True:
+                fraction = min((time.monotonic() - started) / 1.2, 1)
+                for finger, (x1, y, x2) in enumerate(paths, 1):
+                    self.checked(self.lib.nemu_input_event_finger_touch_down(
+                        self.handle, self.display, finger, round(x1 + (x2 - x1) * fraction), y))
+                if fraction == 1:
+                    break
+                time.sleep(.02)
+            time.sleep(.15)
+        finally:
+            codes = [self.lib.nemu_input_event_finger_touch_up(self.handle, self.display, finger)
+                     for finger in (1, 2)]
+            for code in codes:
+                self.checked(code)
+        return {}
+
     def close(self) -> None:
         if self.handle:
             self.lib.nemu_disconnect(self.handle)
@@ -275,7 +307,7 @@ def _worker(connection, dll: str, root: str, index: int, package: str, display: 
             operation, args = connection.recv()
             if operation == "close":
                 break
-            if operation not in {"capture", "tap", "swipe", "back"}:
+            if operation not in {"capture", "tap", "swipe", "back", "zoom_out"}:
                 raise FlowError("Unknown MuMu operation")
             connection.send(getattr(renderer, operation)(*args))
     except Exception as exc:

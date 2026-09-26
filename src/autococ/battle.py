@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import re
 
 from .config import BattleConfig
+from .strategies import is_line_strategy
 
 
 RESOURCE_PATTERN = re.compile(r"(?P<number>\d[\d.,]*)(?P<suffix>[kKmM]?)")
@@ -58,6 +59,29 @@ def score_target(target: BattleTarget, config: BattleConfig, *, searches: int = 
     total = target.gold_elixir_total
     if searches > config.max_searches:
         return BattleScore(target, total, False, False, ("search limit exceeded",))
+    if config.resource_filter is not None:
+        rule = config.resource_filter
+        rule.validate()
+        if not rule.enabled:
+            return BattleScore(target, total, True, False, ("resource filtering disabled",))
+        checks = (("gold", target.gold, rule.min_gold), ("elixir", target.elixir, rule.min_elixir),
+                  ("dark_elixir", target.dark_elixir, rule.min_dark_elixir),
+                  ("gold_elixir", total, rule.min_total))
+        reasons = []
+        for name, amount, minimum in checks:
+            if minimum is None:
+                continue
+            if type(amount) is not int or amount < 0:
+                reasons.append(f"{name} unreadable")
+            elif amount < minimum:
+                reasons.append(f"{name}={amount}; below minimum={minimum}")
+        accepted = not reasons
+        if not accepted and searches == config.max_searches:
+            reasons.append("search limit reached")
+        return BattleScore(target, total, accepted, not accepted and searches < config.max_searches,
+                           tuple(reasons or ("all resource floors met",)))
+    if is_line_strategy(config.strategy):
+        return BattleScore(target, total, True, False, ("first clear opponent for round count",))
     should_attack = total is not None and total >= config.min_expected_resources
     reason = "resource floor met" if should_attack else "resource floor not met"
     if total is None:
@@ -104,4 +128,3 @@ def basic_deployment_plan(points: tuple[tuple[int, int], ...]) -> DeploymentPlan
         for index, (x, y) in enumerate(points)
     )
     return DeploymentPlan(reason="basic edge deployment", steps=steps)
-

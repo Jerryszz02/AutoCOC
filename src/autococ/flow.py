@@ -6,12 +6,13 @@ import logging
 import math
 from threading import Event
 import time
+from uuid import uuid4
 
 from .actions import AutomationContext
 from .adb import ADBClient
 from .config import AppConfig
 from .errors import FlowError, StopRequested
-from .recovery import recover_connection
+from .recovery import confirm_welcome_back, recover_connection, welcome_back_point
 from .reporting import RunStats, TaskResult, capture_run_provenance, write_report
 from .scene import SceneSnapshot
 from .session import GameSession
@@ -24,12 +25,20 @@ FlowFunction = Callable[[AutomationContext], None]
 def return_to_village(session: GameSession, *, initial_snapshot: SceneSnapshot | None = None):
     exit_scenes = {"training", "request", "donation", "clan_chat", "search", "popup"}
     snapshot = initial_snapshot if initial_snapshot is not None else session.observe("home-check")
+    welcome_confirmed = False
     for exits in range(5):
         session.check_deadline()
         if snapshot.scene == "village":
             break
         if exits == 4:
             raise FlowError("Village recovery exceeded four verified scene exits")
+        if snapshot.scene == "popup" and welcome_back_point(snapshot) is not None:
+            if not welcome_confirmed:
+                confirm_welcome_back(session, snapshot)
+                welcome_confirmed = True
+            snapshot = session.wait_for((exit_scenes | {"village", "settlement"}) - {"popup"},
+                                        timeout_sec=20, label="welcome-home")
+            continue
         if snapshot.scene in exit_scenes:
             session.back(snapshot, reason=f"Return from {snapshot.scene} before selected task")
             snapshot = session.wait_for((exit_scenes | {"village", "settlement"}) - {snapshot.scene},
@@ -40,8 +49,11 @@ def return_to_village(session: GameSession, *, initial_snapshot: SceneSnapshot |
         else:
             snapshot = session.wait_for({"village"} | exit_scenes,
                                         timeout_sec=session.config.game.startup_timeout_sec, label="starting-home")
-    controls = {button["name"] for button in snapshot.observations.get("buttons", [])}
-    if not math.isfinite(snapshot.confidence) or snapshot.confidence < 0.8 or not {"attack", "shop"} <= controls:
+    buttons = snapshot.observations.get("buttons", [])
+    if (not math.isfinite(snapshot.confidence) or snapshot.confidence < 0.8
+            or not isinstance(buttons, list)
+            or any(sum(button.get("name") == name for button in buttons if isinstance(button, dict)) != 1
+                   for name in ("attack", "shop"))):
         raise FlowError("Village is not verified by confident scene and both navigation controls")
     return snapshot
 
@@ -72,6 +84,10 @@ class FlowRunner:
     def _check_stop(self) -> None:
         if self.stop_event is not None and self.stop_event.is_set():
             raise StopRequested("interrupted by user")
+
+    def run_routine(self, routine) -> RunStats:
+        from .daily import run_routine
+        return run_routine(self, routine)
 
     def _notify(self, kind: str, **data: object) -> None:
         if self.progress is not None:
@@ -131,6 +147,9 @@ class FlowRunner:
                                            launch="launch" in profile.enabled_tasks, logger=self.logger,
                                            **connection_options)
             stats.events_path = session.events_path
+            version = getattr(session, "client_version", None)
+            if isinstance(version, str) and version:
+                stats.provenance["client_version"] = version
             while True:
                 self._check_stop()
                 stop = stops.check()
@@ -154,6 +173,14 @@ class FlowRunner:
                         frame = session.last_snapshot
                         result = TaskResult(task, "failed", str(exc), elapsed_sec=time.monotonic() - started,
                                             evidence=[frame.screenshot_path] if frame else [])
+                    if task == "battle":
+                        result = replace(result, metrics={**result.metrics,
+                                         "receipt_kind": "battle", "battle_id": uuid4().hex})
+                        if (result.metrics.get("returned_home") is True and
+                                type(result.metrics.get("rounds_completed")) is int and
+                                result.metrics["rounds_completed"] == 1):
+                            stats.battles_completed += 1
+                            stats.battles_won += int(result.metrics.get("victory") is True)
                     stats.record_task(result)
                     active_task = None
                     self._record_resolution(session, stats)

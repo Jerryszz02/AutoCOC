@@ -58,6 +58,10 @@ enabled_tasks = ["launch", "battle"]
 enabled_tasks = ["launch", "request", "donate"]
 
 [battle]
+# two_edge: event troops first, then ordinary troops, split across two edges.
+# edrag_line: troops in bar order on one edge, then heroes at its midpoint; no abilities.
+# Both choose the first opponent and exclude siege/spells. verified keeps resource mode.
+strategy = "two_edge"
 # Implemented objective: observed gold + elixir; dark elixir is reported separately.
 objective = "resources"
 # Attack only when both amounts are readable and their sum reaches this threshold.
@@ -65,6 +69,9 @@ min_expected_resources = 300000
 # Maximum observed candidates, including the first. Never attack below the threshold to exhaust this budget.
 max_searches = 30
 deploy_timeout_sec = 180
+# Optional independent wait for settlement after deployment. If omitted, reuses
+# deploy_timeout_sec for compatibility. Session/task deadlines still apply.
+# settlement_timeout_sec = 300
 
 [reporting]
 write_markdown = true
