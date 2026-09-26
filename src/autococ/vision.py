@@ -561,9 +561,17 @@ class ScreenshotRecognizer:
                      and max(.9, self.ocr_config.confidence_threshold) <= item["confidence"] <= 1]
         matches = [re.fullmatch(r"[xX×]\s*([0-9]+)", item["text"].strip()) for item in confident]
         counts = {int(match[1]) for match in matches if match is not None}
-        ambiguous = any(match is None for match in matches)
+        # A thresholded selected-card border can read as a standalone line.
+        # Only those explicit line shapes are decoration; every other
+        # unparsed high-confidence read still makes the quantity uncertain.
+        decorative_lines = {"一", "-", "—", "─"}
+        ambiguous = any(match is None and item["text"].strip() not in decorative_lines
+                        for item, match in zip(confident, matches, strict=True))
         count = next(iter(counts)) if len(counts) == 1 and not ambiguous else None
-        return {"count": count, "confidence": max((item["confidence"] for item in confident), default=0.0),
+        confidence = (max((item["confidence"] for item, match in zip(confident, matches, strict=True)
+                           if match is not None and int(match[1]) == count), default=0.0)
+                      if count is not None else max((item["confidence"] for item in confident), default=0.0))
+        return {"count": count, "confidence": confidence,
                 "frame": str(path), "slot_bbox": list(bbox), "roi": list(roi), "readings": reads,
                 "count_bbox": list(count_bbox) if count_bbox is not None else None, "line_roi": list(line_roi),
                 "reason": "explicit_header_count" if count is not None else "header_count_unverified"}

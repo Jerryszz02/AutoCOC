@@ -14,6 +14,64 @@ from autococ.settlement import BONUS_TEMPLATE_CROPS, locate_number_line, recogni
 from autococ.vision import ScreenshotRecognizer
 
 
+class EarnedStarShapeTests(unittest.TestCase):
+    root = Path(__file__).resolve().parents[1]
+
+    def star_region(self, name: str) -> np.ndarray:
+        crop = cv2.imdecode(np.fromfile(self.root / "tests/fixtures" / name, dtype=np.uint8),
+                            cv2.IMREAD_COLOR)
+        image = np.zeros((720, 1280, 3), np.uint8)
+        image[65:220, 430:845] = crop
+        return image
+
+    def test_two_real_complete_one_star_outlines(self):
+        # Crops from hero-follow-1 frame 00060 and the earlier 20260924
+        # victory reread frame 00061; neither needs victory text for counting.
+        for name in ("settlement-star-hero-follow-20260926.png",
+                     "settlement-star-old-victory-20260924.png"):
+            with self.subTest(source=name):
+                result = recognize_earned_stars(self.star_region(name))
+                self.assertEqual(result["count"], 1)
+                self.assertEqual(len(result["evidence"]["shapes"]), 1)
+                self.assertEqual(len(result["evidence"]["shapes"][0]["concavity_depths"]), 5)
+
+    def test_complete_two_and_three_star_outlines(self):
+        for count in (2, 3):
+            with self.subTest(count=count):
+                image = np.zeros((720, 1280, 3), np.uint8)
+                for index in range(count):
+                    points = []
+                    for vertex in range(10):
+                        angle = -math.pi / 2 + vertex * math.pi / 5 + (index - 1) * .12
+                        radius = 60 if vertex % 2 == 0 else 27
+                        points.append([round(510 + 135 * index + math.cos(angle) * radius),
+                                       round(143 + math.sin(angle) * radius)])
+                    cv2.fillPoly(image, [np.array(points, np.int32)], (240, 240, 240))
+                self.assertEqual(recognize_earned_stars(image)["count"], count)
+
+    def test_occlusion_and_decorations_do_not_become_earned_stars(self):
+        for mode in ("covered_tip", "extra_rectangle", "extra_circle", "blank"):
+            with self.subTest(mode=mode):
+                image = self.star_region("settlement-star-hero-follow-20260926.png")
+                if mode == "covered_tip":
+                    image[80:116, 495:546] = 0
+                elif mode == "extra_rectangle":
+                    image[90:205, 610:705] = 240
+                elif mode == "extra_circle":
+                    cv2.circle(image, (660, 148), 50, (240, 240, 240), -1)
+                else:
+                    image[65:220, 430:845] = 0
+                self.assertIsNone(recognize_earned_stars(image)["count"])
+
+    def test_old_three_star_screen_with_clipped_middle_star_stays_unknown(self):
+        # The 20260926-004627 frame shows three stars, but the middle contour
+        # touches this detector's top ROI and overlaps the percent label.
+        result = recognize_earned_stars(self.star_region("settlement-star-clipped-three-20260926.png"))
+        self.assertEqual(len(result["evidence"]["shapes"]), 3)
+        self.assertEqual(sum(shape["verified"] for shape in result["evidence"]["shapes"]), 2)
+        self.assertIsNone(result["count"])
+
+
 class SparseSettlementNumberTests(unittest.TestCase):
     root = Path(__file__).resolve().parents[1]
     fixture_directory = root / "reports/cleanup-partial-battle-20260924-021726"

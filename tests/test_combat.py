@@ -552,7 +552,11 @@ class CombatTests(unittest.TestCase):
             active.observe("partial-deployment")
             raise DeploymentError("Final quantity unreadable", partial_receipt=partial)
         session.deploy = fail_after_start
+        phases = []
+        session.progress_callback = phases.append
         result = battle(session)
+        self.assertIn("投放核验失败，等待结算", phases)
+        self.assertNotIn("等待结算", phases)
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.reason, "Final quantity unreadable")
         self.assertEqual(session.deploy_calls, 1)

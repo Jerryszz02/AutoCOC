@@ -115,3 +115,9 @@
 英雄跟进续作：TOML 执行器重验当帧英雄头像，以选中边框、闭合血条及独立技能前后样本分别判断状态；完整观察层补上部署／技能后英雄卡定位。原目录 9 张历史实图的完整命名卡链回放 9/9，记录 `reports/verification/hero-phase-replay.json`，不是本轮实机验收。龙公爵技能仍未知，部署仍待新实机。
 
 对应全量回归 **806 passed、126 skipped、408 subtests passed**（`reports/verification/pytest-20260926-224017.json`），运行代码指纹不变。
+
+`reports/hero-follow-1/run-20260926-224324-712317-ca6fcbc5.json` 使用 `8a3ca9e`，计划普通兵后跟进英雄，但普通兵第七次投放时，原图已从雷龙 x4 变 x3，局部有效 x3 被阈值 OCR 的非数量线条否决，因此未走到英雄步骤。随后结算胜利页的星形计数也无法核验，最终失败并回村；报告完成场数 1 不表示本次英雄或完整部署验收成功。两处失败证据独立保留。
+
+针对上述失败，数量 OCR 仅允许明确线条噪声不构成冲突，xN 冲突、近形字符及未知词继续拒绝；星形轮廓的近似仅滤除细小锯齿，仍要求完整五角与五个深凹，遮挡和被截断的旧三星画面保持未知。运行进度会即时显示“投放核验失败，等待结算”。
+
+修复后全量 **813 passed、126 skipped、427 subtests passed**（`reports/verification/pytest-20260926-230223.json`）；历史实图 **127 passed、145 subtests passed**（`reports/verification/historical-replay-final.json`），两轮源码指纹不变；依赖及编译检查通过。

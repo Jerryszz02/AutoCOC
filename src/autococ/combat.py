@@ -250,7 +250,8 @@ def run_battle(session: GameSession) -> TaskResult:
             raise FlowError("Deployment receipt has no screenshot evidence")
         evidence.extend(Path(path) for path in deployment_evidence)
 
-        progress("等待结算")
+        progress("等待结算" if deployment.get("completed") is True
+                 else "投放核验失败，等待结算")
         settlement_timeout = session.config.battle.settlement_timeout_sec or session.config.battle.deploy_timeout_sec
         settlement_frame = deployed if deployed.scene == "settlement" else session.wait_for(
             {"settlement"}, timeout_sec=settlement_timeout + (35 if cleanup_only else 0), label="battle-settlement",
