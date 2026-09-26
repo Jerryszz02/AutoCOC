@@ -67,6 +67,30 @@ class BattleCardTests(unittest.TestCase):
         self.assertEqual([(slot["count"], slot["unit_id"]) for slot in troops],
                          [(8, "meteor_golem"), (2, "bowler"), (1, "wall_breaker"), (1, "archer")])
 
+    def test_swiped_real_bar_recovers_all_four_spell_cards_without_guessing_low_ocr(self) -> None:
+        expected = ["totem_spell", "overgrowth_spell", "revival_spell", "freeze_spell"]
+        for label, revival_confidence, revival_count in (("first", .99878, 1),
+                                                          ("middle", .82878, None),
+                                                          ("last", .99878, 1)):
+            with self.subTest(frame=label):
+                path = self.root / f"tests/fixtures/swiped_battle_bar_{label}_20260926.png"
+                texts = [OCRText(value, confidence, bbox) for value, confidence, bbox in (
+                    ("x3", .9988, (930, 592, 970, 622)),
+                    ("x2", .99802, (1027, 592, 1066, 622)),
+                    ("x1", revival_confidence, (1128, 593, 1164, 622)),
+                    ("x2", .9984, (1221, 592, 1260, 622)),
+                )]
+                vision = ScreenshotRecognizer(provider=Mock())
+                vision.client_version = "18.600.7"
+                slots = vision._battle_observation(path, texts, "enemy_village")["slots"]
+                spells = [slot for slot in slots if slot["kind"] == "spell"]
+                self.assertEqual([slot["unit_id"] for slot in spells], expected)
+                self.assertEqual([slot["count"] for slot in spells], [3, 2, revival_count, 2])
+                self.assert_independent(slots)
+                vision.client_version = "18.600.8"
+                mismatched = vision._battle_observation(path, texts, "enemy_village")["slots"]
+                self.assertFalse(any(slot["unit_id"] in expected for slot in mismatched))
+
     def test_background_bridges_do_not_duplicate_siege_or_split_last_spell(self) -> None:
         fixtures = (("reports/live-20260922/terrain-stop-check-015411", 1),
                     ("reports/20260923-015217-869637-e2129181", 13))

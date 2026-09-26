@@ -482,6 +482,22 @@
       "state": "active",
       "client_version": "18.600.7",
       "version_code": 180600008
+    },
+    {
+      "unit_id": "freeze_spell",
+      "surface": "battle",
+      "path": "units/freeze_spell_battle_18_600_7.png",
+      "source_frame": "tests/fixtures/swiped_battle_bar_last_20260926.png",
+      "source_bbox_1280": [
+        1192,
+        636,
+        1237,
+        678
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008,
+      "evidence": "ice-vial portrait visually agrees with earlier army-surface freeze sample; no information-panel proof; battle card count x2 read separately"
     }
   ]
 }

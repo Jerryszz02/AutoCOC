@@ -879,9 +879,52 @@ class ScreenshotRecognizer:
             return next((y for y in range(706, 716) if rows[y - 699] < .3
                          and np.all(rows[y - 702:y - 699] >= .8)), None)
 
+        def edge_backed_card(left: int, right: int) -> bool:
+            """Recover a bordered card whose moving art masks cyan side pixels.
+
+            This stricter alternative needs both partial colour sides, its own
+            opposite-directed long edges, a closed bottom and one exact count
+            on the current frame. The count never supplies card identity.
+            """
+            if left < 3 or right > 1277 or not 80 <= right - left <= 105:
+                return False
+            sides = [max(float((mask[625:695, start + shift:start + shift + 3] > 0).mean())
+                         for shift in (-2, -1, 0, 1, 2)) for start in (left, right - 3)]
+            if min(sides) < .4 or edge_direction[left] < 250 or edge_direction[right - 1] > -250:
+                return False
+            if colored_bottom(left, right) is None:
+                return False
+            counts = []
+            for item in texts:
+                if (item.bbox is None or not math.isfinite(item.confidence)
+                        or not max(.9, self.ocr_config.confidence_threshold) <= item.confidence <= 1
+                        or not re.fullmatch(r"[xX×]\s*[0-9]+", item.text.strip())):
+                    continue
+                box = scale_box(item.bbox, from_resolution=self.baseline_resolution,
+                                to_resolution=(1280, 720))
+                cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+                if left <= cx <= right and 588 <= cy <= 627:
+                    counts.append(item)
+            if len(counts) == 1:
+                return True
+            if counts:
+                return False
+            # A transient low-confidence quantity should not erase a card
+            # with its own borders and a verified versioned portrait. Its
+            # quantity remains unknown until a later fresh OCR observation.
+            from .unit_catalog import recognize_card_identity
+
+            identities = [recognize_card_identity(
+                image, (left, 595, right, 711), kind, surface="battle",
+                client_version=self.client_version) for kind in ("troop", "spell")]
+            return sum(identity["unit_id"] is not None and
+                       isinstance(identity["confidence"], (int, float)) and
+                       identity["confidence"] >= .97 for identity in identities) == 1
+
         for contour in contours:
             left, top, width, height = cv2.boundingRect(contour)
-            if not (80 <= width <= 105 and 105 <= height <= 125 and supported_sides(left, left + width)):
+            if not (80 <= width <= 105 and 105 <= height <= 125 and
+                    (supported_sides(left, left + width) or edge_backed_card(left, left + width))):
                 continue
             boxes.append((left, max(590, top + 585), left + width, min(715, top + 585 + height)))
 
@@ -1048,12 +1091,19 @@ class ScreenshotRecognizer:
             identity = recognize_card_identity(image, box, kind, surface="battle",
                                                client_version=self.client_version)
             if kind == "unknown":
+                spell_identity = recognize_card_identity(
+                    image, box, "spell", surface="battle",
+                    client_version=self.client_version)
                 # A hero's pet and equipment can change independently of the
                 # hero. A sampled face may establish hero identity even when
                 # the old pet-icon classifier has no matching template.
                 hero_identity = recognize_card_identity(image, box, "hero", surface="battle",
                                                         client_version=self.client_version)
-                if hero_identity["unit_id"] is not None:
+                if (spell_identity["unit_id"] is not None
+                        and spell_identity["confidence"] >= .97
+                        and hero_identity["unit_id"] is None):
+                    kind, identity = "spell", spell_identity
+                elif hero_identity["unit_id"] is not None:
                     kind, identity = "hero", hero_identity
             if is_event and identity["unit_id"] is None:
                 # The legacy event portrait is not in the versioned unit
