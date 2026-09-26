@@ -1078,10 +1078,52 @@ class ScreenshotRecognizer:
         # pet icon. A versioned, hero-specific face proposes a card, but its
         # own opposing side edges and bottom boundary must also be present.
         from .hero_state import HERO_PHASE_TEMPLATE_IDS
-        from .unit_catalog import template_manifest
+        from .unit_catalog import CATALOG_ROOT, recognize_card_identity, template_manifest
 
         phase_cards = []
-        if self.client_version == template_manifest()["client"]:
+        catalog = template_manifest()
+        if self.client_version == catalog["client"]:
+            # Duke's unequipped card can lose the top-left coloured icon, which
+            # splits its contour. Its versioned face only proposes a location;
+            # both long card sides and the closed bottom must confirm it.
+            duke_entries = [entry for entry in catalog["templates"]
+                            if entry.get("unit_id") == "dragon_duke"
+                            and entry.get("surface") == "battle"
+                            and entry.get("client_version") == self.client_version]
+            for entry in duke_entries:
+                relative = entry.get("path")
+                if not isinstance(relative, str):
+                    continue
+                template_path = (CATALOG_ROOT / relative).resolve()
+                if not template_path.is_relative_to(CATALOG_ROOT.resolve()) or not template_path.is_file():
+                    continue
+                portrait = read_template(template_path)
+                if portrait is None:
+                    continue
+                region = image[625:690]
+                score_map = cv2.matchTemplate(region, portrait, cv2.TM_CCOEFF_NORMED)
+                score_map[~np.isfinite(score_map)] = -1
+                _, score, _, point = cv2.minMaxLoc(score_map)
+                anchor_x, anchor_y = point[0], point[1] + 625
+                if score < .97 or not 632 <= anchor_y <= 640 or anchor_x < 20:
+                    continue
+                # The sampled face begins about 20 px inside its own card.
+                left = max(range(max(3, anchor_x - 24), anchor_x - 16),
+                           key=lambda x: edge_direction[x])
+                right = left + 90
+                box = (left, 595, right, 711)
+                if not (80 <= right - left <= 105 and right <= 1277
+                        and edge_direction[left] >= 250
+                        and min(edge_direction[right - 4:right]) <= -150
+                        and supported_sides(left, right)
+                        and colored_bottom(left, right) == 711):
+                    continue
+                identity = recognize_card_identity(image, box, "hero", surface="battle",
+                                                   client_version=self.client_version)
+                if identity["unit_id"] != "dragon_duke" or identity["confidence"] < .97:
+                    continue
+                if not any(min(right, old[2]) > max(left, old[0]) for old in boxes):
+                    boxes.append(box)
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             for hero_id, template_hero in HERO_PHASE_TEMPLATE_IDS.items():
                 for phase in ("ready", "used"):

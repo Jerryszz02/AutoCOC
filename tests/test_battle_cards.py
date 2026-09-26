@@ -12,11 +12,58 @@ import numpy as np
 from autococ.ocr import OCRText
 from autococ.scene import SceneSnapshot
 from autococ.strategy_execution import _match_card
+from autococ.unit_catalog import recognize_card_identity
 from autococ.vision import ScreenshotRecognizer
 
 
 class BattleCardTests(unittest.TestCase):
     root = Path(__file__).resolve().parents[1]
+
+    def test_unequipped_duke_card_needs_versioned_face_and_both_borders(self) -> None:
+        # Redacted card crop from hero-only-1 scout frame 00011. The top-left
+        # icon is absent, so the old whole-colour contour omits this hero.
+        crop = cv2.imdecode(np.fromfile(
+            self.root / "tests/fixtures/hero-duke-no-icon-scout-20260926.png",
+            dtype=np.uint8), cv2.IMREAD_COLOR)
+        with TemporaryDirectory() as directory:
+            for mode in ("complete", "wrong_version", "missing_left", "missing_right", "missing_bottom"):
+                with self.subTest(mode=mode):
+                    image = np.zeros((720, 1280, 3), dtype=np.uint8)
+                    image[565:715, 590:700] = crop
+                    if mode == "missing_left":
+                        image[625:695, 597:603] = 0
+                    elif mode == "missing_right":
+                        image[625:695, 685:691] = 0
+                    elif mode == "missing_bottom":
+                        image[703:715, 607:681] = 0
+                    path = Path(directory) / f"{mode}.png"
+                    cv2.imwrite(str(path), image)
+                    vision = ScreenshotRecognizer(provider=Mock())
+                    vision.client_version = "18.600.8" if mode == "wrong_version" else "18.600.7"
+                    observation = vision._battle_observation(path, [], "enemy_village")
+                    frame = SceneSnapshot("enemy_village", .99, path, {"battle": observation})
+                    if mode == "complete":
+                        card = _match_card(frame, "dragon_duke", "hero")
+                        self.assertEqual(card["bbox"], [599, 595, 689, 711])
+                        self.assertGreaterEqual(card["confidence"], .97)
+                    else:
+                        self.assertFalse(any(card["unit_id"] == "dragon_duke"
+                                             for card in observation["slots"]))
+                        if mode != "wrong_version":
+                            identity = recognize_card_identity(
+                                image, (599, 595, 689, 711), "hero", client_version="18.600.7")
+                            self.assertEqual(identity["unit_id"], "dragon_duke")
+            portrait = cv2.imdecode(np.fromfile(
+                self.root / "assets/catalogs/units/dragon_duke_battle_18_600_7.png",
+                dtype=np.uint8), cv2.IMREAD_COLOR)
+            edge = np.zeros((720, 1280, 3), dtype=np.uint8)
+            edge[636:636 + portrait.shape[0], 2:2 + portrait.shape[1]] = portrait
+            path = Path(directory) / "edge-face-without-card.png"
+            cv2.imwrite(str(path), edge)
+            vision = ScreenshotRecognizer(provider=Mock())
+            vision.client_version = "18.600.7"
+            self.assertFalse(any(card["unit_id"] == "dragon_duke" for card in
+                                 vision._battle_observation(path, [], "enemy_village")["slots"]))
 
     def test_deployed_and_used_hero_cards_keep_named_strategy_binding(self) -> None:
         # Redacted card crops from the controlled Warden deploy/ability frames.

@@ -121,3 +121,9 @@
 针对上述失败，数量 OCR 仅允许明确线条噪声不构成冲突，xN 冲突、近形字符及未知词继续拒绝；星形轮廓的近似仅滤除细小锯齿，仍要求完整五角与五个深凹，遮挡和被截断的旧三星画面保持未知。运行进度会即时显示“投放核验失败，等待结算”。
 
 修复后全量 **813 passed、126 skipped、427 subtests passed**（`reports/verification/pytest-20260926-230223.json`）；历史实图 **127 passed、145 subtests passed**（`reports/verification/historical-replay-final.json`），两轮源码指纹不变；依赖及编译检查通过。
+
+英雄独立采样使用 `1384f20`：`reports/hero-only-1/` 在龙公爵卡片预检失败前未投放单位，完成场数为 0；后续空场结算另由正式回村流程恢复（`reports/disconnect-recovery-c112af63/result.json`），不补计成功。`reports/hero-three-1/` 已发出一次咏王部署，原图显示落地且首个有效帧已为低血量红条，现有绿色血条核验未接受，后续英雄和技能均未继续；完成场数仍为 0，不能当作英雄技能通过。
+
+低血量咏王只在当前版本身份、ready 人像、彩色金书与卡片辉光同帧匹配且 used 图像均不匹配时确认部署及技能就绪；不从红条推断存活，灰卡仍不能证明技能已用。龙公爵初始卡左上图标缺失时，需独立头像、两侧边框及底边共同定位；错误版本或缺边保持未知。两处均以脱敏真帧及逐项破坏反例覆盖，后续混合打法仍须另做实机验收。
+
+上述修复全量回归 **817 passed、126 skipped、441 subtests passed**；历史实图 **127 passed、145 subtests passed**，测试期间运行代码指纹不变。依赖及 diff 检查通过。

@@ -174,14 +174,14 @@ def recognize_hero_state(
         result["state"] = "selected"
     # A pet can be reassigned: the Warden-specific lower-card and book images must
     # both match before interpreting this pet-equipped card as this ready layout.
-    if health is not None and pet is not None and Path(pet["template"]).name == "battle_hero_pet_0.png" and (unit_id is None or unit_id == "grand_warden"):
+    if pet is not None and Path(pet["template"]).name == "battle_hero_pet_0.png" and (unit_id is None or unit_id == "grand_warden"):
         active = _match(image, TEMPLATES / "hero_warden_active_book.png", (x0, 510, x1, 573))
         glows = [_match(image, TEMPLATES / name, (x0, 620, x1, 690))
                  for name in ("hero_warden_ready_card.png", "hero_warden_ready_card_phase.png")]
         glow = max((item for item in glows if item is not None), key=lambda item: item["confidence"], default=None)
         used_book = _match(image, TEMPLATES / "hero_warden_used_book.png", (x0, 510, x1, 573))
         used_card = _match(image, TEMPLATES / "hero_warden_used_card.png", (x0, 620, x1, 690))
-        if active is not None and glow is not None:
+        if health is not None and active is not None and glow is not None:
             result.update(state="ability_ready", ability_ready=True, ability_used=False)
             evidence["ability_ready"] = {
                 "hero": "grand_warden", "equipment_layout": "observed_gold_book",
@@ -189,13 +189,30 @@ def recognize_hero_state(
                 "template_source": WARDEN_TEMPLATE_SOURCE,
                 "card_template_source": WARDEN_READY_PHASE_SOURCE if Path(glow["template"]).name.endswith("_phase.png") else WARDEN_TEMPLATE_SOURCE,
             }
-        elif used_book is not None and used_card is not None:
+        elif health is not None and used_book is not None and used_card is not None:
             result.update(state="ability_used", ability_ready=False, ability_used=True)
             evidence["ability_used"] = {
                 "hero": "grand_warden", "equipment_layout": "observed_gold_book",
                 "gray_equipment": used_book, "gray_card_book": used_card,
                 "template_source": WARDEN_USED_TEMPLATE_SOURCE,
             }
+        elif health is None and unit_id == "grand_warden":
+            # Low health can remove the green fill before the next observation.
+            # Three independent current-card anchors must still prove this exact
+            # ready layout; a red bar or a selected border alone proves nothing.
+            phase_portrait = evidence.get("phase_portrait") or _hero_phase_portrait(image, box, unit_id)
+            evidence["phase_portrait"] = phase_portrait
+            if (phase_portrait is not None and phase_portrait["phase"] == "ready"
+                    and active is not None and glow is not None
+                    and used_book is None and used_card is None):
+                result.update(state="ability_ready", deployed=True, ability_ready=True, ability_used=False)
+                evidence["ability_ready"] = {
+                    "hero": "grand_warden", "equipment_layout": "observed_gold_book_low_health",
+                    "phase_portrait": phase_portrait, "active_equipment": active, "card_book_glow": glow,
+                    "gray_equipment": used_book, "gray_card_book": used_card,
+                    "template_source": WARDEN_TEMPLATE_SOURCE,
+                    "card_template_source": WARDEN_READY_PHASE_SOURCE if Path(glow["template"]).name.endswith("_phase.png") else WARDEN_TEMPLATE_SOURCE,
+                }
     elif health is not None and pet is not None and Path(pet["template"]).name in HERO_ABILITY_SAMPLES:
         hero, _, ready_frame, used_frame = HERO_ABILITY_SAMPLES[Path(pet["template"]).name]
         if unit_id is not None and unit_id != hero:
