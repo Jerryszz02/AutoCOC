@@ -515,6 +515,262 @@
       "state": "active",
       "client_version": "18.600.7",
       "version_code": 180600008
+    },
+    {
+      "unit_id": "electro_dragon",
+      "surface": "army",
+      "path": "units/electro_dragon_army_18_600_7.png",
+      "source_frame": "reports/live-army-editor-probe/frames/00002-resume-army-after.png",
+      "source_bbox_1280": [
+        580,
+        226,
+        625,
+        268
+      ],
+      "information_panel": "reports/resume-sampling/frames/00002-electro-info-after.png",
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "dragon_rider",
+      "surface": "army",
+      "path": "units/dragon_rider_army_18_600_7.png",
+      "source_frame": "reports/live-army-editor-probe/frames/00002-resume-army-after.png",
+      "source_bbox_1280": [
+        683,
+        226,
+        728,
+        268
+      ],
+      "information_panel": "reports/resume-sampling/frames/00002-rocket-info-after.png",
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "balloon",
+      "surface": "army",
+      "path": "units/balloon_army_18_600_7.png",
+      "source_frame": "reports/live-army-editor-probe/frames/00002-resume-army-after.png",
+      "source_bbox_1280": [
+        785,
+        226,
+        830,
+        268
+      ],
+      "information_panel": "reports/resume-sampling/frames/00002-balloon-info-after.png",
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "lightning_spell",
+      "surface": "army",
+      "path": "units/lightning_spell_army_18_600_7.png",
+      "source_frame": "reports/live-army-editor-probe/frames/00002-resume-army-after.png",
+      "source_bbox_1280": [
+        580,
+        405,
+        625,
+        447
+      ],
+      "information_panel": "reports/resume-sampling/frames/00002-lightning-info-after.png",
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "totem_spell",
+      "surface": "army",
+      "path": "units/totem_spell_army_current_18_600_7.png",
+      "source_frame": "reports/live-army-editor-probe/frames/00002-resume-army-after.png",
+      "source_bbox_1280": [
+        683,
+        405,
+        728,
+        447
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008,
+      "information_panel": "reports/resume-sampling/frames/00002-earthquake-info-after.png"
+    },
+    {
+      "unit_id": "lightning_spell",
+      "surface": "current_picker",
+      "path": "units/lightning_spell_picker_capacity_gray_18_600_7.png",
+      "source_frame": "reports/resume-sampling/frames/00002-spell-picker-after.png",
+      "source_bbox_1280": [
+        70,
+        460,
+        124,
+        513
+      ],
+      "state": "capacity_gray",
+      "client_version": "18.600.7",
+      "version_code": 180600008,
+      "information_panel": "reports/resume-sampling/frames/00002-lightning-info-after.png"
+    },
+    {
+      "unit_id": "totem_spell",
+      "surface": "current_picker",
+      "path": "units/totem_spell_picker_capacity_gray_18_600_7.png",
+      "source_frame": "reports/resume-sampling/frames/00002-spell-picker-after.png",
+      "source_bbox_1280": [
+        591,
+        597,
+        645,
+        650
+      ],
+      "state": "capacity_gray",
+      "client_version": "18.600.7",
+      "version_code": 180600008,
+      "information_panel": "reports/resume-sampling/frames/00002-earthquake-info-after.png"
+    },
+    {
+      "unit_id": "lightning_spell",
+      "surface": "current_picker",
+      "path": "units/lightning_spell_picker_active_18_600_7.png",
+      "source_frame": "reports/resume-sampling/frames/00001-spell-free-capacity-before.png",
+      "source_bbox_1280": [
+        70,
+        460,
+        124,
+        513
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008,
+      "information_panel": "reports/resume-sampling/frames/00002-lightning-info-after.png"
+    },
+    {
+      "unit_id": "totem_spell",
+      "surface": "current_picker",
+      "path": "units/totem_spell_picker_active_18_600_7.png",
+      "source_frame": "reports/resume-sampling/frames/00001-spell-free-capacity-before.png",
+      "source_bbox_1280": [
+        591,
+        597,
+        645,
+        650
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008,
+      "information_panel": "reports/resume-sampling/frames/00002-earthquake-info-after.png"
+    },
+    {
+      "unit_id": "troop_launcher",
+      "surface": "army",
+      "path": "units/troop_launcher_army_18_600_7.png",
+      "source_frame": "reports/live-army-editor-probe/frames/00002-resume-army-after.png",
+      "source_bbox_1280": [
+        1169,
+        398,
+        1214,
+        440
+      ],
+      "information_panel": "reports/resume-sampling/frames/00002-launcher-info-after.png",
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "sky_wagon",
+      "surface": "army",
+      "path": "units/sky_wagon_army_18_600_7.png",
+      "source_frame": "reports/live-army-editor-probe/frames/00002-resume-army-after.png",
+      "source_bbox_1280": [
+        1102,
+        398,
+        1147,
+        440
+      ],
+      "information_panel": "reports/resume-sampling/frames/00002-sky-wagon-info-after.png",
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "grand_warden",
+      "surface": "army_hero",
+      "role": "color_profile",
+      "path": "units/grand_warden_army_color_2_18_600_7.png",
+      "source_frame": "reports/resume-sampling/frames/00001-current-before-direct-before.png",
+      "source_bbox_1280": [
+        28,
+        220,
+        142,
+        540
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "dragon_duke",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/dragon_duke_army_face_3_18_600_7.png",
+      "source_frame": "reports/resume-sampling/frames/00001-current-before-direct-before.png",
+      "source_bbox_1280": [
+        195,
+        320,
+        230,
+        350
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "electro_dragon",
+      "surface": "battle",
+      "path": "units/electro_dragon_battle_current_18_600_7.png",
+      "source_frame": "reports/daily-combined-2/20260926-210910-681684-2ba05bed/frames/00039-scout-camera-ready.png",
+      "source_bbox_1280": [
+        109,
+        634,
+        154,
+        676
+      ],
+      "information_panel": "reports/resume-sampling/frames/00002-electro-info-after.png",
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "dragon_rider",
+      "surface": "battle",
+      "path": "units/dragon_rider_battle_current_18_600_7.png",
+      "source_frame": "reports/daily-combined-2/20260926-210910-681684-2ba05bed/frames/00039-scout-camera-ready.png",
+      "source_bbox_1280": [
+        206,
+        634,
+        251,
+        676
+      ],
+      "information_panel": "reports/resume-sampling/frames/00002-rocket-info-after.png",
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "balloon",
+      "surface": "battle",
+      "path": "units/balloon_battle_current_18_600_7.png",
+      "source_frame": "reports/daily-combined-2/20260926-210910-681684-2ba05bed/frames/00039-scout-camera-ready.png",
+      "source_bbox_1280": [
+        303,
+        634,
+        348,
+        676
+      ],
+      "information_panel": "reports/resume-sampling/frames/00002-balloon-info-after.png",
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
     }
   ]
 }

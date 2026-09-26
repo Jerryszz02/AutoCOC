@@ -179,6 +179,10 @@ def run_routine(runner, routine: RoutineConfig) -> RunStats:
                 if task.kind == "event":
                     scoring = last_progress.values.get("scoring_condition")
                     if scoring == "destroy_building":
+                        if not task.strategy_file:
+                            record(TaskResult(task.id, "not_supported", "Event building tasks require a configured targeted strategy",
+                                              evidence=list(last_progress.evidence)))
+                            break
                         session.config = replace(session.config, battle=replace(session.config.battle,
                             target_building=last_progress.values.get("building_type", "")))
                     if scoring == "deploy_units":

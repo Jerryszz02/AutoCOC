@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import Mock
 
 from autococ.army_control import ArmyRecipe, ArmyRequirement, ensure_army
+from autococ.errors import StopRequested
 from autococ.scene import SceneSnapshot
 
 
@@ -59,7 +60,295 @@ def preset(troop="meteor_golem", spell="lightning_spell", *, complete=True, use_
                 {"kind": "siege", "unit_id": "wall_wrecker", "count": 1}]}
 
 
+class DirectArmySession:
+    def __init__(self, *, missing=None, uncertain_after=None, extra_change_after=None,
+                 lightning_housing=1, full_capacity=False, untrusted_grey=False,
+                 never_unblocks=False, grey_availability=None, stale_frames_after_tap=0,
+                 stop_after_stale=False, stale_preflight_return_frames=0,
+                 stale_post_return_frames=0, wrong_post_return_counts=False,
+                 preserve_healing=False):
+        self.counts = {"freeze_spell": 2, "lightning_spell": 1}
+        if preserve_healing:
+            self.counts["lightning_spell"] = 0
+            self.counts["healing_spell"] = 1
+        self.surface = "current"
+        self.missing = missing
+        self.uncertain_after = uncertain_after
+        self.extra_change_after = extra_change_after
+        self.lightning_housing = lightning_housing
+        self.full_capacity = full_capacity
+        self.untrusted_grey = untrusted_grey
+        self.never_unblocks = never_unblocks
+        self.grey_availability = grey_availability
+        self.stale_frames_after_tap = stale_frames_after_tap
+        self.stale_left = 0
+        self.before_mutation = None
+        self.stop_after_stale = stop_after_stale
+        self.stop_requested = False
+        self.stale_preflight_return_frames = stale_preflight_return_frames
+        self.stale_post_return_frames = stale_post_return_frames
+        self.wrong_post_return_counts = wrong_post_return_counts
+        self.close_count = 0
+        self.return_frames = 0
+        self.mutations = 0
+        self.taps = []
+        self.frames = 0
+
+    def check_deadline(self):
+        if self.stop_requested:
+            raise StopRequested("stopped in test")
+
+    def observe(self, label):
+        self.frames += 1
+        if self.surface == "current":
+            if self.close_count:
+                self.return_frames += 1
+            shown_counts = dict(self.counts)
+            if self.wrong_post_return_counts and self.close_count == 2:
+                shown_counts["lightning_spell"] += 1
+            shot = current(f"direct-current-{self.frames}.png", spells=[
+                {"unit_id": unit_id, "kind": "spell", "count": count}
+                for unit_id, count in shown_counts.items() if count])
+            if self.stale_preflight_return_frames or self.stale_post_return_frames:
+                def icon(value):
+                    return {"phash": value, "mean_bgr": [80, 100, 120],
+                            "std_bgr": [25, 30, 35]}
+                stale = ((self.close_count == 1 and
+                          self.return_frames <= self.stale_preflight_return_frames) or
+                         (self.close_count == 2 and
+                          self.return_frames <= self.stale_post_return_frames))
+                shot.observations["army"]["hero_loadout"] = {
+                    "barbarian_king": {
+                        "pet_visual": icon("ffffffffffffffff" if stale else "0000000000000000"),
+                        "equipment_1_visual": icon("1111111111111111"),
+                        "equipment_2_visual": icon("2222222222222222")}}
+            shot.observations["army_editor"]["controls"].append({
+                "action": "open_picker", "kind": "spell", "point": [100, 100],
+                "enabled": True, "cost_free": True, "confidence": .99})
+            if self.full_capacity:
+                shot.observations["army"]["spells"] = {
+                    "used": (self.counts["freeze_spell"] * 4 + self.counts["lightning_spell"]
+                             + self.counts.get("healing_spell", 0)),
+                    "capacity": 9}
+            else:
+                shot.observations["army"]["spells"]["used"] = sum(self.counts.values())
+            return shot
+        if self.uncertain_after == self.mutations and self.mutations:
+            return SceneSnapshot("unknown", 0, Path("uncertain.png"), {})
+        shown_counts = self.counts
+        if self.stale_left:
+            shown_counts = self.before_mutation
+            self.stale_left -= 1
+            if self.stop_after_stale:
+                self.stop_requested = True
+        controls = [{"action": action, "unit_id": unit_id, "point": point,
+                     "enabled": True, "cost_free": True, "confidence": .99}
+                    for action, unit_id, point in (
+                        ("decrement", "freeze_spell", [300, 600]),
+                        ("increment", "lightning_spell", [400, 600]))
+                    if (action, unit_id) != self.missing]
+        if self.full_capacity:
+            blocked = (self.never_unblocks or
+                       shown_counts["freeze_spell"] * 4 + shown_counts["lightning_spell"]
+                       + shown_counts.get("healing_spell", 0) >= 9)
+            for control in controls:
+                if control["action"] == "increment":
+                    control["enabled"] = not blocked
+                    if blocked and not self.untrusted_grey:
+                        control["capacity_blocked"] = True
+        controls.append({"action": "close_picker", "point": [1200, 100],
+                         "enabled": True, "cost_free": True, "confidence": .99})
+        return SceneSnapshot("training", .99, Path(f"direct-picker-{self.frames}.png"), {
+            "army_editor": {"surface": "current_picker", "ready": True,
+                            "editing_kind": "spell", "complete_kinds": {"spell": True},
+                            "cards": [{"kind": "spell", "unit_id": unit_id, "count": count}
+                                      for unit_id, count in shown_counts.items()],
+                            "unit_availability": (({"lightning_spell": self.grey_availability}
+                                                  if self.grey_availability is not None else {})
+                                                  if self.full_capacity else
+                                                  {"lightning_spell": {"available": True}}),
+                            "unit_housing_space": {"freeze_spell": 4 if self.full_capacity else 1,
+                                                   "lightning_spell": self.lightning_housing},
+                            "controls": controls}})
+
+    def tap(self, snapshot, point, *, reason):
+        self.taps.append(tuple(point))
+        if point == [100, 100]:
+            self.surface = "picker"
+        elif point == [1200, 100]:
+            self.surface = "current"
+            self.close_count += 1
+            self.return_frames = 0
+        elif point == [300, 600]:
+            self.before_mutation = dict(self.counts)
+            self.counts["freeze_spell"] -= 1
+            self.mutations += 1
+            self.stale_left = self.stale_frames_after_tap
+        elif point == [400, 600]:
+            self.before_mutation = dict(self.counts)
+            self.counts["lightning_spell"] += 1
+            self.mutations += 1
+            self.stale_left = self.stale_frames_after_tap
+        if self.mutations and self.mutations == self.extra_change_after:
+            self.counts["lightning_spell"] += 1
+
+
 class ArmyControlTests(unittest.TestCase):
+    def test_direct_edit_refuses_to_remove_the_last_selected_card(self):
+        shot = current()
+        shot.observations["army_editor"]["controls"].append({
+            "action": "open_picker", "kind": "spell", "point": [100, 100],
+            "enabled": True, "cost_free": True, "confidence": .99})
+        session = Mock()
+        session.observe.return_value = shot
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual((result.status, result.reason),
+                         ("not_supported", "direct_empty_picker_unverified"))
+        self.assertEqual(result.metrics["recipe_mutations"], 0)
+        session.tap.assert_not_called()
+
+    def test_direct_edit_preflights_then_decrements_before_increments(self):
+        session = DirectArmySession()
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual((result.status, result.metrics["recipe_mutations"]), ("succeeded", 5), result.reason)
+        self.assertEqual(session.taps, [(100, 100), (1200, 100), (100, 100),
+                                        (300, 600), (300, 600),
+                                        (400, 600), (400, 600), (400, 600),
+                                        (1200, 100)])
+        self.assertEqual(result.metrics["observed"]["spell"], {"lightning_spell": 4})
+
+    def test_direct_preflight_return_retries_animated_hero_icon(self):
+        session = DirectArmySession(stale_preflight_return_frames=1)
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual(result.status, "succeeded", result.reason)
+        self.assertEqual(session.close_count, 2)
+        self.assertEqual(session.mutations, 5)
+
+    def test_direct_postmutation_return_retries_animated_hero_icon(self):
+        session = DirectArmySession(stale_post_return_frames=1)
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual(result.status, "succeeded", result.reason)
+        self.assertEqual(session.close_count, 2)
+        self.assertEqual(session.return_frames, 2)
+        self.assertEqual(session.mutations, 5)
+
+    def test_direct_return_fails_after_three_unmatched_loadout_frames(self):
+        session = DirectArmySession(stale_post_return_frames=3)
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual((result.status, result.reason), ("failed", "direct_spell_return_mismatch"))
+        self.assertEqual(result.metrics["return_state"], "loadout_unverified")
+        self.assertEqual(session.return_frames, 3)
+        self.assertEqual(session.mutations, 5)
+
+    def test_direct_return_fails_immediately_on_complete_count_mismatch(self):
+        session = DirectArmySession(wrong_post_return_counts=True)
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual((result.status, result.reason), ("failed", "direct_spell_return_mismatch"))
+        self.assertEqual(result.metrics["return_state"], "counts_mismatch")
+        self.assertEqual(session.return_frames, 1)
+        self.assertEqual(session.mutations, 5)
+
+    def test_direct_edit_missing_target_control_never_mutates(self):
+        session = DirectArmySession(missing=("increment", "lightning_spell"))
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual((result.status, result.reason),
+                         ("not_supported", "direct_spell_control_unavailable:lightning_spell"))
+        self.assertEqual(session.mutations, 0)
+        self.assertEqual(session.taps, [(100, 100), (1200, 100)])
+
+    def test_uncertain_direct_edit_is_never_replayed(self):
+        session = DirectArmySession(uncertain_after=1)
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual((result.status, result.reason), ("failed", "direct_edit_result_uncertain"))
+        self.assertEqual(session.mutations, 1)
+        self.assertEqual(session.taps.count((300, 600)), 1)
+
+    def test_direct_edit_waits_for_a_fresh_count_after_stale_frame(self):
+        session = DirectArmySession(stale_frames_after_tap=1)
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual(result.status, "succeeded", result.reason)
+        self.assertEqual(session.mutations, 5)
+        self.assertEqual(session.taps.count((300, 600)), 2)
+
+    def test_direct_edit_stops_after_three_unchanged_frames(self):
+        session = DirectArmySession(stale_frames_after_tap=10)
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual((result.status, result.reason), ("failed", "direct_edit_result_uncertain"))
+        self.assertEqual(result.metrics["observation_state"], "uncertain")
+        self.assertEqual(session.mutations, 1)
+        self.assertEqual(session.taps.count((300, 600)), 1)
+
+    def test_direct_edit_honors_stop_during_reobservation(self):
+        session = DirectArmySession(stale_frames_after_tap=1, stop_after_stale=True)
+        with self.assertRaises(StopRequested):
+            ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual(session.mutations, 1)
+        self.assertEqual(session.taps.count((300, 600)), 1)
+
+    def test_direct_edit_rejects_other_count_change_after_tap(self):
+        session = DirectArmySession(extra_change_after=1)
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual((result.status, result.reason), ("failed", "direct_edit_result_uncertain"))
+        self.assertEqual(session.mutations, 1)
+        self.assertEqual(session.taps.count((300, 600)), 1)
+
+    def test_direct_edit_checks_capacity_before_first_decrement(self):
+        session = DirectArmySession(lightning_housing=4)
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual((result.status, result.reason), ("skipped", "spell_capacity_exceeded:13>11"))
+        self.assertEqual(session.mutations, 0)
+        self.assertEqual(session.taps, [(100, 100), (1200, 100)])
+
+    def test_full_capacity_grey_card_is_preflight_candidate_only(self):
+        session = DirectArmySession(full_capacity=True)
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual(result.status, "succeeded", result.reason)
+        self.assertEqual(session.taps[:4], [(100, 100), (1200, 100),
+                                            (100, 100), (300, 600)])
+        self.assertEqual(session.mutations, 5)
+
+    def test_untrusted_grey_card_cannot_start_removing_units(self):
+        session = DirectArmySession(full_capacity=True, untrusted_grey=True)
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual((result.status, result.reason),
+                         ("not_supported", "unit_availability_unverified:lightning_spell"))
+        self.assertEqual(session.mutations, 0)
+
+    def test_grey_target_absent_from_current_army_cannot_start_removing_units(self):
+        session = DirectArmySession(full_capacity=True, preserve_healing=True)
+        recipe = ArmyRecipe((ArmyRequirement("healing_spell", 1),
+                             ArmyRequirement("lightning_spell", 4)))
+        result = ensure_army(session, recipe)
+        self.assertEqual((result.status, result.reason),
+                         ("not_supported", "unit_availability_unverified:lightning_spell"))
+        self.assertEqual(result.metrics["recipe_mutations"], 0)
+        self.assertEqual(session.taps, [(100, 100), (1200, 100)])
+
+    def test_grey_card_must_become_enabled_before_increment(self):
+        session = DirectArmySession(full_capacity=True, never_unblocks=True)
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual((result.status, result.reason),
+                         ("failed", "direct_increment_control_lost:lightning_spell"))
+        self.assertEqual(session.mutations, 2)
+        self.assertNotIn((400, 600), session.taps)
+
+    def test_grey_card_does_not_override_explicit_locked_unit(self):
+        session = DirectArmySession(full_capacity=True,
+                                    grey_availability={"available": False, "reason": "locked"})
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual((result.status, result.reason), ("skipped", "unit_locked:lightning_spell"))
+        self.assertEqual(session.mutations, 0)
+
+    def test_relevant_manifest_coverage_allows_matching_recipe(self):
+        shot = current(troops=[{"unit_id": None, "count": 8}])
+        shot.observations["army"]["manifest"].update(
+            complete=False, complete_kinds={"troop": False, "spell": True})
+        session = Mock()
+        session.observe.return_value = shot
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("freeze_spell", 2),)))
+        self.assertEqual(result.status, "succeeded")
+        session.tap.assert_not_called()
+
     def test_absent_optional_locked_unit_does_not_block_the_matching_recipe(self):
         session = Mock()
         shot = current()

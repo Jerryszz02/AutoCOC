@@ -29,8 +29,15 @@ class Unit:
     housing_space: int | None = None
 
 
+# Independently observed information panels / picker space labels on 18.600.7.
+# Unobserved units keep None; capacity checks must never treat that as zero.
+_SAMPLED_HOUSING = {"electro_dragon": 30, "dragon_rider": 25, "balloon": 5,
+                    "lightning_spell": 1, "totem_spell": 1}
+
+
 def _units(kind: UnitKind, values: str, *, source: str = "army") -> tuple[Unit, ...]:
-    return tuple(Unit(unit_id, kind, unit_id.replace("_", " ").title(), source)
+    return tuple(Unit(unit_id, kind, unit_id.replace("_", " ").title(), source,
+                      _SAMPLED_HOUSING.get(unit_id))
                  for unit_id in values.split())
 
 

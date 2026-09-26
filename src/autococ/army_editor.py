@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
+import json
 import re
 from collections.abc import Sequence
 
@@ -17,7 +18,7 @@ import numpy as np
 
 from .locator import scale_box
 from .ocr import OCRProvider, OCRText
-from .unit_catalog import get_unit
+from .unit_catalog import CATALOG_ROOT, get_unit, recognize_card_identity, template_manifest
 
 _BASE = (1280, 720)
 _TITLE = re.compile(r"编辑军队配置\s*([0-9一二三四五六七八九十]+)")
@@ -35,6 +36,11 @@ def _point(item: OCRText) -> list[int]:
     assert item.bbox is not None
     l, t, r, b = item.bbox
     return [(l + r) // 2, (t + b) // 2]
+
+
+def _scale_point(x: int, y: int, resolution: tuple[int, int]) -> list[int]:
+    return [round(x * resolution[0] / _BASE[0]),
+            round(y * resolution[1] / _BASE[1])]
 
 
 def _one(texts: Sequence[OCRText], label: str, roi: tuple[int, int, int, int]) -> OCRText | None:
@@ -68,6 +74,22 @@ def _capacities(texts: Sequence[OCRText], *, edit: bool) -> dict[str, dict[str, 
     return result
 
 
+def _local_capacity(path: Path, provider: OCRProvider | None,
+                    native_resolution: tuple[int, int],
+                    roi: tuple[int, int, int, int], maximum: int) -> dict[str, int] | None:
+    reader = getattr(provider, "recognize_line", None)
+    if not callable(reader):
+        return None
+    native_roi = scale_box(roi, from_resolution=_BASE, to_resolution=native_resolution)
+    candidates = [(_CAPACITY.fullmatch(item.text.strip()), item) for item in
+                  reader(path, native_roi) if item.confidence >= .65]
+    matches = [match for match, _ in candidates if match is not None]
+    if len(matches) != 1:
+        return None
+    used, total = int(matches[0].group(1)), int(matches[0].group(2))
+    return {"used": used, "total": total} if 0 <= used <= total <= maximum else None
+
+
 def _picker_visible(image: np.ndarray) -> bool:
     # The expanded picker fills both lower rows with bright framed cards while
     # darkening the editor above. Works for coloured troop and gray spell cards.
@@ -75,6 +97,273 @@ def _picker_visible(image: np.ndarray) -> bool:
     upper = gray[385:415, 50:1200]
     lower = gray[460:665, 50:1200]
     return float(np.mean(upper)) < 75 and float(np.mean(lower > 160)) > .20
+
+
+def _red_minus(image: np.ndarray, x: int, y: int) -> bool:
+    """The observed current picker puts a red remove glyph on each selected card."""
+    crop = image[y-14:y+14, x-14:x+14]
+    if crop.shape[:2] != (28, 28):
+        return False
+    b, g, r = cv2.split(crop.astype(np.float32))
+    red = (r > 110) & (r > g * 1.45) & (r > b * 1.35)
+    return float(red.mean()) >= .28
+
+
+def _picker_row(image: np.ndarray) -> tuple[str | None, list[tuple[int, int, int, int]]]:
+    """Locate top-row selected cards using their own red minus glyphs."""
+    rows = {"troop": 194, "spell": 287}
+    found = {}
+    for kind, top in rows.items():
+        boxes = []
+        for index in range(6 if kind == "troop" else 4):
+            left = 558 + index * 104
+            if _red_minus(image, left + 78, top + 16):
+                boxes.append((left, top, left + 98, top + 98))
+        found[kind] = boxes
+    active = [kind for kind, boxes in found.items() if boxes]
+    return (active[0], found[active[0]]) if len(active) == 1 else (None, [])
+
+
+def _picker_count(provider: OCRProvider | None, path: Path, texts: Sequence[OCRText],
+                  box: tuple[int, int, int, int],
+                  native_resolution: tuple[int, int], image: np.ndarray,
+                  client_version: str | None,
+                  unit_id: str | None) -> tuple[int | None, dict[str, object]]:
+    roi = (box[0], box[1], box[0] + 45, box[1] + 30)
+    candidates = [item for item in texts if item.confidence >= .9 and _inside(item, roi)
+                  and re.fullmatch(r"[xX×]\s*[0-9]+", item.text.strip())]
+    source = "full_ocr"
+    if not candidates and provider is not None:
+        reader = getattr(provider, "recognize_line", None)
+        if callable(reader):
+            native_roi = scale_box(roi, from_resolution=_BASE, to_resolution=native_resolution)
+            candidates = [item for item in reader(path, native_roi)
+                          if item.confidence >= .9 and
+                          re.fullmatch(r"[xX×]\s*[0-9]+", item.text.strip())]
+            source = "line_roi"
+    values = {int(re.sub(r"\D", "", item.text)) for item in candidates}
+    count = next(iter(values)) if len(values) == 1 and next(iter(values)) > 0 else None
+    evidence = {"source": source, "reads": [asdict(item) for item in candidates]}
+    votes: dict[int, set[str]] = {}
+    if not values:
+        image_reader = getattr(provider, "recognize_line_image", None)
+        if callable(image_reader):
+            left, top = box[:2]
+            gray = cv2.cvtColor(image[top:top + 30, left:left + 52],
+                                cv2.COLOR_BGR2GRAY)
+            variants = {"gray": gray, "inverted": 255 - gray,
+                        "threshold": cv2.threshold(gray, 170, 255,
+                                                   cv2.THRESH_BINARY)[1]}
+            observed: list[dict[str, object]] = []
+            for name, crop in variants.items():
+                reads = image_reader(crop)
+                if not isinstance(reads, (list, tuple)):
+                    continue
+                for item in reads:
+                    if isinstance(item, OCRText):
+                        observed.append({"variant": name, "text": item.text,
+                                         "confidence": item.confidence})
+            evidence["contrast_reads"] = observed
+            for item in observed:
+                if (item["confidence"] >= .78 and
+                        re.fullmatch(r"[xX×]\s*[0-9]+", item["text"].strip())):
+                    value = int(re.sub(r"\D", "", item["text"]))
+                    if value > 0:
+                        votes.setdefault(value, set()).add(item["variant"])
+            if len(votes) == 1 and len(next(iter(votes.values()))) >= 2:
+                count = next(iter(votes))
+                evidence["source"] = "contrast_consensus"
+    if not values and not votes and count is None and client_version == template_manifest().get("client"):
+        provenance_path = CATALOG_ROOT / "picker_count_provenance.json"
+        try:
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            provenance = {}
+        sample_path = CATALOG_ROOT / "current_picker_x1_18_600_7.png"
+        full_path = CATALOG_ROOT / "current_picker_x1_full_18_600_7.png"
+        if (provenance.get("client") == client_version and sample_path.is_file()
+                and full_path.is_file()):
+            sample = cv2.imdecode(np.fromfile(sample_path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+            full = cv2.imdecode(np.fromfile(full_path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+            header = cv2.cvtColor(image[box[1]:box[1] + 31, box[0]:box[0] + 55],
+                                  cv2.COLOR_BGR2GRAY)
+            whole = cv2.cvtColor(image[box[1]:box[1] + 30, box[0] + 1:box[0] + 46],
+                                  cv2.COLOR_BGR2GRAY)
+            if (sample is not None and full is not None and
+                    header.shape[0] >= sample.shape[0] and header.shape[1] >= sample.shape[1]
+                    and whole.shape == full.shape):
+                score = float(cv2.matchTemplate(header, sample, cv2.TM_CCOEFF_NORMED).max())
+                full_score = float(cv2.matchTemplate(whole, full, cv2.TM_CCOEFF_NORMED).max())
+                evidence["x1_sample_score"] = round(score, 5)
+                evidence["x1_full_score"] = round(full_score, 5)
+                if score >= .9 and full_score >= .96:
+                    evidence["source"] = "versioned_picker_x1_sample"
+                    count = 1
+        if (count is None and unit_id == "lightning_spell" and box[:2] == (558, 287)):
+            six_path = CATALOG_ROOT / "current_picker_x6_18_600_7.png"
+            six = cv2.imdecode(np.fromfile(six_path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE) if six_path.is_file() else None
+            header = cv2.cvtColor(image[287:317, 559:604], cv2.COLOR_BGR2GRAY)
+            if six is not None and header.shape == six.shape:
+                score = float(cv2.matchTemplate(header, six, cv2.TM_CCOEFF_NORMED).max())
+                evidence["x6_full_score"] = round(score, 5)
+                if score >= .97:
+                    evidence["source"] = "versioned_picker_x6_sample"
+                    count = 6
+    return count, evidence
+
+
+def _bottom_picker_controls(image: np.ndarray, kind: str,
+                            client_version: str | None,
+                            baseline_resolution: tuple[int, int],
+                            selected: set[str], capacity: dict[str, int] | None
+                            ) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
+    """Only independently sampled portraits can produce a bottom-card control."""
+    controls: list[dict[str, object]] = []
+    availability: dict[str, dict[str, object]] = {}
+    if client_version != template_manifest().get("client"):
+        return controls, availability
+    matches: dict[str, list[dict[str, object]]] = {}
+    for top in (431, 568):
+        for index in range(9):
+            left = round(33 + index * 130.25)
+            box = (left, top, left + 124, top + 124)
+            identity = recognize_card_identity(image, box, kind,
+                                               surface="current_picker",
+                                               client_version=client_version)
+            unit_id = identity["unit_id"]
+            if unit_id is None or not identity["evidence"]:
+                continue
+            matched = identity["evidence"][0]["template"]
+            state = ("capacity_gray" if "_capacity_gray_" in matched else
+                     "active" if "_active_" in matched else None)
+            if state is None:
+                continue
+            matches.setdefault(unit_id, []).append({"box": box, "identity": identity,
+                                                     "state": state})
+    for unit_id, hits in matches.items():
+        if len(hits) != 1:
+            continue
+        hit = hits[0]
+        box, identity, state = hit["box"], hit["identity"], hit["state"]
+        full = (isinstance(capacity, dict) and
+                capacity.get("used") == capacity.get("total"))
+        if state == "capacity_gray" and not full:
+            continue
+        enabled = state == "active"
+        if enabled or unit_id in selected:
+            availability[unit_id] = {"available": True,
+                                      "reason": ("active_picker_card" if enabled else
+                                                 "present_in_current_army")}
+        controls.append({"action": "increment", "unit_id": unit_id,
+                         "point": _scale_point(box[0] + 61, box[1] + 57,
+                                               baseline_resolution),
+                         "confidence": identity["confidence"],
+                         "enabled": enabled, "capacity_blocked": not enabled,
+                         "identity_verified": True, "cost_free": True,
+                         "evidence": {"identity": identity,
+                                      "card_bbox": list(scale_box(
+                                          box, from_resolution=_BASE,
+                                          to_resolution=baseline_resolution)),
+                                      "state": state}})
+    return controls, availability
+
+
+def _current_picker(path: Path, image: np.ndarray, provider: OCRProvider | None,
+                    texts: Sequence[OCRText], native_resolution: tuple[int, int],
+                    client_version: str | None,
+                    baseline_resolution: tuple[int, int]) -> dict[str, object]:
+    kind, boxes = _picker_row(image)
+    capacities = _capacities(texts, edit=False)
+    if kind == "spell":
+        shifted_troop = [item for item in texts if item.confidence >= .88 and item.bbox is not None
+                         and _inside(item, (550, 55, 710, 110))
+                         and _CAPACITY.fullmatch(item.text.strip())]
+        if len(shifted_troop) == 1:
+            match = _CAPACITY.fullmatch(shifted_troop[0].text.strip())
+            used, total = int(match.group(1)), int(match.group(2))
+            if 0 <= used <= total <= 500:
+                capacities["troop"] = {"used": used, "total": total}
+        shifted = [item for item in texts if item.confidence >= .88 and item.bbox is not None
+                   and _inside(item, (560, 235, 675, 275))
+                   and _CAPACITY.fullmatch(item.text.strip())]
+        if len(shifted) == 1:
+            match = _CAPACITY.fullmatch(shifted[0].text.strip())
+            used, total = int(match.group(1)), int(match.group(2))
+            if 0 <= used <= total <= 20:
+                capacities["spell"] = {"used": used, "total": total}
+    rows = ({"troop": ((560, 145, 680, 185), 500),
+             "spell": ((560, 325, 670, 365), 20)} if kind == "troop" else
+            {"troop": ((560, 55, 680, 100), 500),
+             "spell": ((560, 235, 670, 275), 20)})
+    for name, (roi, maximum) in rows.items():
+        if name not in capacities:
+            observed = _local_capacity(path, provider, native_resolution, roi, maximum)
+            if observed is not None:
+                capacities[name] = observed
+    result: dict[str, object] = {"frame": str(path), "surface": "current_picker",
+                                 "ready": kind is not None, "editing_kind": kind,
+                                 "cards": [], "controls": [], "presets": [],
+                                 "capacities": capacities,
+                                 "complete_kinds": {"troop": False, "spell": False},
+                                 "unit_availability": {}, "unit_housing_space": {},
+                                 "unknowns": [], "complete": False}
+    if kind is None:
+        result["unknowns"].append("picker_editing_kind_unverified")
+        return result
+    close_point = (800, 320) if kind == "troop" else (1050, 240)
+    result["controls"].append({"action": "close_picker",
+                               "point": _scale_point(*close_point, baseline_resolution),
+                               "confidence": .95, "enabled": True, "cost_free": True,
+                               "evidence": {"visual": "observed_dimmed_background_dismissal",
+                                            "editing_kind": kind}})
+    if boxes != [(558 + i * 104, boxes[0][1], 656 + i * 104, boxes[0][1] + 98)
+                 for i in range(len(boxes))]:
+        result["unknowns"].append("picker_selected_cards_not_contiguous")
+    seen = set()
+    for box in boxes:
+        identity = recognize_card_identity(image, box, kind, surface="army",
+                                           client_version=client_version)
+        unit_id = identity["unit_id"]
+        count, count_evidence = _picker_count(provider, path, texts, box, native_resolution,
+                                              image, client_version, unit_id)
+        card = {"kind": kind, "source": "army", "unit_id": unit_id,
+                "count": count, "confidence": identity["confidence"],
+                "bbox": list(scale_box(box, from_resolution=_BASE,
+                                       to_resolution=baseline_resolution)),
+                "evidence": {"identity": identity,
+                                                 "count": count_evidence,
+                                                 "red_minus": True}}
+        result["cards"].append(card)
+        if count is None or unit_id is None or unit_id in seen:
+            result["unknowns"].append("picker_selected_identity_or_count_unverified")
+            continue
+        seen.add(unit_id)
+        unit = get_unit(unit_id)
+        if type(unit.housing_space) is int and unit.housing_space > 0:
+            result["unit_housing_space"][unit_id] = unit.housing_space
+        result["unit_availability"][unit_id] = {"available": True,
+                                                  "reason": "present_in_current_army"}
+        result["controls"].append({"action": "decrement", "unit_id": unit_id,
+                                   "point": _scale_point(box[0] + 78, box[1] + 16,
+                                                         baseline_resolution),
+                                   "confidence": identity["confidence"],
+                                   "enabled": True, "cost_free": True,
+                                   "evidence": card["evidence"]})
+    capacity = result["capacities"].get(kind)
+    if not result["unknowns"] and boxes:
+        if (isinstance(capacity, dict) and
+                len(result["unit_housing_space"]) == len(boxes) and
+                sum(card["count"] * result["unit_housing_space"][card["unit_id"]]
+                    for card in result["cards"]) == capacity["used"]):
+            result["complete_kinds"][kind] = True
+        else:
+            result["unknowns"].append("picker_capacity_or_housing_mismatch")
+    bottom_controls, availability = _bottom_picker_controls(
+        image, kind, client_version, baseline_resolution, seen,
+        result["capacities"].get(kind))
+    result["controls"].extend(bottom_controls)
+    result["unit_availability"].update(availability)
+    return result
 
 
 def _save_current_icon_visible(image: np.ndarray) -> bool:
@@ -139,6 +428,7 @@ def _save_current_dialog(image: np.ndarray, texts: Sequence[OCRText]) -> dict[st
 def recognize_army_editor(
     path: str | Path, provider: OCRProvider, texts: Sequence[OCRText], *,
     baseline_resolution: tuple[int, int] = _BASE,
+    client_version: str | None = None,
 ) -> dict[str, object]:
     """Locate the observed page and safe controls in one fresh frame.
 
@@ -166,9 +456,25 @@ def recognize_army_editor(
     if save_dialog is not None:
         save_dialog["frame"] = str(path)
         return save_dialog
+    saved_title = _one(canonical, "已保存的配置", (545, 40, 735, 105))
+    army_title = _one(canonical, "我的军队", (185, 40, 340, 105))
     edit_titles = [item for item in canonical if item.bbox is not None and
                    _TITLE.search(item.text.replace(" ", "")) and item.confidence >= .88 and
                    _inside(item, (460, 25, 780, 110))]
+    if _picker_visible(image):
+        picker_kind, _ = _picker_row(image)
+        # Opening the spell tray scrolls the entire page upward by 86 px,
+        # clipping both tabs. The fully occupied hero header at its observed
+        # shifted location distinguishes this sampled current layout from the
+        # saved-plan editor's partially filled hero row.
+        shifted_current = (picker_kind == "spell" and army_title is None and
+                           _one(canonical, "4/4", (40, 55, 105, 100)) is not None and
+                           _one(canonical, "强化军队", (850, 15, 1050, 100)) is not None and
+                           _one(canonical, "强化英雄", (1020, 15, 1220, 100)) is not None and
+                           not edit_titles)
+        if (saved_title is not None and army_title is not None) or shifted_current:
+            return _current_picker(path, image, provider, canonical, (width, height),
+                                   client_version, baseline_resolution)
     has_editor_capacity = bool(_capacities(canonical, edit=True).get("troop"))
     picker = has_editor_capacity and _picker_visible(image)
     if len(edit_titles) == 1 or picker:
@@ -181,8 +487,6 @@ def recognize_army_editor(
         # coverage. An unrecognised card must never produce an increment tap.
         result["unknowns"].append("editor_card_identity_samples_unavailable")
         return result
-    saved_title = _one(canonical, "已保存的配置", (545, 40, 735, 105))
-    army_title = _one(canonical, "我的军队", (185, 40, 340, 105))
     if saved_title is None or army_title is None:
         result["unknowns"].append("army_tabs_unanchored")
         return result
@@ -225,7 +529,27 @@ def recognize_army_editor(
     result["surface"] = "current"
     result["ready"] = True
     result["capacities"] = _capacities(canonical, edit=False)
+    for name, roi, maximum in (("troop", (560, 145, 680, 185), 500),
+                               ("spell", (560, 325, 670, 365), 20)):
+        if name not in result["capacities"]:
+            observed = _local_capacity(path, provider, (width, height), roi, maximum)
+            if observed is not None:
+                result["capacities"][name] = observed
     result["controls"].append(_control("open_saved", saved_title))
+    for kind, row_top, capacity_key in (("troop", 194, "troop"),
+                                        ("spell", 373, "spell")):
+        capacity = result["capacities"].get(capacity_key)
+        if (isinstance(capacity, dict) and capacity.get("used", 0) > 0
+                and float(cv2.cvtColor(image[row_top:row_top + 98, 558:656],
+                                       cv2.COLOR_BGR2GRAY).std()) > 28):
+            point = _scale_point(607, row_top + 49, baseline_resolution)
+            result["controls"].append({"action": "open_picker", "kind": kind,
+                                       "point": point, "confidence": .92,
+                                       "enabled": True, "cost_free": True,
+                                       "evidence": {"capacity": capacity,
+                                                    "first_card_visual_std": round(float(
+                                                        cv2.cvtColor(image[row_top:row_top + 98, 558:656],
+                                                                       cv2.COLOR_BGR2GRAY).std()), 3)}})
     if _save_current_icon_visible(image):
         result["controls"].append({"action": "save_current", "point": [414, 74],
                                    "confidence": .93, "enabled": True, "cost_free": True,

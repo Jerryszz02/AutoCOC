@@ -74,6 +74,20 @@ class ArmyManifestTests(unittest.TestCase):
         self.assertEqual(len(result["troops"]), 4)
         self.assertIsNone(result["troops"][0]["count"])
 
+    def test_selected_row_completion_does_not_depend_on_other_row(self) -> None:
+        image, texts = self.make()
+        texts = [item for item in texts if item.text != "x6"]
+        both = self.inspect(image, texts)
+        self.assertFalse(both["complete"])
+        self.assertEqual(both["complete_kinds"], {"troop": True, "spell": False})
+        cv2.imencode(".png", image)[1].tofile(self.path)
+        troops = recognize_army_manifest(self.path, self.provider, texts, groups=("troops",))
+        self.assertTrue(troops["complete"])
+        self.assertEqual(troops["complete_kinds"], {"troop": True, "spell": False})
+        self.assertEqual(troops["spells"], [])
+        with self.assertRaises(ValueError):
+            recognize_army_manifest(self.path, self.provider, texts, groups=("siege",))
+
     def test_local_line_can_recover_a_missing_quantity(self) -> None:
         image, texts = self.make()
         self.provider.recognize_line.return_value = [OCRText("x10", .98, (560, 196, 600, 219))]
@@ -170,6 +184,51 @@ class ArmyManifestTests(unittest.TestCase):
         self.assertEqual(result["spells"][0]["evidence"]["count"]["source"], "contrast_line_roi")
         self.assertEqual(result["spells"][3]["evidence"]["count"]["source"], "contrast_line_roi")
 
+    def test_new_live_army_quantity_identity_and_siege_evidence(self) -> None:
+        path = Path(__file__).parent / "fixtures/army_current_new_20260926.png"
+        provider = RapidOCRProvider()
+        texts = provider.recognize(path)
+        result = recognize_army_manifest(path, provider, texts,
+                                         baseline_resolution=(2560, 1440),
+                                         client_version="18.600.7")
+        self.assertTrue(result["complete"], result["unknowns"])
+        self.assertEqual(result["complete_kinds"], {"troop": True, "spell": True})
+        self.assertEqual([(card["unit_id"], card["count"]) for card in result["troops"]],
+                         [("electro_dragon", 10), ("dragon_rider", 1), ("balloon", 2)])
+        self.assertEqual([(card["unit_id"], card["count"]) for card in result["spells"]],
+                         [("lightning_spell", 6), ("totem_spell", 5)])
+        self.assertEqual(result["troops"][1]["evidence"]["count"]["source"],
+                         "sampled_x1_header")
+        siege = recognize_army_siege(path, provider, {"used": 3, "capacity": 3},
+                                     baseline_resolution=(2560, 1440),
+                                     client_version="18.600.7")
+        self.assertEqual([(card["unit_id"], card["count"]) for card in siege["cards"]],
+                         [("siege_barracks", 1), ("sky_wagon", 1),
+                          ("troop_launcher", 1)])
+        self.assertTrue(siege["complete"], siege["unknowns"])
+
+    def test_sampled_x1_header_rejects_x10_and_x2(self) -> None:
+        path = Path(__file__).parent / "fixtures/army_current_new_20260926.png"
+        # Withheld OCR forces the independent glyph path for each visible card.
+        # The x1 sample must not fill the neighboring x10 or x2 headers.
+        result = recognize_army_manifest(path, self.provider, ANCHORS,
+                                         client_version="18.600.7", groups=("troops",))
+        self.assertEqual([card["count"] for card in result["troops"]], [None, 1, None])
+        self.assertFalse(result["complete_kinds"]["troop"])
+        older = Path(__file__).parent / "fixtures/army_confirmation_counts_20260926.png"
+        older_result = recognize_army_manifest(older, self.provider, ANCHORS,
+                                               client_version="18.600.7", groups=("troops",))
+        self.assertIsNone(older_result["troops"][0]["count"])  # observed x8
+        self.assertIsNone(older_result["troops"][1]["count"])  # observed x2
+        self.assertIsNone(older_result["troops"][2]["count"])  # different card background
+        image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        image = cv2.resize(image, (1280, 720), interpolation=cv2.INTER_AREA)
+        image[198:217, 688:696] = image[198:217, 675:683]
+        cv2.imencode(".png", image)[1].tofile(self.path)
+        extra_digit = recognize_army_manifest(self.path, self.provider, ANCHORS,
+                                              client_version="18.600.7", groups=("troops",))
+        self.assertIsNone(extra_digit["troops"][1]["count"])
+
     def test_real_large_hero_cards_bind_stable_ids_to_loadout_without_column_identity(self) -> None:
         fixtures = Path(__file__).parent / "fixtures"
         observed = []
@@ -190,6 +249,18 @@ class ArmyManifestTests(unittest.TestCase):
             for icon in ("pet_visual", "equipment_1_visual", "equipment_2_visual"):
                 self.assertTrue(visual_fingerprint_matches(
                     observed[0][unit_id][icon], observed[1][unit_id][icon]))
+
+    def test_current_hero_animation_stays_identifiable_on_another_real_frame(self) -> None:
+        fixtures = Path(__file__).parent / "fixtures"
+        for name in ("army_current_animated_20260926.png",
+                     "army_current_new_20260926.png"):
+            with self.subTest(frame=name):
+                heroes = recognize_army_heroes(fixtures / name,
+                                               {"used": 4, "capacity": 4},
+                                               client_version="18.600.7")
+                self.assertTrue(heroes["complete"], heroes["unknowns"])
+                self.assertEqual([card["unit_id"] for card in heroes["cards"]],
+                                 ["grand_warden", "dragon_duke", "minion_prince", "archer_queen"])
 
     def test_swapped_hero_cards_change_ids_with_portraits_and_missing_edge_blocks_completion(self) -> None:
         source = Path(__file__).parent / "fixtures/army_heroes_first_frame_20260926.png"
@@ -225,11 +296,10 @@ class ArmyManifestTests(unittest.TestCase):
                                               client_version="18.600.7")
                 self.assertEqual([card["count"] for card in result["cards"]], [1, 1, 1])
                 self.assertEqual([card["unit_id"] for card in result["cards"]],
-                                 ["siege_barracks", None, None])
+                                 ["siege_barracks", "sky_wagon", "troop_launcher"])
                 self.assertTrue(all(card["level"] is None and card["available"] is None
                                     for card in result["cards"]))
-                self.assertFalse(result["complete"])
-                self.assertEqual(result["unknowns"].count("siege_identity_unavailable"), 2)
+                self.assertTrue(result["complete"], result["unknowns"])
                 self.assertTrue(all(card["evidence"]["count_reads"] for card in result["cards"]))
 
     def test_siege_identity_requires_observed_capacity_quantity_and_client_version(self) -> None:

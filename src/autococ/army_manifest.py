@@ -201,11 +201,16 @@ def recognize_army_manifest(
     screenshot_path: str | Path, provider: OCRProvider, texts: Sequence[OCRText], *,
     baseline_resolution: tuple[int, int] = _BASE, client_version: str | None = None,
     capacities: dict[str, object] | None = None,
+    groups: Sequence[str] = ("troops", "spells"),
 ) -> dict[str, object]:
     """`texts` and returned card boxes use `baseline_resolution`; provider boxes are native."""
+    if not groups or any(group not in _ROWS for group in groups):
+        raise ValueError("groups must contain troops and/or spells")
+    selected = tuple(dict.fromkeys(groups))
     path = Path(screenshot_path)
     result = {"frame": str(path), "layout": "my_army_rows_v1", "supported_layout": False,
               "complete": False, "troops": [], "spells": [], "unknowns": [],
+              "complete_kinds": {"troop": False, "spell": False},
               "source_resolution": None, "baseline_resolution": list(baseline_resolution),
               "layout_evidence": {"anchors": {}, "rows": {}}}
     unknowns = result["unknowns"]
@@ -239,7 +244,8 @@ def recognize_army_manifest(
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     foreground = (((hsv[:, :, 0] >= 40) & (hsv[:, :, 1] >= 40) & (hsv[:, :, 2] >= 100))
                   | ((hsv[:, :, 1] <= 90) & (hsv[:, :, 2] >= 190))).astype(np.uint8)
-    for group, roi in _ROWS.items():
+    for group in selected:
+        roi = _ROWS[group]
         left, top, right, bottom = roi
         mask = foreground[top:bottom, left:right]
         uncovered = mask.copy()
@@ -288,7 +294,7 @@ def recognize_army_manifest(
         unknowns.extend({"group": group, "reason": reason} for reason in dict.fromkeys(row_unknowns))
         for box, sides in boxes:
             count, count_evidence = _read_count(path, provider, canonical, box, (width, height), baseline_resolution,
-                                                image, native_image)
+                                                image, native_image, client_version)
             card_box = list(scale_box(box, from_resolution=_BASE, to_resolution=baseline_resolution))
             identity = recognize_card_identity(image, box, "troop" if group == "troops" else "spell",
                                                surface="army", client_version=client_version)
@@ -304,6 +310,8 @@ def recognize_army_manifest(
             }})
             if count is None:
                 unknowns.append({"group": group, "bbox": card_box, "reason": "missing_or_ambiguous_exact_quantity"})
+        result["complete_kinds"]["troop" if group == "troops" else "spell"] = not any(
+            item.get("group") == group for item in unknowns)
     result["complete"] = not unknowns
     result["identity_complete"] = result["complete"] and all(
         card["unit_id"] is not None for group in ("troops", "spells") for card in result[group])
@@ -322,7 +330,7 @@ def _inside(item: OCRText, roi: tuple[int, int, int, int]) -> bool:
 
 
 def _read_count(path, provider, texts, box, native_resolution, baseline_resolution,
-                canonical_image, native_image):
+                canonical_image, native_image, client_version):
     roi = (box[0], box[1], box[0] + 70, box[1] + 28)
     candidates = [item for item in texts if _confident(item) and _inside(item, roi)
                   and re.fullmatch(r"[xX×]\s*[0-9]+", item.text.strip())]
@@ -339,6 +347,7 @@ def _read_count(path, provider, texts, box, native_resolution, baseline_resoluti
         asdict(OCRText(item.text, item.confidence, None if item.bbox is None else scale_box(
             item.bbox, from_resolution=_BASE, to_resolution=baseline_resolution))) for item in candidates]}
     if len(candidates) != 1:
+        local_values: set[int] = set()
         # The spell cards' purple/icy background can defeat full-frame and
         # native line OCR. Re-read only the quantity glyphs with several
         # contrast transforms, retaining the exact text and confidence. This
@@ -368,9 +377,31 @@ def _read_count(path, provider, texts, box, native_resolution, baseline_resoluti
                      and item["confidence"] >= .9
                      and re.fullmatch(r"[xX×]\s*[0-9]+", item["text"].strip())]
             values = {int(re.sub(r"\D", "", item["text"])) for item in valid}
+            local_values = values
             if len(values) == 1 and next(iter(values)) > 0:
                 evidence["source"] = "contrast_line_roi"
                 return next(iter(values)), evidence
+        # The siege x1 glyph is independent evidence for its shape. A second
+        # troop sample includes the space after the digit, so x11 cannot match
+        # merely by sharing an x1 prefix. Both must agree after OCR fails.
+        if not candidates and not local_values and client_version == template_manifest().get("client"):
+            sample_path = CATALOG_ROOT / "siege_count_x1_18_600_7.png"
+            sample = cv2.imdecode(np.fromfile(sample_path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE) if sample_path.is_file() else None
+            full_path = CATALOG_ROOT / "army_count_x1_18_600_7.png"
+            full = cv2.imdecode(np.fromfile(full_path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE) if full_path.is_file() else None
+            if sample is not None and full is not None:
+                left, top = box[:2]
+                header = cv2.cvtColor(canonical_image[top:top + 31, left:left + 55], cv2.COLOR_BGR2GRAY)
+                whole = cv2.cvtColor(canonical_image[top:top + 28, left + 1:left + 46], cv2.COLOR_BGR2GRAY)
+                if (header.shape[0] >= sample.shape[0] and header.shape[1] >= sample.shape[1]
+                        and whole.shape[0] >= full.shape[0] and whole.shape[1] >= full.shape[1]):
+                    score = float(cv2.matchTemplate(header, sample, cv2.TM_CCOEFF_NORMED).max())
+                    full_score = float(cv2.matchTemplate(whole, full, cv2.TM_CCOEFF_NORMED).max())
+                    evidence["x1_header_scores"] = {"independent_glyph": round(score, 5),
+                                                     "whole_header": round(full_score, 5)}
+                    if score >= .85 and full_score >= .94:
+                        evidence["source"] = "sampled_x1_header"
+                        return 1, evidence
         return None, evidence
     count = int(re.sub(r"\D", "", candidates[0].text))
     return count if count > 0 else None, evidence

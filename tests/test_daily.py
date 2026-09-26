@@ -142,6 +142,18 @@ class DailyRunnerTests(unittest.TestCase):
         return TaskResult("battle","succeeded","verified",evidence=[self.frame.screenshot_path],
                           metrics={"returned_home":True,"rounds_completed":1,"victory":False})
 
+    def test_building_event_requires_targeted_strategy_before_battle(self):
+        routine = RoutineConfig((TaskSpec("building-event", "event", max_battles=1),))
+        progress = GoalProgress(False, values={"scoring_condition": "destroy_building",
+                                               "building_type": "air_defense"})
+        with patch("autococ.daily.read_progress", return_value=progress), \
+                patch("autococ.combat.run_battle") as battle:
+            stats = self.runner().run_routine(routine)
+        battle.assert_not_called()
+        self.assertEqual(stats.battles_completed, 0)
+        self.assertTrue(any(r.status == "not_supported" and "targeted strategy" in r.reason
+                            for r in stats.task_results))
+
     def test_multiple_goals_run_sequentially_with_independent_options(self):
         routine=RoutineConfig((TaskSpec("gold","resources",strategy="two_edge",max_battles=1),
                                TaskSpec("oil","resources",strategy="edrag_line",max_battles=1,

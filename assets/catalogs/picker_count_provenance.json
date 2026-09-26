@@ -1,0 +1,37 @@
+{
+  "client": "18.600.7",
+  "version_code": 180600008,
+  "source_frame": "reports/live-army-editor-probe/frames/00002-resume-electro-info-after.png",
+  "source_bbox_1280": [
+    665,
+    195,
+    694,
+    220
+  ],
+  "observed_unit": "dragon_rider",
+  "observed_count": 1,
+  "state": "current_picker_troop",
+  "samples": [
+    {
+      "path": "current_picker_x1_18_600_7.png",
+      "source_frame": "reports/live-army-editor-probe/frames/00002-resume-electro-info-after.png",
+      "source_bbox_1280": [665, 195, 694, 220],
+      "observed_unit": "dragon_rider",
+      "observed_count": 1
+    },
+    {
+      "path": "current_picker_x1_full_18_600_7.png",
+      "source_frame": "reports/live-army-editor-probe/frames/00002-resume-electro-info-after.png",
+      "source_bbox_1280": [663, 194, 708, 224],
+      "observed_unit": "dragon_rider",
+      "observed_count": 1
+    },
+    {
+      "path": "current_picker_x6_18_600_7.png",
+      "source_frame": "reports/resume-sampling/frames/00002-spell-picker-after.png",
+      "source_bbox_1280": [559, 287, 604, 317],
+      "observed_unit": "lightning_spell",
+      "observed_count": 6
+    }
+  ]
+}

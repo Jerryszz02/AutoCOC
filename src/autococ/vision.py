@@ -384,7 +384,8 @@ class ScreenshotRecognizer:
             from .army_editor import recognize_army_editor
 
             observations["army_editor"] = recognize_army_editor(
-                path, self.provider, texts, baseline_resolution=self.baseline_resolution)
+                path, self.provider, texts, baseline_resolution=self.baseline_resolution,
+                client_version=self.client_version)
             editor = observations["army_editor"]
             if (scene == SCENE_TRAINING and editor.get("surface") == "current"
                     and isinstance(observations.get("army"), dict)
@@ -416,7 +417,7 @@ class ScreenshotRecognizer:
                     if loadout["complete"]:
                         army["hero_loadout_complete"] = True
                         army["hero_loadout"] = loadout["hero_loadout"]
-            if (scene == SCENE_UNKNOWN and editor.get("surface") == "picker"
+            if (scene == SCENE_UNKNOWN and editor.get("surface") in {"picker", "current_picker"}
                     and editor.get("ready") is True
                     and isinstance(editor.get("capacities"), dict)
                     and "troop" in editor["capacities"]):

@@ -1,4 +1,4 @@
-"""Evidence-gated army recipe application through the saved-plan editor.
+"""Evidence-gated army recipe application through current or saved editors.
 
 The army UI changes the entire lineup when a saved plan is used. A recipe only
 specifies which *kinds* to replace; every other kind is copied from the fresh
@@ -27,7 +27,13 @@ def _read_current(snapshot, *, full: bool, relevant: set[str] | None = None) -> 
     if not isinstance(army, dict):
         return {}, "army_observation_missing"
     manifest = army.get("manifest")
-    if not isinstance(manifest, dict) or not manifest.get("complete"):
+    if not isinstance(manifest, dict):
+        return {}, "army_manifest_incomplete"
+    needed = {"troop", "spell"} if full else ({"troop", "spell"} & (relevant or set()))
+    complete_kinds = manifest.get("complete_kinds")
+    if any(manifest.get("complete") is not True and
+           (not isinstance(complete_kinds, dict) or complete_kinds.get(kind) is not True)
+           for kind in needed):
         return {}, "army_manifest_incomplete"
     groups = {"troop": manifest.get("troops"), "spell": manifest.get("spells")}
     identities = army.get("identity_cards")
@@ -85,10 +91,15 @@ def _matches(observed: dict[str, dict[str, int]], desired: dict[str, dict[str, i
     return True
 
 
-def _control(editor: dict, action: str, *, unit_id: str | None = None) -> dict | None:
+def _control(editor: dict, action: str, *, unit_id: str | None = None,
+             kind: str | None = None, allow_capacity_blocked: bool = False) -> dict | None:
     matches = [item for item in editor.get("controls", []) if item.get("action") == action
                and (unit_id is None or item.get("unit_id") == unit_id)
-               and item.get("enabled") is True and item.get("cost_free") is True
+               and (kind is None or item.get("kind") == kind)
+               and (item.get("enabled") is True or (allow_capacity_blocked
+                    and action == "increment" and item.get("enabled") is False
+                    and item.get("capacity_blocked") is True))
+               and item.get("cost_free") is True
                and isinstance(item.get("confidence"), (int, float))
                and item["confidence"] >= .9 and isinstance(item.get("point"), (list, tuple))
                and len(item["point"]) == 2 and all(type(n) is int for n in item["point"])]
@@ -133,11 +144,16 @@ def _observed_group(editor: dict, kind: str) -> dict[str, int] | None:
     if not isinstance(complete, dict) or complete.get(kind) is not True:
         return None
     counts: dict[str, int] = {}
-    for card in editor.get("cards", []):
+    if not isinstance(editor.get("cards"), list):
+        return None
+    for card in editor["cards"]:
+        if not isinstance(card, dict):
+            return None
         if card.get("kind") != kind:
             continue
         unit_id, count = card.get("unit_id"), card.get("count")
-        if get_unit(unit_id) is None or type(count) is not int or count < 0 or unit_id in counts:
+        unit = get_unit(unit_id) if isinstance(unit_id, str) else None
+        if unit is None or unit.kind != kind or type(count) is not int or count < 0 or unit_id in counts:
             return None
         counts[unit_id] = count
     return counts
@@ -216,12 +232,15 @@ def _explicit_unavailable(editor: dict, unit_id: str) -> str | None:
 
 
 def _preflight_change(snapshot, editor: dict, observed: dict[str, dict[str, int]],
-                      desired: dict[str, dict[str, int]], *, known_only: bool = False) -> str | None:
+                      desired: dict[str, dict[str, int]], *, known_only: bool = False,
+                      deferred_availability: set[str] | None = None) -> str | None:
     """Reject a known impossible edit; require evidence for additions and space.
 
     Existing, already-matching troops need no unlock or housing observations.
     For a changed lineup, an absent unit must be visibly available in the
-    picker. Unknown costs are not treated as zero.
+    picker. A current-picker capacity block may defer the availability check
+    until space has been released; it never establishes availability itself.
+    Unknown costs are not treated as zero.
     """
     army = snapshot.observations.get("army", {})
     availability = editor.get("unit_availability", {})
@@ -239,7 +258,9 @@ def _preflight_change(snapshot, editor: dict, observed: dict[str, dict[str, int]
             if blocked is not None:
                 return blocked
             entry = availability.get(unit_id) if isinstance(availability, dict) else None
-            if not isinstance(entry, dict) or entry.get("available") is not True:
+            deferred = (unit_id in (deferred_availability or set()) and
+                        (not isinstance(entry, dict) or entry.get("available") is not False))
+            if (not isinstance(entry, dict) or entry.get("available") is not True) and not deferred:
                 if not known_only:
                     return f"unit_availability_unverified:{unit_id}"
         capacity_kind = {"troop": "troops", "spell": "spells", "hero": "heroes", "siege": "siege"}[kind]
@@ -278,6 +299,239 @@ def _preflight_change(snapshot, editor: dict, observed: dict[str, dict[str, int]
         if projected > total:
             return f"{kind}_capacity_exceeded:{projected}>{total}"
     return None
+
+
+def _positive_counts(group: dict[str, int]) -> dict[str, int]:
+    return {unit_id: count for unit_id, count in group.items() if count}
+
+
+def _direct_picker(snapshot, kind: str) -> dict | None:
+    editor = snapshot.observations.get("army_editor")
+    if (snapshot.scene != "training" or not isinstance(editor, dict)
+            or editor.get("surface") != "current_picker" or editor.get("ready") is not True
+            or editor.get("editing_kind") != kind):
+        return None
+    return editor
+
+
+def _observe_direct_current_return(session, counts: dict[str, dict[str, int]],
+                                   loadout: dict, evidence: list[Path]):
+    """Allow animation to settle; never retry a clearly different full lineup."""
+    deadline = time.monotonic() + 15
+    last, state, actual = None, "current_unverified", None
+    for attempt in range(3):
+        session.check_deadline()
+        if attempt and time.monotonic() >= deadline:
+            break
+        shot = session.observe(f"army-current-return-{attempt}")
+        evidence.append(shot.screenshot_path)
+        last = shot
+        editor = shot.observations.get("army_editor")
+        if (shot.scene == "training" and isinstance(editor, dict)
+                and editor.get("surface") == "current" and editor.get("ready") is True):
+            actual, issue = _read_current(shot, full=True)
+            if issue is None:
+                if not _matches(actual, counts):
+                    return shot, "counts_mismatch", actual
+                observed_loadout = _hero_loadout(shot.observations["army"], set(actual["hero"]))
+                if _same_loadout(loadout, observed_loadout):
+                    return shot, "matched", actual
+                state = "loadout_unverified"
+            else:
+                state = issue
+        if shot.scene in {"disconnected", "maintenance", "battle", "enemy_village"}:
+            break
+        if attempt < 2:
+            session.check_deadline()
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(.35, remaining))
+    return last, state, actual
+
+
+def _observe_direct_edit(session, kind: str, before: dict[str, int],
+                         expected: dict[str, int], evidence: list[Path]):
+    """Confirm one edit from at most three new frames without repeating its tap."""
+    deadline = time.monotonic() + 15
+    last = None
+    for attempt in range(3):
+        session.check_deadline()
+        if attempt and time.monotonic() >= deadline:
+            break
+        shot = session.observe(f"army-current-picker-edit-{attempt}")
+        evidence.append(shot.screenshot_path)
+        editor = _direct_picker(shot, kind)
+        actual = None if editor is None else _observed_group(editor, kind)
+        last = (shot, editor, actual)
+        if actual is not None:
+            counts = _positive_counts(actual)
+            if counts == _positive_counts(expected):
+                return (*last, "matched")
+            if counts != _positive_counts(before):
+                return (*last, "mismatch")
+        if shot.scene in {"disconnected", "maintenance", "battle", "enemy_village"}:
+            break
+        if attempt < 2:
+            session.check_deadline()
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(.35, remaining))
+    return (*last, "uncertain") if last is not None else (None, None, None, "uncertain")
+
+
+def _apply_direct(session, snapshot, observed: dict[str, dict[str, int]],
+                  desired: dict[str, dict[str, int]], original_loadout: dict,
+                  evidence: list[Path]) -> TaskResult:
+    """Preflight every changed picker, then mutate one observed count per tap."""
+    changed = [kind for kind in ("troop", "spell")
+               if not _matches(observed, desired, kinds={kind})]
+    expected = {kind: dict(group) for kind, group in observed.items()}
+    receipt: list[dict[str, object]] = []
+    actions = 0
+    total_edits = sum(abs(desired[kind].get(unit_id, 0) - observed[kind].get(unit_id, 0))
+                      for kind in changed for unit_id in observed[kind].keys() | desired[kind].keys())
+    if total_edits > 100:
+        return _result("not_supported", "direct_edit_action_limit", evidence, actions=0,
+                       recipe_mutations=0, required_mutations=total_edits)
+
+    def outcome(status: str, reason: str, **extra) -> TaskResult:
+        return _result(status, reason, evidence, actions=actions,
+                       recipe_mutations=len(receipt), before=observed, desired=desired,
+                       confirmed_counts=expected, mutations=receipt, **extra)
+
+    # Current picker kind and completeness are anchored by selected cards.
+    # Removing every original card leaves no independent kind anchor, so the
+    # next count cannot be verified even when a target card is waiting below.
+    if any(not any(count > 0 and desired[kind].get(unit_id, 0) > 0
+                   for unit_id, count in observed[kind].items()) for kind in changed):
+        return outcome("not_supported", "direct_empty_picker_unverified")
+
+    # Navigation is read-only. Check all target kinds before making the first
+    # decrement, so a missing target card cannot strand a partly edited army.
+    for kind in changed:
+        editor = snapshot.observations["army_editor"]
+        control = _control(editor, "open_picker", kind=kind)
+        if control is None:
+            return outcome("not_supported", f"direct_open_picker_unavailable:{kind}")
+        session.check_deadline()
+        session.tap(snapshot, control["point"], reason=f"Inspect current {kind} picker")
+        actions += 1
+        picker = _observe_surface(session, "current_picker", evidence, timeout_sec=15)
+        picker_editor = None if picker is None else _direct_picker(picker, kind)
+        if picker_editor is None:
+            return outcome("failed", f"direct_{kind}_picker_unverified")
+        close = _control(picker_editor, "close_picker")
+
+        def abort_preflight(status: str, reason: str) -> TaskResult:
+            nonlocal actions, snapshot
+            if close is None:
+                return outcome("failed", f"direct_{kind}_close_unavailable",
+                               preflight_reason=reason)
+            session.check_deadline()
+            session.tap(picker, close["point"], reason=f"Leave uneditable {kind} picker")
+            actions += 1
+            snapshot, return_state, actual = _observe_direct_current_return(
+                session, expected, original_loadout, evidence)
+            if return_state != "matched":
+                return outcome("failed", "direct_preflight_return_unverified",
+                               preflight_reason=reason, return_state=return_state,
+                               return_counts=actual)
+            return outcome(status, reason)
+
+        group = _observed_group(picker_editor, kind)
+        if group is None or _positive_counts(group) != _positive_counts(observed[kind]):
+            return abort_preflight("not_supported", f"direct_{kind}_current_counts_unverified")
+        partial = {item: dict(cards) for item, cards in observed.items()}
+        partial[kind] = desired[kind]
+        deferred_availability = set()
+        for unit_id in desired[kind]:
+            if desired[kind].get(unit_id, 0) <= observed[kind].get(unit_id, 0):
+                continue
+            candidate = _control(picker_editor, "increment", unit_id=unit_id,
+                                 allow_capacity_blocked=True)
+            if (observed[kind].get(unit_id, 0) > 0 and candidate is not None
+                    and candidate.get("enabled") is False
+                    and candidate.get("capacity_blocked") is True):
+                deferred_availability.add(unit_id)
+        preflight = _preflight_change(snapshot, picker_editor, observed, partial,
+                                      deferred_availability=deferred_availability)
+        if preflight is not None:
+            return abort_preflight("skipped" if _known_no_opportunity(preflight) else "not_supported",
+                                   preflight)
+        for unit_id in observed[kind].keys() | desired[kind].keys():
+            difference = desired[kind].get(unit_id, 0) - observed[kind].get(unit_id, 0)
+            if difference and _control(picker_editor, "increment" if difference > 0 else "decrement",
+                                       unit_id=unit_id, allow_capacity_blocked=difference > 0) is None:
+                return abort_preflight("not_supported", f"direct_{kind}_control_unavailable:{unit_id}")
+        if close is None:
+            return outcome("failed", f"direct_{kind}_close_unavailable")
+        session.check_deadline()
+        session.tap(picker, close["point"], reason=f"Close inspected {kind} picker")
+        actions += 1
+        snapshot, return_state, actual = _observe_direct_current_return(
+            session, expected, original_loadout, evidence)
+        if return_state != "matched":
+            return outcome("failed", "direct_preflight_return_unverified",
+                           return_state=return_state, return_counts=actual)
+
+    for kind in changed:
+        opener = _control(snapshot.observations["army_editor"], "open_picker", kind=kind)
+        if opener is None:
+            return outcome("failed", f"direct_open_picker_lost:{kind}")
+        session.check_deadline()
+        session.tap(snapshot, opener["point"], reason=f"Edit current {kind} lineup")
+        actions += 1
+        picker = _observe_surface(session, "current_picker", evidence, timeout_sec=15)
+        editor = None if picker is None else _direct_picker(picker, kind)
+        group = None if editor is None else _observed_group(editor, kind)
+        if group is None or _positive_counts(group) != _positive_counts(expected[kind]):
+            return outcome("failed", f"direct_{kind}_reopen_unverified")
+        for unit_id in sorted(expected[kind].keys() | desired[kind].keys(),
+                              key=lambda uid: (desired[kind].get(uid, 0) >= expected[kind].get(uid, 0), uid)):
+            target = desired[kind].get(unit_id, 0)
+            while group.get(unit_id, 0) != target:
+                direction = "decrement" if group.get(unit_id, 0) > target else "increment"
+                if direction == "increment":
+                    unavailable = _explicit_unavailable(editor, unit_id)
+                    if unavailable is not None:
+                        return outcome("failed", unavailable)
+                control = _control(editor, direction, unit_id=unit_id)
+                if control is None:
+                    return outcome("failed", f"direct_{direction}_control_lost:{unit_id}")
+                after_group = dict(group)
+                after_group[unit_id] = group.get(unit_id, 0) + (-1 if direction == "decrement" else 1)
+                session.check_deadline()
+                session.tap(picker, control["point"], reason=f"Current army {unit_id} {direction}")
+                actions += 1
+                after, after_editor, actual, confirmation = _observe_direct_edit(
+                    session, kind, group, after_group, evidence)
+                if confirmation != "matched":
+                    return outcome("failed", "direct_edit_result_uncertain", unit_id=unit_id,
+                                   direction=direction, expected_count=after_group[unit_id],
+                                   observed_count=None if actual is None else actual.get(unit_id, 0),
+                                   observation_state=confirmation)
+                receipt.append({"kind": kind, "unit_id": unit_id, "direction": direction,
+                                "count": after_group[unit_id], "frame": str(after.screenshot_path)})
+                expected[kind] = dict(actual)
+                picker, editor, group = after, after_editor, actual
+        if _positive_counts(group) != _positive_counts(desired[kind]):
+            return outcome("failed", f"direct_{kind}_target_unverified")
+        close = _control(editor, "close_picker")
+        if close is None:
+            return outcome("failed", f"direct_{kind}_close_lost")
+        session.check_deadline()
+        session.tap(picker, close["point"], reason=f"Close edited {kind} picker")
+        actions += 1
+        snapshot, return_state, actual = _observe_direct_current_return(
+            session, expected, original_loadout, evidence)
+        if return_state != "matched":
+            return outcome("failed", f"direct_{kind}_return_mismatch",
+                           return_state=return_state, return_counts=actual)
+    if not _matches(expected, desired):
+        return outcome("failed", "direct_full_recipe_unverified")
+    final, _ = _read_current(snapshot, full=True)
+    return outcome("succeeded", "Current army recipe applied and fully verified",
+                   observed=final)
 
 
 def ensure_army(session, recipe: ArmyRecipe) -> TaskResult:
@@ -335,6 +589,10 @@ def ensure_army(session, recipe: ArmyRecipe) -> TaskResult:
     original_loadout = _hero_loadout(army, set(observed["hero"]))
     if original_loadout is None:
         return _result("not_supported", "hero_equipment_or_pet_observation_missing", evidence, actions=0)
+    changed_kinds = {kind for kind in _KINDS if not _matches(observed, desired, kinds={kind})}
+    if (changed_kinds <= {"troop", "spell"} and all(
+            _control(editor, "open_picker", kind=kind) is not None for kind in changed_kinds)):
+        return _apply_direct(session, snapshot, observed, desired, original_loadout, evidence)
     control = _control(editor, "open_saved")
     if control is None:
         return _result("not_supported", "saved_plan_tab_unavailable", evidence, actions=0)

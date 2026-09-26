@@ -7,6 +7,10 @@ import cv2
 import numpy as np
 
 from autococ.unit_catalog import ArmyRecipe, ArmyRequirement, coverage, recognize_card_identity
+from autococ.locator import scale_box
+from autococ.ocr import OCRText, RapidOCRProvider
+from autococ.scene import SCENE_BATTLE, SCENE_ENEMY_VILLAGE
+from autococ.vision import ScreenshotRecognizer
 
 
 class UnitCatalogTests(unittest.TestCase):
@@ -71,6 +75,29 @@ class UnitCatalogTests(unittest.TestCase):
                         surface="army", client_version="18.600.8")
                     self.assertIsNone(wrong_version["unit_id"])
                     self.assertEqual(wrong_version["reason"], "client_version_unverified")
+
+    def test_real_battle_bar_binds_remaining_troops_after_electro_deploys(self):
+        provider = RapidOCRProvider()
+        recognizer = ScreenshotRecognizer(provider=provider)
+        recognizer.client_version = "18.600.7"
+        fixtures = Path(__file__).parent / "fixtures"
+        for filename, scene, expected in (
+            ("daily_battle_bar_before_20260926.png", SCENE_ENEMY_VILLAGE,
+             [("electro_dragon", 10), ("dragon_rider", 1), ("balloon", 2)]),
+            ("daily_battle_bar_after_20260926.png", SCENE_BATTLE,
+             [("dragon_rider", 1), ("balloon", 2)]),
+        ):
+            with self.subTest(frame=filename):
+                path = fixtures / filename
+                texts = [OCRText(item.text, item.confidence, scale_box(
+                    item.bbox, from_resolution=(2560, 1440), to_resolution=(1280, 720)))
+                    for item in provider.recognize(path)]
+                battle = recognizer._battle_observation(path, texts, scene)
+                troops = [(card["unit_id"], card["count"]) for card in battle["slots"]
+                          if card["kind"] == "troop"]
+                self.assertEqual(troops, expected)
+                self.assertTrue(all(card["source"] == "army" for card in battle["slots"]
+                                    if card["kind"] == "troop"))
 
 
 if __name__ == "__main__":
