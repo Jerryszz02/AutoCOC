@@ -99,7 +99,8 @@ def run_battle(session: GameSession) -> TaskResult:
             evidence.extend(prepared.evidence)
             metrics["army_preparation"] = {"status": prepared.status, "reason": prepared.reason, **prepared.metrics}
             if prepared.status == "skipped":
-                if type(prepared.metrics.get("actions")) is not int or prepared.metrics["actions"] != 0:
+                mutations = prepared.metrics.get("recipe_mutations")
+                if type(mutations) is not int or mutations != 0:
                     raise FlowError("Unavailable army result followed an uncertain recipe mutation")
                 home = return_to_village(session)
                 evidence.append(home.screenshot_path)

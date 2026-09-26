@@ -31,16 +31,54 @@ class ArmyEditorRecognitionTests(unittest.TestCase):
                          [("open_saved", [640, 75])])
         self.assertEqual(editor["cards"], [])
 
+    def test_current_save_icon_needs_visual_glyph(self):
+        self.image[54:100, 388:443] = (20, 20, 20)
+        self.image[61:83, 404:428] = (235, 235, 235)
+        editor = self.read([OCRText("我的军队", .99, (210, 60, 310, 90)),
+                            OCRText("已保存的配置", .99, (570, 60, 710, 90))])
+        self.assertIn("save_current", [item["action"] for item in editor["controls"]])
+
+    def test_save_dialog_only_exposes_unique_visible_empty_enabled_slot(self):
+        self.image[:] = (75, 95, 115)
+        self.image[110:240, 100:350] = (235, 70, 35)
+        self.image[305:430, 1120:1230] = (150, 175, 195)
+        self.image[455:580, 1120:1230] = (75, 75, 75)
+        self.image[610:710, 1120:1230] = (75, 75, 75)
+        texts = [OCRText("将军队保存为新配置", .99, (545, 55, 735, 85))]
+        texts.extend(OCRText("保存军队", .99, (1145, y, 1215, y + 25))
+                     for y in (180, 360, 512, 660))
+        editor = self.read(texts)
+        self.assertEqual(editor["surface"], "save_current")
+        self.assertTrue(editor["ready"])
+        self.assertEqual([(item["action"], item["point"]) for item in editor["controls"]],
+                         [("save_to_empty", [1180, 372])])
+        self.image[305:430, 100:350] = (235, 70, 35)
+        editor = self.read(texts)
+        self.assertFalse(editor["ready"])
+        self.assertEqual(editor["controls"], [])
+        self.image[305:430, 100:350] = (75, 95, 115)
+        self.image[305:410, 100:310] = (95, 95, 95)
+        self.image[305:410, 100:310:3] = (225, 225, 225)
+        editor = self.read(texts)
+        self.assertFalse(editor["ready"])  # A gray card still occupies the row.
+        self.image[305:410, 100:310] = (75, 95, 115)
+        editor = self.read(texts + [OCRText("x2", .99, (200, 360, 225, 380))])
+        self.assertFalse(editor["ready"])  # Explicit quantity also forbids an empty slot.
+
     def test_saved_page_controls_do_not_make_unidentified_preset_complete(self):
         editor = self.read([OCRText("我的军队", .99, (210, 60, 310, 90)),
                             OCRText("已保存的配置", .99, (570, 60, 710, 90)),
+                            OCRText("军队配置1", .99, (45, 130, 140, 155)),
                             OCRText("使用", .99, (1150, 170, 1190, 195)),
                             OCRText("编辑", .99, (1150, 230, 1190, 255)),
                             OCRText("新建", .99, (1150, 670, 1190, 695))])
         self.assertEqual(editor["surface"], "saved")
         self.assertTrue(editor["ready"])
         self.assertFalse(editor["presets"][0]["complete"])
-        self.assertEqual(editor["controls"][0]["action"], "create_preset")
+        self.assertEqual(editor["presets"][0]["preset_id"], "1")
+        self.assertTrue(editor["occupied_preset_ids_complete"])
+        self.assertEqual([item["action"] for item in editor["controls"]],
+                         ["open_current", "create_preset"])
 
     def test_edit_title_anchors_capacity_but_does_not_invent_cards(self):
         editor = self.read([OCRText("编辑军队配置1", .99, (570, 52, 710, 80)),
@@ -50,6 +88,12 @@ class ArmyEditorRecognitionTests(unittest.TestCase):
         self.assertEqual(editor["capacities"]["troop"], {"used": 270, "total": 335})
         self.assertFalse(editor["complete"])
         self.assertEqual(editor["controls"], [])
+
+    def test_ocr_misread_spell_capacity_is_rejected(self):
+        editor = self.read([OCRText("编辑军队配置3", .99, (570, 52, 710, 80)),
+                            OCRText("0/335", .99, (570, 150, 670, 180)),
+                            OCRText("0/110", .99, (570, 290, 670, 320))])
+        self.assertNotIn("spell", editor["capacities"])
 
     def test_picker_needs_visual_panel_and_capacity_anchor(self):
         self.image[460:665, 50:1200] = 230

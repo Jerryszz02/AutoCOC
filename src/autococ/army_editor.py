@@ -55,6 +55,7 @@ def _capacities(texts: Sequence[OCRText], *, edit: bool) -> dict[str, dict[str, 
                 "siege": (940, 230, 1120, 390)} if edit else
                {"troop": (560, 105, 850, 175), "spell": (560, 345, 850, 415)})
     result = {}
+    bounds = {"troop": 500, "spell": 20, "siege": 10}
     for kind, roi in regions.items():
         matches = [(_CAPACITY.fullmatch(item.text.strip()), item) for item in texts
                    if item.confidence >= .88 and _inside(item, roi)]
@@ -62,7 +63,7 @@ def _capacities(texts: Sequence[OCRText], *, edit: bool) -> dict[str, dict[str, 
         if len(matches) == 1:
             m, _ = matches[0]
             used, total = int(m.group(1)), int(m.group(2))
-            if 0 <= used <= total:
+            if 0 <= used <= total <= bounds[kind]:
                 result[kind] = {"used": used, "total": total}
     return result
 
@@ -74,6 +75,65 @@ def _picker_visible(image: np.ndarray) -> bool:
     upper = gray[385:415, 50:1200]
     lower = gray[460:665, 50:1200]
     return float(np.mean(upper)) < 75 and float(np.mean(lower > 160)) > .20
+
+
+def _save_current_icon_visible(image: np.ndarray) -> bool:
+    """Require the white tray glyph inside the current-army tab before tapping it."""
+    hsv = cv2.cvtColor(image[54:100, 388:443], cv2.COLOR_BGR2HSV)
+    white = float(np.mean((hsv[:, :, 1] < 65) & (hsv[:, :, 2] > 170)))
+    outline = float(np.mean(hsv[:, :, 2] < 65))
+    return white >= .07 and outline >= .1
+
+
+def _save_current_dialog(image: np.ndarray, texts: Sequence[OCRText]) -> dict[str, object] | None:
+    title = _one(texts, "将军队保存为新配置", (480, 35, 800, 105))
+    if title is None:
+        return None
+    result: dict[str, object] = {"frame": "", "surface": "save_current", "ready": False,
+                                 "cards": [], "controls": [], "presets": [],
+                                 "capacities": {}, "unknowns": [], "complete": False}
+    buttons = sorted((item for item in texts if item.text.strip() == "保存军队"
+                      and item.confidence >= .88 and _inside(item, (1100, 120, 1240, 700))),
+                     key=lambda item: _point(item)[1])
+    if len(buttons) < 2:
+        result["unknowns"].append("save_current_rows_unanchored")
+        return result
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    empty_active = []
+    for item in buttons:
+        center_y = _point(item)[1]
+        top, bottom = max(160, center_y - 80), min(710, center_y + 30)
+        if bottom - top < 60:
+            continue
+        cards = hsv[top:bottom, 70:1050]
+        colorful = float(np.mean((cards[:, :, 0] >= 65) & (cards[:, :, 0] <= 170)
+                                  & (cards[:, :, 1] >= 75) & (cards[:, :, 2] >= 110)))
+        content_gray = cv2.cvtColor(image[max(160, center_y-70):min(710, center_y+55),
+                                              100:1050], cv2.COLOR_BGR2GRAY)
+        content_std = float(content_gray.std())
+        card_edges = float(np.mean(cv2.Canny(content_gray, 50, 130) > 0))
+        count_label = any(item.bbox is not None and re.fullmatch(r"[xX×]\s*[0-9]+", item.text.strip())
+                          and 100 <= _point(item)[0] <= 1050
+                          and center_y - 70 <= _point(item)[1] <= center_y + 55
+                          for item in texts)
+        button = hsv[max(150, center_y - 65):min(710, center_y + 45), 1120:1230]
+        brightness = float(np.mean(button[:, :, 2]))
+        if (not count_label and colorful < .025 and content_std <= 15
+                and card_edges <= .04 and brightness >= 130):
+            empty_active.append((item, colorful, brightness, content_std, card_edges))
+    if len(empty_active) == 1:
+        item, colorful, brightness, content_std, card_edges = empty_active[0]
+        result["controls"].append(_control("save_to_empty", item,
+                                           empty_color_fraction=colorful,
+                                           empty_content_std=content_std,
+                                           empty_card_edge_fraction=card_edges,
+                                           button_brightness=brightness))
+        result["ready"] = True
+    elif empty_active:
+        result["unknowns"].append("save_current_empty_slot_ambiguous")
+    else:
+        result["unknowns"].append("save_current_empty_slot_not_visible")
+    return result
 
 
 def recognize_army_editor(
@@ -102,6 +162,10 @@ def recognize_army_editor(
     image = cv2.resize(image, _BASE, interpolation=cv2.INTER_AREA)
     canonical = [OCRText(item.text, item.confidence, None if item.bbox is None else scale_box(
         item.bbox, from_resolution=baseline_resolution, to_resolution=_BASE)) for item in texts]
+    save_dialog = _save_current_dialog(image, canonical)
+    if save_dialog is not None:
+        save_dialog["frame"] = str(path)
+        return save_dialog
     edit_titles = [item for item in canonical if item.bbox is not None and
                    _TITLE.search(item.text.replace(" ", "")) and item.confidence >= .88 and
                    _inside(item, (460, 25, 780, 110))]
@@ -129,6 +193,7 @@ def recognize_army_editor(
     if use or edits:
         result["surface"] = "saved"
         result["ready"] = True
+        result["controls"].append(_control("open_current", army_title))
         if len(use) != len(edits):
             result["unknowns"].append("saved_row_controls_incomplete")
         for index, (use_item, edit_item) in enumerate(zip(sorted(use, key=lambda x: x.bbox[1]),
@@ -136,18 +201,36 @@ def recognize_army_editor(
             if abs(_point(use_item)[1] - _point(edit_item)[1]) > 105:
                 result["unknowns"].append("saved_row_control_alignment_unknown")
                 continue
+            labels = [item for item in canonical if item.bbox is not None and
+                      re.fullmatch(r"军队配置\s*([0-9]+)", item.text.strip()) and
+                      _inside(item, (25, 110, 250, 670)) and
+                      25 <= _point(use_item)[1] - _point(item)[1] <= 75]
             result["presets"].append({"row": index, "complete": False, "cards": [],
+                                      "preset_id": (re.search(r"[0-9]+", labels[0].text).group()
+                                                    if len(labels) == 1 else None),
                                       "use_point": _point(use_item), "edit_point": _point(edit_item),
                                       "evidence": [asdict(use_item), asdict(edit_item)]})
         new = _one(canonical, "新建", (1090, 625, 1250, 715))
         if new is not None:
             result["controls"].append(_control("create_preset", new))
+        ids = [item.get("preset_id") for item in result["presets"]]
+        first = next((item for item in canonical if item.text.strip() == "军队配置1"
+                      and item.bbox is not None and _inside(item, (25, 110, 250, 180))), None)
+        result["occupied_preset_ids_complete"] = bool(
+            first is not None and new is not None and ids and all(ids)
+            and len(set(ids)) == len(ids) and len(use) == len(edits) == len(ids)
+            and max(_point(item)[1] for item in use) < _point(new)[1])
         result["unknowns"].append("saved_preset_manifest_unavailable")
         return result
     result["surface"] = "current"
     result["ready"] = True
     result["capacities"] = _capacities(canonical, edit=False)
     result["controls"].append(_control("open_saved", saved_title))
+    if _save_current_icon_visible(image):
+        result["controls"].append({"action": "save_current", "point": [414, 74],
+                                   "confidence": .93, "enabled": True, "cost_free": True,
+                                   "evidence": {"icon": "white_down_arrow_and_tray",
+                                                "tabs": [asdict(army_title), asdict(saved_title)]}})
     return result
 
 

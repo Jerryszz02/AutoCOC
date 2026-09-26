@@ -13,6 +13,10 @@ def current(name="current.png", *, troops=None, spells=None, heroes=None, siege=
     heroes = [{"unit_id": "barbarian_king", "kind": "hero", "count": 1}] if heroes is None else heroes
     siege = [{"unit_id": "wall_wrecker", "kind": "siege", "count": 1}] if siege is None else siege
     observations = {"army": {"manifest": {"complete": complete, "troops": troops, "spells": spells},
+                            "troops": {"used": 320, "capacity": 335},
+                            "spells": {"used": 2, "capacity": 11},
+                            "heroes": {"used": 1, "capacity": 4},
+                            "siege": {"used": 1, "capacity": 3},
                             "identity_cards": heroes + siege,
                             "identity_coverage": {"hero": True, "siege": True},
                             "hero_loadout_complete": True,
@@ -21,14 +25,25 @@ def current(name="current.png", *, troops=None, spells=None, heroes=None, siege=
     if editor:
         observations["army_editor"] = {"surface": "current", "ready": True, "controls": [
             {"action": "open_saved", "point": [640, 75], "enabled": True,
+             "cost_free": True, "confidence": .99},
+            {"action": "save_current", "point": [414, 74], "enabled": True,
              "cost_free": True, "confidence": .99}]}
     return SceneSnapshot("training", .99, Path(name), observations)
 
 
-def saved(*presets, capabilities=None):
+def saved(*presets, capabilities=None, availability=None, housing=None, inventory_complete=False):
     return SceneSnapshot("training", .99, Path("saved.png"), {"army_editor": {
         "surface": "saved", "ready": True, "presets": list(presets),
-        "editor_capabilities": capabilities, "controls": []}})
+        "editor_capabilities": capabilities, "unit_availability": availability,
+        "unit_housing_space": housing,
+        "occupied_preset_ids_complete": inventory_complete,
+        "controls": [{"action": "open_current", "point": [260, 75],
+                      "enabled": True, "cost_free": True, "confidence": .99}]}})
+
+
+def verified_saved(*presets):
+    return saved(*presets, availability={"lightning_spell": {"available": True}},
+                 housing={"freeze_spell": 1, "lightning_spell": 1})
 
 
 def preset(troop="meteor_golem", spell="lightning_spell", *, complete=True, use_free=True):
@@ -45,6 +60,19 @@ def preset(troop="meteor_golem", spell="lightning_spell", *, complete=True, use_
 
 
 class ArmyControlTests(unittest.TestCase):
+    def test_absent_optional_locked_unit_does_not_block_the_matching_recipe(self):
+        session = Mock()
+        shot = current()
+        shot.observations["army_editor"]["unit_availability"] = {
+            "lightning_spell": {"available": False, "reason": "locked"}}
+        session.observe.return_value = shot
+        recipe = ArmyRecipe((ArmyRequirement("freeze_spell", 2),
+                             ArmyRequirement("lightning_spell", 4, optional=True)))
+        result = ensure_army(session, recipe)
+        self.assertEqual(result.status, "succeeded", result.reason)
+        self.assertEqual(result.metrics["observed"]["spell"], {"freeze_spell": 2})
+        session.tap.assert_not_called()
+
     def test_matching_declared_kind_skips_switch_and_ignores_unknown_other_kind(self):
         session = Mock()
         session.observe.return_value = current(troops=[{"unit_id": None, "count": 8}])
@@ -91,7 +119,7 @@ class ArmyControlTests(unittest.TestCase):
 
     def test_saved_plan_must_preserve_unmentioned_troops_heroes_and_siege(self):
         session = Mock()
-        session.observe.side_effect = [current(), saved(preset(troop="dragon"))]
+        session.observe.side_effect = [current(), verified_saved(preset(troop="dragon"))]
         result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
         self.assertEqual(result.status, "not_supported")
         self.assertEqual(result.reason, "saved_plan_or_editor_samples_unavailable")
@@ -123,7 +151,7 @@ class ArmyControlTests(unittest.TestCase):
         matching["hero_loadout"] = {"barbarian_king": {
             **loadout["barbarian_king"], "pet_visual": icon("1234567890abcdee")}}
         session = Mock()
-        session.observe.side_effect = [before, saved(matching), after]
+        session.observe.side_effect = [before, verified_saved(matching), after]
         result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
         self.assertEqual(result.status, "succeeded")
         self.assertEqual(session.tap.call_count, 2)
@@ -141,7 +169,7 @@ class ArmyControlTests(unittest.TestCase):
         session = Mock()
         verified = current("verified.png", spells=[
             {"unit_id": "lightning_spell", "kind": "spell", "count": 4}])
-        session.observe.side_effect = [current(), saved(preset()), verified]
+        session.observe.side_effect = [current(), verified_saved(preset()), verified]
         result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
         self.assertEqual(result.status, "succeeded")
         self.assertEqual(result.metrics["observed"]["troop"], {"meteor_golem": 8})
@@ -151,12 +179,136 @@ class ArmyControlTests(unittest.TestCase):
 
     def test_uncertain_use_is_not_replayed(self):
         session = Mock()
-        session.observe.side_effect = [current(), saved(preset())] + [
+        session.observe.side_effect = [current(), verified_saved(preset())] + [
             SceneSnapshot("unknown", 0, Path(f"transition-{i}.png"), {}) for i in range(5)]
         result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.reason, "army_use_result_uncertain")
         self.assertEqual(session.tap.call_count, 2)
+
+    def test_matching_saved_plan_is_not_used_without_preflight_evidence(self):
+        session = Mock()
+        session.observe.side_effect = [current(), saved(preset())]
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual((result.status, result.reason),
+                         ("not_supported", "unit_availability_unverified:lightning_spell"))
+        self.assertEqual(session.tap.call_count, 1)
+
+        session = Mock()
+        session.observe.side_effect = [current(), saved(preset(),
+            availability={"lightning_spell": {"available": False, "reason": "locked"}})]
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual((result.status, result.reason), ("skipped", "unit_locked:lightning_spell"))
+        self.assertEqual(result.metrics["recipe_mutations"], 0)
+        self.assertEqual(result.metrics["actions"], 1)
+        self.assertEqual(session.tap.call_count, 1)
+
+    def test_current_exact_match_respects_explicit_unavailability(self):
+        shot = current()
+        shot.observations["army_editor"]["unit_availability"] = {
+            "freeze_spell": {"available": False, "reason": "locked"}}
+        session = Mock()
+        session.observe.return_value = shot
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("freeze_spell", 2),)))
+        self.assertEqual((result.status, result.reason), ("skipped", "unit_locked:freeze_spell"))
+        self.assertEqual(result.metrics["recipe_mutations"], 0)
+        session.tap.assert_not_called()
+
+    def test_known_locked_and_capacity_shortage_skip_before_mutation(self):
+        recipe = ArmyRecipe((ArmyRequirement("lightning_spell", 4),))
+        capabilities = {"freeze_spell": True, "lightning_spell": True}
+        session = Mock()
+        session.observe.side_effect = [current(), saved(capabilities=capabilities,
+            availability={"lightning_spell": {"available": False, "reason": "locked"}})]
+        result = ensure_army(session, recipe)
+        self.assertEqual((result.status, result.reason), ("skipped", "unit_locked:lightning_spell"))
+        self.assertEqual(session.tap.call_count, 1)  # Only opened the saved-plan page.
+
+        session = Mock()
+        session.observe.side_effect = [current(), saved(capabilities=capabilities,
+            availability={"lightning_spell": {"available": True}},
+            housing={"freeze_spell": 1, "lightning_spell": 3})]
+        result = ensure_army(session, recipe)
+        self.assertEqual((result.status, result.reason), ("skipped", "spell_capacity_exceeded:12>11"))
+        self.assertEqual(session.tap.call_count, 1)
+
+    def test_unknown_availability_or_housing_blocks_copy(self):
+        recipe = ArmyRecipe((ArmyRequirement("lightning_spell", 2),))
+        capabilities = {"freeze_spell": True, "lightning_spell": True}
+        session = Mock()
+        session.observe.side_effect = [current(), saved(capabilities=capabilities)]
+        result = ensure_army(session, recipe)
+        self.assertEqual((result.status, result.reason),
+                         ("not_supported", "unit_availability_unverified:lightning_spell"))
+        session = Mock()
+        session.observe.side_effect = [current(), saved(capabilities=capabilities,
+            availability={"lightning_spell": {"available": True}})]
+        result = ensure_army(session, recipe)
+        self.assertEqual((result.status, result.reason),
+                         ("not_supported", "spell_housing_unverified:freeze_spell"))
+
+    def test_expired_event_troop_is_known_no_opportunity_before_copy(self):
+        session = Mock()
+        session.observe.side_effect = [current(), saved(capabilities={
+            "meteor_golem": True, "event_super_pekka": True},
+            availability={"event_super_pekka": {"available": False, "reason": "expired"}})]
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("event_super_pekka", 1),)))
+        self.assertEqual((result.status, result.reason),
+                         ("skipped", "event_unit_expired:event_super_pekka"))
+        self.assertEqual(session.tap.call_count, 1)
+
+    def test_copy_current_never_uses_a_plan_without_full_postcopy_manifest(self):
+        recipe = ArmyRecipe((ArmyRequirement("lightning_spell", 2),))
+        capabilities = {"freeze_spell": True, "lightning_spell": True}
+        dialog = SceneSnapshot("training", .99, Path("save-dialog.png"), {"army_editor": {
+            "surface": "save_current", "ready": True,
+            "controls": [{"action": "save_to_empty", "point": [1179, 372],
+                          "enabled": True, "cost_free": True, "confidence": .99}]}})
+        sequence = [current(), saved({"preset_id": "1", "complete": False},
+                    capabilities=capabilities, inventory_complete=True,
+                    availability={"lightning_spell": {"available": True}},
+                    housing={"freeze_spell": 1, "lightning_spell": 1}),
+                    current("source.png"), dialog, saved({"preset_id": "3", "complete": False})]
+        session = Mock()
+        session.observe.side_effect = sequence
+        result = ensure_army(session, recipe)
+        self.assertEqual((result.status, result.reason),
+                         ("failed", "copied_plan_full_manifest_unverified"))
+        self.assertEqual(session.tap.call_count, 4)
+
+    def test_copy_never_claims_an_old_matching_plan_as_the_new_slot(self):
+        recipe = ArmyRecipe((ArmyRequirement("lightning_spell", 2),))
+        dialog = SceneSnapshot("training", .99, Path("save-dialog.png"), {"army_editor": {
+            "surface": "save_current", "ready": True,
+            "controls": [{"action": "save_to_empty", "point": [1179, 372],
+                          "enabled": True, "cost_free": True, "confidence": .99}]}})
+        old = preset(spell="freeze_spell")
+        old["preset_id"] = "1"
+        next(card for card in old["cards"] if card["kind"] == "spell")["count"] = 2
+        session = Mock()
+        session.observe.side_effect = [
+            current(), saved({"preset_id": "1", "complete": False},
+                             capabilities={"freeze_spell": True, "lightning_spell": True},
+                             availability={"lightning_spell": {"available": True}},
+                             housing={"freeze_spell": 1, "lightning_spell": 1},
+                             inventory_complete=True),
+            current("source.png"), dialog, saved(old)]
+        result = ensure_army(session, recipe)
+        self.assertEqual((result.status, result.reason),
+                         ("failed", "copied_plan_full_manifest_unverified"))
+        self.assertEqual(session.tap.call_count, 4)
+
+    def test_copy_requires_complete_preexisting_plan_id_inventory(self):
+        recipe = ArmyRecipe((ArmyRequirement("lightning_spell", 2),))
+        session = Mock()
+        session.observe.side_effect = [current(), saved({"preset_id": "1", "complete": False},
+            capabilities={"freeze_spell": True, "lightning_spell": True},
+            availability={"lightning_spell": {"available": True}},
+            housing={"freeze_spell": 1, "lightning_spell": 1})]
+        result = ensure_army(session, recipe)
+        self.assertEqual((result.status, result.reason),
+                         ("not_supported", "saved_plan_inventory_unverified"))
+        self.assertEqual(session.tap.call_count, 1)
 
 
 if __name__ == "__main__":

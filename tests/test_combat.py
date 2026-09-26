@@ -568,15 +568,16 @@ class CombatTests(unittest.TestCase):
         from autococ.unit_catalog import ArmyRecipe, ArmyRequirement
         strategy = StrategyDefinition("recipe", "recipe", ArmyRecipe((ArmyRequirement("barbarian", 1),)),
                                       (StrategyStep("deploy_troop", "barbarian"),))
-        for safe_home, actions, expected in ((True, 0, "skipped"), (False, 0, "failed"),
-                                             (True, 1, "failed")):
-            with self.subTest(safe_home=safe_home, actions=actions):
+        for safe_home, mutations, expected in ((True, 0, "skipped"), (False, 0, "failed"),
+                                               (True, 1, "failed"), (True, None, "failed")):
+            with self.subTest(safe_home=safe_home, mutations=mutations):
                 session = FakeSession([])
                 session.config.battle = replace(session.config.battle,
                                                 strategy_file=str(Path("recipe.toml").resolve()))
                 home = frame(0, "village", resources=deepcopy(BEFORE))
                 prepared = TaskResult("prepare_army", "skipped", "unit_locked:barbarian",
-                                     evidence=[Path("army-lock.png")], metrics={"actions": actions})
+                                     evidence=[Path("army-lock.png")],
+                                     metrics={"actions": 1, "recipe_mutations": mutations})
                 returns = [home, home if safe_home else FlowError("Cannot verify home")]
                 with patch("autococ.strategy_config.load_strategy", return_value=strategy), \
                         patch("autococ.army_control.ensure_army", return_value=prepared), \

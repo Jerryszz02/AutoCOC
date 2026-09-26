@@ -95,14 +95,16 @@ def _control(editor: dict, action: str, *, unit_id: str | None = None) -> dict |
     return matches[0] if len(matches) == 1 else None
 
 
-def _observe_surface(session, wanted: str, evidence: list[Path], *, timeout_sec: float = 35):
+def _observe_surface(session, wanted: str, evidence: list[Path], *, timeout_sec: float = 35,
+                     require_ready: bool = True):
     deadline = time.monotonic() + timeout_sec
     for index in range(5):
         session.check_deadline()
         snapshot = session.observe(f"army-{wanted}-{index}")
         evidence.append(snapshot.screenshot_path)
         editor = snapshot.observations.get("army_editor")
-        if isinstance(editor, dict) and editor.get("surface") == wanted and editor.get("ready") is True:
+        if (isinstance(editor, dict) and editor.get("surface") == wanted
+                and (not require_ready or editor.get("ready") is True)):
             return snapshot
         if snapshot.scene in {"disconnected", "maintenance", "battle", "enemy_village"}:
             break
@@ -110,6 +112,20 @@ def _observe_surface(session, wanted: str, evidence: list[Path], *, timeout_sec:
             break
         time.sleep(min(1, max(0, deadline - time.monotonic())))
     return None
+
+
+def _scroll_save_dialog(session, snapshot) -> None:
+    """Reveal an empty save row inside an independently titled dialog."""
+    editor = snapshot.observations.get("army_editor")
+    if (not isinstance(editor, dict) or editor.get("surface") != "save_current"
+            or snapshot is not session.last_snapshot):
+        raise RuntimeError("Save-current dialog is not the fresh observed surface")
+    session.check_deadline()
+    session.event("swipe_save_current_dialog", frame=str(snapshot.screenshot_path),
+                  start=[500, 620], end=[500, 180], reason="Reveal an unoccupied saved-plan slot")
+    session.context.swipe(500, 620, 500, 180, 800)
+    session.action_count += 1
+    session.last_snapshot = None
 
 
 def _observed_group(editor: dict, kind: str) -> dict[str, int] | None:
@@ -183,6 +199,87 @@ def _same_loadout(first: dict | None, second: dict | None) -> bool:
     return True
 
 
+def _known_no_opportunity(reason: str) -> bool:
+    return reason.startswith(("event_unit_expired:", "unit_locked:")) or "_capacity_exceeded:" in reason
+
+
+def _explicit_unavailable(editor: dict, unit_id: str) -> str | None:
+    entries = editor.get("unit_availability")
+    entry = entries.get(unit_id) if isinstance(entries, dict) else None
+    if not isinstance(entry, dict) or entry.get("available") is not False:
+        return None
+    if entry.get("reason") == "expired" and get_unit(unit_id).source == "event":
+        return f"event_unit_expired:{unit_id}"
+    if entry.get("reason") == "locked":
+        return f"unit_locked:{unit_id}"
+    return None
+
+
+def _preflight_change(snapshot, editor: dict, observed: dict[str, dict[str, int]],
+                      desired: dict[str, dict[str, int]], *, known_only: bool = False) -> str | None:
+    """Reject a known impossible edit; require evidence for additions and space.
+
+    Existing, already-matching troops need no unlock or housing observations.
+    For a changed lineup, an absent unit must be visibly available in the
+    picker. Unknown costs are not treated as zero.
+    """
+    army = snapshot.observations.get("army", {})
+    availability = editor.get("unit_availability", {})
+    costs = editor.get("unit_housing_space", {})
+    for kind in _KINDS:
+        before, after = observed[kind], desired[kind]
+        delta = {unit_id: after.get(unit_id, 0) - before.get(unit_id, 0)
+                 for unit_id in before.keys() | after.keys()}
+        if not any(delta.values()):
+            continue
+        for unit_id, change in sorted(delta.items()):
+            if change <= 0:
+                continue
+            blocked = _explicit_unavailable(editor, unit_id)
+            if blocked is not None:
+                return blocked
+            entry = availability.get(unit_id) if isinstance(availability, dict) else None
+            if not isinstance(entry, dict) or entry.get("available") is not True:
+                if not known_only:
+                    return f"unit_availability_unverified:{unit_id}"
+        capacity_kind = {"troop": "troops", "spell": "spells", "hero": "heroes", "siege": "siege"}[kind]
+        capacity = army.get(capacity_kind) if isinstance(army, dict) else None
+        if (not isinstance(capacity, dict) or type(capacity.get("used")) is not int
+                or type(capacity.get("capacity")) is not int):
+            if known_only:
+                continue
+            return f"{kind}_capacity_unverified"
+        used, total = capacity["used"], capacity["capacity"]
+        if not 0 <= used <= total:
+            return f"{kind}_capacity_unverified"
+        if kind in {"hero", "siege"}:
+            projected = used + sum(delta.values())
+        else:
+            if sum(value for value in delta.values() if value > 0) == 0:
+                continue  # Only removing units cannot overflow a confirmed capacity.
+            projected = used
+            for unit_id, change in sorted(delta.items()):
+                if change == 0:
+                    continue
+                unit = get_unit(unit_id)
+                cost = costs.get(unit_id) if isinstance(costs, dict) else None
+                if type(cost) is not int:
+                    cost = unit.housing_space
+                if type(cost) is not int or cost <= 0:
+                    if known_only:
+                        projected = None
+                        break
+                    return f"{kind}_housing_unverified:{unit_id}"
+                projected += change * cost
+            if projected is None:
+                continue
+        if projected < 0:
+            return f"{kind}_capacity_unverified"
+        if projected > total:
+            return f"{kind}_capacity_exceeded:{projected}>{total}"
+    return None
+
+
 def ensure_army(session, recipe: ArmyRecipe) -> TaskResult:
     """Match, then optionally use or create one fully observed saved plan.
 
@@ -207,6 +304,15 @@ def ensure_army(session, recipe: ArmyRecipe) -> TaskResult:
     desired, issue = _desired(observed, recipe)
     if issue:
         return _result("not_supported", issue, evidence)
+    current_editor = snapshot.observations.get("army_editor")
+    current_army = snapshot.observations.get("army")
+    for item in recipe.units:
+        if item.optional and item.unit_id not in desired[get_unit(item.unit_id).kind]:
+            continue
+        for source in (current_editor, current_army):
+            unavailable = _explicit_unavailable(source, item.unit_id) if isinstance(source, dict) else None
+            if unavailable is not None:
+                return _result("skipped", unavailable, evidence, actions=0, recipe_mutations=0)
     if _matches(observed, desired, kinds=relevant):
         return _result("succeeded", "Army recipe matched a fresh observation", evidence,
                        observed=observed, actions=0)
@@ -219,13 +325,16 @@ def ensure_army(session, recipe: ArmyRecipe) -> TaskResult:
     desired, issue = _desired(observed, recipe)
     if issue:
         return _result("not_supported", issue, evidence, actions=0)
+    editor = snapshot.observations.get("army_editor")
+    if not isinstance(editor, dict) or editor.get("surface") != "current" or editor.get("ready") is not True:
+        return _result("not_supported", "current_army_navigation_unavailable", evidence, actions=0)
+    known_issue = _preflight_change(snapshot, editor, observed, desired, known_only=True)
+    if known_issue is not None and _known_no_opportunity(known_issue):
+        return _result("skipped", known_issue, evidence, actions=0, recipe_mutations=0)
     army = snapshot.observations["army"]
     original_loadout = _hero_loadout(army, set(observed["hero"]))
     if original_loadout is None:
         return _result("not_supported", "hero_equipment_or_pet_observation_missing", evidence, actions=0)
-    editor = snapshot.observations.get("army_editor")
-    if not isinstance(editor, dict) or editor.get("surface") != "current" or editor.get("ready") is not True:
-        return _result("not_supported", "current_army_navigation_unavailable", evidence, actions=0)
     control = _control(editor, "open_saved")
     if control is None:
         return _result("not_supported", "saved_plan_tab_unavailable", evidence, actions=0)
@@ -234,6 +343,11 @@ def ensure_army(session, recipe: ArmyRecipe) -> TaskResult:
     if saved is None:
         return _result("failed", "saved_plan_page_unverified", evidence, actions=1)
     saved_editor = saved.observations["army_editor"]
+    preflight = _preflight_change(snapshot, saved_editor, observed, desired)
+    if preflight is not None:
+        if _known_no_opportunity(preflight):
+            return _result("skipped", preflight, evidence, actions=1, recipe_mutations=0)
+        return _result("not_supported", preflight, evidence, actions=1)
     for preset in saved_editor.get("presets", []):
         manifest = _preset_manifest(preset)
         if (manifest is None or not _matches(manifest, desired) or
@@ -256,28 +370,78 @@ def ensure_army(session, recipe: ArmyRecipe) -> TaskResult:
         return _result("succeeded", "Saved army recipe applied and fully verified", evidence,
                        actions=2, observed=final)
 
-    # We may only create a scratch plan when every desired unit has observed
-    # picker/edit coverage. The current production samples do not yet cover
-    # heroes/siege or all picker cards, so this correctly stops before creation.
+    # A new plan starts as an exact copy of the observed current army. This is
+    # the verified game UI's Save current army action, so untouched troop kinds
+    # and hero loadouts need not be reconstructed from empty picker slots.
+    # Picker/edit coverage is required only for kinds the recipe changes.
     capabilities = saved_editor.get("editor_capabilities")
-    needed = {unit_id for cards in (observed, desired) for group in cards.values()
-              for unit_id in group}
+    changed_kinds = {kind for kind in _KINDS if observed[kind] != desired[kind]}
+    needed = {unit_id for cards in (observed, desired) for kind in changed_kinds
+              for unit_id in cards[kind]}
     if not isinstance(capabilities, dict) or any(capabilities.get(unit_id) is not True for unit_id in needed):
         return _result("not_supported", "saved_plan_or_editor_samples_unavailable", evidence,
                        actions=1, needed=sorted(needed))
-    if saved_editor.get("editor_preserves_hero_loadout") is not True:
-        return _result("not_supported", "scratch_hero_loadout_preservation_unavailable", evidence, actions=1)
-    create = _control(saved_editor, "create_preset")
-    if create is None:
-        return _result("not_supported", "empty_saved_plan_slot_unavailable", evidence, actions=1)
-    session.tap(saved, create["point"], reason="Create empty scratch army plan")
+    if saved_editor.get("occupied_preset_ids_complete") is not True:
+        return _result("not_supported", "saved_plan_inventory_unverified", evidence, actions=1)
+    before_ids = {item.get("preset_id") for item in saved_editor.get("presets", [])}
+    if None in before_ids or not before_ids:
+        return _result("not_supported", "saved_plan_inventory_unverified", evidence, actions=1)
+    open_current = _control(saved_editor, "open_current")
+    if open_current is None:
+        return _result("not_supported", "copy_current_navigation_unavailable", evidence, actions=1)
+    session.tap(saved, open_current["point"], reason="Open current army before copying it")
+    copy_source = _observe_surface(session, "current", evidence)
+    if copy_source is None:
+        return _result("failed", "copy_current_source_unverified", evidence, actions=2)
+    source_counts, issue = _read_current(copy_source, full=True)
+    source_loadout = None if issue else _hero_loadout(
+        copy_source.observations["army"], set(source_counts["hero"]))
+    if issue or not _matches(source_counts, observed) or not _same_loadout(original_loadout, source_loadout):
+        return _result("failed", "copy_current_source_changed", evidence, actions=2,
+                       issue=issue)
+    copy_control = _control(copy_source.observations.get("army_editor", {}), "save_current")
+    if copy_control is None:
+        return _result("not_supported", "copy_current_control_unavailable", evidence, actions=2)
+    session.tap(copy_source, copy_control["point"], reason="Open observed Save current army dialog")
+    dialog = _observe_surface(session, "save_current", evidence, require_ready=False)
+    if dialog is None:
+        return _result("failed", "copy_current_dialog_unverified", evidence, actions=3)
+    if dialog.observations["army_editor"].get("ready") is not True:
+        _scroll_save_dialog(session, dialog)
+        dialog = _observe_surface(session, "save_current", evidence, timeout_sec=20)
+    if dialog is None:
+        return _result("not_supported", "empty_saved_plan_slot_unavailable", evidence, actions=4)
+    save_copy = _control(dialog.observations["army_editor"], "save_to_empty")
+    if dialog.scene != "training" or save_copy is None:
+        return _result("not_supported", "empty_saved_plan_slot_unverified", evidence, actions=4)
+    session.tap(dialog, save_copy["point"], reason="Copy current army into uniquely verified empty plan")
+    copied = _observe_surface(session, "saved", evidence)
+    if copied is None:
+        return _result("failed", "copied_plan_result_uncertain", evidence, actions=5)
+    copied_candidates = []
+    for item in copied.observations["army_editor"].get("presets", []):
+        if item.get("preset_id") in before_ids:
+            continue
+        manifest = _preset_manifest(item)
+        loadout = _hero_loadout(item, set(observed["hero"]))
+        if manifest is not None and _matches(manifest, observed) and _same_loadout(original_loadout, loadout):
+            copied_candidates.append(item)
+    if len(copied_candidates) != 1 or not copied_candidates[0].get("preset_id"):
+        return _result("failed", "copied_plan_full_manifest_unverified", evidence, actions=5)
+    copied_preset = copied_candidates[0]
+    edit_point = copied_preset.get("edit_point")
+    if not isinstance(edit_point, (list, tuple)) or len(edit_point) != 2:
+        return _result("failed", "copied_plan_edit_control_unverified", evidence, actions=5)
+    session.tap(copied, edit_point, reason="Edit fully verified copy of current army")
     editing = _observe_surface(session, "edit", evidence)
     if editing is None:
-        return _result("failed", "scratch_plan_creation_uncertain", evidence, actions=2)
-    actions = 2
+        return _result("failed", "copied_plan_editor_unverified", evidence, actions=6)
+    if editing.observations["army_editor"].get("preset_id") != copied_preset["preset_id"]:
+        return _result("failed", "copied_plan_editor_id_mismatch", evidence, actions=6)
+    actions = 6
     # Editor controls are generated from identity templates, exact counts, and
     # the observed plus/minus icons. Removes precede adds to free capacity.
-    for kind in _KINDS:
+    for kind in changed_kinds:
         target = desired[kind]
         for _ in range(100):
             current_group = _observed_group(editing.observations["army_editor"], kind)
@@ -321,6 +485,8 @@ def ensure_army(session, recipe: ArmyRecipe) -> TaskResult:
     if saved is None:
         return _result("failed", "scratch_save_result_uncertain", evidence, actions=actions)
     for preset in saved.observations["army_editor"].get("presets", []):
+        if preset.get("preset_id") != copied_preset["preset_id"]:
+            continue
         manifest = _preset_manifest(preset)
         if (manifest is None or not _matches(manifest, desired) or preset.get("use_cost_free") is not True
                 or not _same_loadout(original_loadout, _hero_loadout(preset, set(desired["hero"])))):
