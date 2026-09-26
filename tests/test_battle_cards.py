@@ -19,6 +19,40 @@ from autococ.vision import ScreenshotRecognizer
 class BattleCardTests(unittest.TestCase):
     root = Path(__file__).resolve().parents[1]
 
+    def test_deployed_duke_keeps_named_binding_only_with_own_card_and_hp(self) -> None:
+        # Held-out 00076 card from the same observed select/tap/deploy chain
+        # that produced the 00075 portrait catalog variant.
+        image = cv2.imdecode(np.fromfile(
+            self.root / "tests/fixtures/hero-duke-deployed-20260926.png",
+            dtype=np.uint8), cv2.IMREAD_COLOR)
+        with TemporaryDirectory() as directory:
+            for mode in ("complete", "wrong_version", "missing_left", "missing_right",
+                         "missing_bottom", "missing_hp"):
+                with self.subTest(mode=mode):
+                    changed = image.copy()
+                    if mode == "missing_left":
+                        changed[625:695, 597:603] = 0
+                    elif mode == "missing_right":
+                        changed[625:695, 685:691] = 0
+                    elif mode == "missing_bottom":
+                        changed[703:715, 607:681] = 0
+                    elif mode == "missing_hp":
+                        changed[567:581, 605:683] = 0
+                    path = Path(directory) / f"duke-{mode}.png"
+                    cv2.imencode(".png", changed)[1].tofile(path)
+                    vision = ScreenshotRecognizer(provider=Mock())
+                    vision.client_version = "18.600.8" if mode == "wrong_version" else "18.600.7"
+                    observation = vision._battle_observation(path, [], "battle")
+                    duke = [card for card in observation["slots"] if card["unit_id"] == "dragon_duke"]
+                    if mode == "complete":
+                        self.assertEqual(len(duke), 1)
+                        card = _match_card(SceneSnapshot("battle", .99, path, {"battle": observation}),
+                                           "dragon_duke", "hero")
+                        self.assertEqual(card["bbox"], [599, 595, 689, 711])
+                        self.assertGreaterEqual(card["confidence"], .97)
+                    else:
+                        self.assertEqual(duke, [])
+
     def test_unequipped_duke_card_needs_versioned_face_and_both_borders(self) -> None:
         # Redacted card crop from hero-only-1 scout frame 00011. The top-left
         # icon is absent, so the old whole-colour contour omits this hero.

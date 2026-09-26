@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_builtin_strategies_have_validated_action_budget():
-    for name in ("single_edge", "two_edge", "lightning_snipe"):
+    for name in ("single_edge", "two_edge", "two_edge_heroes", "lightning_snipe"):
         definition = load_strategy(ROOT / "strategies" / f"{name}.toml")
         assert definition.id == name
         assert definition.steps

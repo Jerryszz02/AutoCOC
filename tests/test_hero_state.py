@@ -122,6 +122,37 @@ class HeroStateTests(unittest.TestCase):
             no_frame = recognize_hero_state(path, slot, unit_id="dragon_duke", client_version="18.600.7")
             self.assertIsNone(no_frame["deployed"])
 
+    def test_real_duke_deployed_phase_requires_fresh_portrait_and_enclosed_hp(self) -> None:
+        # Source and held-out frames are consecutive real battle observations;
+        # the fixture retains only the Duke card and its HP frame.
+        path = self.root / "tests/fixtures/hero-duke-deployed-20260926.png"
+        slot = [599, 595, 690, 711]
+        state = recognize_hero_state(path, slot, unit_id="dragon_duke", client_version="18.600.7")
+        self.assertEqual(state["state"], "deployed")
+        self.assertTrue(state["deployed"])
+        self.assertEqual(state["evidence"]["portrait_identity"]["unit_id"], "dragon_duke")
+        self.assertIn("dragon_duke_battle_deployed", state["evidence"]["portrait_identity"]["evidence"][0]["template"])
+        self.assertGreaterEqual(min(state["evidence"]["health_bar"]["frame_support"]), .85)
+        self.assertIsNone(state["ability_ready"])
+        self.assertIsNone(state["ability_used"])
+        for unit_id, version in (("archer_queen", "18.600.7"), ("dragon_duke", "unknown")):
+            with self.subTest(unit_id=unit_id, version=version):
+                wrong = recognize_hero_state(path, slot, unit_id=unit_id, client_version=version)
+                self.assertEqual(wrong["state"], "unknown")
+                self.assertIsNone(wrong["deployed"])
+        image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        with TemporaryDirectory() as directory:
+            modified = Path(directory) / "modified.png"
+            for region in ((638, 636, 683, 678), (605, 567, 683, 581)):
+                with self.subTest(region=region):
+                    changed = image.copy()
+                    left, top, right, bottom = region
+                    changed[top:bottom, left:right] = (20, 20, 20)
+                    cv2.imencode(".png", changed)[1].tofile(modified)
+                    result = recognize_hero_state(modified, slot, unit_id="dragon_duke",
+                                                  client_version="18.600.7")
+                    self.assertIsNone(result["deployed"])
+
     def test_selected_border_still_needs_fresh_hero_portrait(self) -> None:
         path = self.root / "tests/fixtures/hero-border-selected.png"
         slot = [502, 592, 591, 711]

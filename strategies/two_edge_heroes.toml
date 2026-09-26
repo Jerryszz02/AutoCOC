@@ -1,0 +1,62 @@
+id = "two_edge_heroes"
+label = "普通兵双边＋咏王／王子／女王／龙公爵"
+army_mode = "captured"
+# Requires these four identified heroes in the current army. Duke is deployed
+# without a scripted ability: its ready/used ability states are not calibrated.
+
+[[steps]]
+action = "deploy_troop"
+unit_id = "*"
+count = "all"
+edge = "two"
+
+[[steps]]
+action = "deploy_hero"
+unit_id = "grand_warden"
+edge = "first"
+
+[[steps]]
+action = "wait"
+unit_id = "grand_warden"
+target = "hero_ready"
+timeout_sec = 15
+
+[[steps]]
+action = "activate_ability"
+unit_id = "grand_warden"
+
+[[steps]]
+action = "deploy_hero"
+unit_id = "minion_prince"
+edge = "first"
+
+[[steps]]
+action = "wait"
+unit_id = "minion_prince"
+target = "hero_ready"
+timeout_sec = 15
+
+[[steps]]
+action = "activate_ability"
+unit_id = "minion_prince"
+
+[[steps]]
+action = "deploy_hero"
+unit_id = "archer_queen"
+edge = "first"
+
+[[steps]]
+action = "wait"
+unit_id = "archer_queen"
+target = "hero_ready"
+timeout_sec = 15
+
+[[steps]]
+action = "activate_ability"
+unit_id = "archer_queen"
+
+[[steps]]
+action = "deploy_hero"
+unit_id = "dragon_duke"
+edge = "first"
+

@@ -217,6 +217,16 @@
       "version_code": 180600008
     },
     {
+      "unit_id": "dragon_duke",
+      "surface": "battle",
+      "path": "units/dragon_duke_battle_deployed_18_600_7.png",
+      "source_frame": "reports/hero-follow-3/20260926-235331-950111-c89377d3/frames/00075-strategy-hero-deployed.png",
+      "source_bbox_1280": [638, 636, 683, 678],
+      "state": "deployed",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
       "unit_id": "minion_prince",
       "surface": "battle",
       "path": "units/minion_prince_battle_18_600_7.png",

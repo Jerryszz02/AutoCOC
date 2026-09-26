@@ -1077,7 +1077,7 @@ class ScreenshotRecognizer:
         # Deployed or used hero cards can lose the coloured header and their
         # pet icon. A versioned, hero-specific face proposes a card, but its
         # own opposing side edges and bottom boundary must also be present.
-        from .hero_state import HERO_PHASE_TEMPLATE_IDS
+        from .hero_state import HERO_PHASE_TEMPLATE_IDS, _health_bar
         from .unit_catalog import CATALOG_ROOT, recognize_card_identity, template_manifest
 
         phase_cards = []
@@ -1105,18 +1105,33 @@ class ScreenshotRecognizer:
                 score_map[~np.isfinite(score_map)] = -1
                 _, score, _, point = cv2.minMaxLoc(score_map)
                 anchor_x, anchor_y = point[0], point[1] + 625
-                if score < .97 or not 632 <= anchor_y <= 640 or anchor_x < 20:
+                deployed_variant = entry.get("state") == "deployed"
+                if score < .97 or not 632 <= anchor_y <= 640 or anchor_x < (40 if deployed_variant else 20):
                     continue
-                # The sampled face begins about 20 px inside its own card.
-                left = max(range(max(3, anchor_x - 24), anchor_x - 16),
-                           key=lambda x: edge_direction[x])
+                # The observed deployed portrait shifts right within the card;
+                # its enclosed HP frame replaces the now incomplete cyan edge.
+                offset = 39 if deployed_variant else 20
+                left_candidates = range(max(3, anchor_x - offset - 4), anchor_x - offset + 4)
+                if not left_candidates:
+                    continue
+                left = max(left_candidates, key=lambda x: edge_direction[x])
                 right = left + 90
                 box = (left, 595, right, 711)
                 if not (80 <= right - left <= 105 and right <= 1277
                         and edge_direction[left] >= 250
-                        and min(edge_direction[right - 4:right]) <= -150
-                        and supported_sides(left, right)
-                        and colored_bottom(left, right) == 711):
+                        and min(edge_direction[right - 4:right]) <= -150):
+                    continue
+                if deployed_variant:
+                    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                    colored_sides = [max(float((mask[625:695, start + shift:start + shift + 3] > 0).mean())
+                                         for shift in (-2, -1, 0, 1, 2))
+                                     for start in (left, right - 3)]
+                    bottom_supported = (gray[709:711, left + 8:right - 8].mean()
+                                        - gray[712, left + 8:right - 8].mean() >= 40)
+                    health = _health_bar(hsv, gray, [left + 5, 592])
+                    if min(colored_sides) < .5 or not bottom_supported or health is None:
+                        continue
+                elif not supported_sides(left, right) or colored_bottom(left, right) != 711:
                     continue
                 identity = recognize_card_identity(image, box, "hero", surface="battle",
                                                    client_version=self.client_version)
