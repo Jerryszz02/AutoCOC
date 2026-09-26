@@ -79,6 +79,37 @@ class TerrainTests(unittest.TestCase):
         self.assertLess(edges[0]["evidence"]["intercept"], 505)
         self.assertGreater(edges[0]["evidence"]["intercept"], 470)
 
+    def test_lower_flank_stays_outside_short_western_boundary(self):
+        from autococ.terrain import find_line_deployment_edges
+
+        # Redacted from the live battle in which the old lower-flank point
+        # landed inside the red deployment boundary and consumed no troop.
+        path = Path(__file__).parent / "fixtures/line-boundary-western-outside.png"
+        edges = find_line_deployment_edges(path)
+        self.assertEqual(len(edges), 4)
+        for edge in edges[2:]:
+            x, y = edge["point"]
+            outer_x = 186 + (y - 390) * 54 / 40
+            self.assertLess(x + 13, outer_x)
+
+    def test_short_visible_outer_edge_vetoes_inner_lower_line(self):
+        import cv2
+        import numpy as np
+        from autococ.terrain import find_line_deployment_edges
+
+        image = np.full((720, 1280, 3), (50, 115, 77), dtype=np.uint8)
+        cv2.line(image, (300, 275), (500, 125), (25, 40, 180), 2)
+        cv2.line(image, (250, 368), (410, 488), (25, 40, 180), 2)
+        with TemporaryDirectory() as temp:
+            path = Path(temp) / "boundary.png"
+            cv2.imwrite(str(path), image)
+            self.assertEqual(len(find_line_deployment_edges(path)), 4)
+            # Too short to be proposed as a flank itself, but enough to show
+            # that the otherwise valid lower line lies inside the perimeter.
+            cv2.line(image, (185, 389), (215, 411), (25, 40, 180), 2)
+            cv2.imwrite(str(path), image)
+            self.assertEqual(find_line_deployment_edges(path), [])
+
     def test_line_edges_follow_current_boundary_translation(self):
         import cv2
         import numpy as np

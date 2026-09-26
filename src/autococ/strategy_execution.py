@@ -365,6 +365,51 @@ def _consume(session, frame: SceneSnapshot, card: dict, points: list[list[int]],
              "unit_id": card.get("unit_id"), "before_count": old, "after_count": None,
              "issued_placements": 0, "consumed": 0, "points": points, "before_frame": before}
     receipt["actions"].append(event)
+    if kind == "troop":
+        # One selected stack and a fixed camera: issue the planned line at the
+        # legacy 0.12 s cadence, then read the count for the entire batch.
+        observed_at = frame.observations.get("observed_at_monotonic")
+        if not isinstance(observed_at, (int, float)) or not math.isfinite(observed_at):
+            observed_at = time.monotonic()
+        for point in points:
+            _check(session, deadline)
+            if time.monotonic() - observed_at > 20:
+                frame = _fresh(session, "strategy-line-refresh", receipt, deadline,
+                               purpose="troop_count", slot=card)
+                observed_at = time.monotonic()
+            _check(session, deadline)
+            session.tap(frame, point, reason="Place selected troop along planned line")
+            event["issued_placements"] += 1
+            receipt["issued_placements"] += 1
+            time.sleep(min(.12, max(0, deadline - time.monotonic())))
+        expected = old - event["issued_placements"]
+        last_count = old
+        for attempt in range(3):
+            _check(session, deadline)
+            if attempt:
+                time.sleep(min(session.config.runtime.poll_interval_sec, 1,
+                               max(0, deadline - time.monotonic())))
+            frame = _fresh(session, "strategy-consumption", receipt, deadline,
+                           purpose="troop_count", slot=card)
+            observed = _remaining(frame, card, recognizer=getattr(session, "recognizer", None))
+            _check(session, deadline)
+            if observed is None:
+                continue
+            if type(observed) is not int or not 0 <= observed <= last_count:
+                raise FlowError("Troop quantity increased while verifying line deployment")
+            consumed = old - observed
+            if consumed > event["issued_placements"]:
+                raise FlowError("Consumption exceeds issued placements")
+            delta = consumed - event["consumed"]
+            event.update(after_count=observed, consumed=consumed,
+                         after_frame=str(frame.screenshot_path))
+            receipt["deployed_units"] += delta
+            receipt["offensive_actions"] += delta
+            receipt["verified"] = receipt["verified"] or consumed > 0
+            last_count = observed
+            if observed == expected:
+                return _fresh(session, "strategy-action-complete", receipt, deadline)
+        raise FlowError("Unit placement consumption could not be verified")
     # A fresh count after each tap bounds uncertainty to one placement. Never
     # replay an uncertain click; preserve the receipt for diagnosis instead.
     for point in points:

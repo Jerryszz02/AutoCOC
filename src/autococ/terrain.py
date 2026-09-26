@@ -54,6 +54,7 @@ def find_line_deployment_edges(screenshot_path: str | Path, *, baseline_resoluti
     lines = cv2.HoughLinesP(red, 1, np.pi / 180, 20, minLineLength=45, maxLineGap=18)
     if lines is None:
         return []
+    western_frontier = _western_line_frontier(red)
     # Retry with two pixels of antialiasing tolerance only when the narrow
     # boundary check cannot establish both flanks.
     for tolerance in (3, 5):
@@ -72,10 +73,23 @@ def find_line_deployment_edges(screenshot_path: str | Path, *, baseline_resoluti
             if len(ys) < 25:
                 continue
             xs = (ys - intercept) / slope
-            valid = (xs - 32 >= 180) & (xs - 32 <= 720)
+            # The lower flank has no resource HUD. A short outer boundary can
+            # sit left of x=212; retaining only x-32>=180 selected an inner
+            # red roof as the apparent deployment edge in a live battle.
+            valid = (xs - 32 >= (180 if edge == 0 else 150)) & (xs - 32 <= 720)
             ys, xs = ys[valid], xs[valid]
             if len(ys) < 25 or (support[ys.astype(int), xs.round().astype(int)] > 0).mean() < .85:
                 continue
+            if edge == 1:
+                # Independently detected western red segments veto an inner
+                # line. Check the whole proposed sweep with a 13px horizontal
+                # margin rather than only the two endpoint taps.
+                blocked = any(
+                    x - 32 + 13 >= western_frontier[max(0, int(y) - 3):int(y) + 4].min()
+                    for y, x in zip(ys, xs)
+                )
+                if blocked:
+                    continue
             frontier = (250 if edge == 0 else 430) - intercept
             candidates[edge].append((frontier / slope, slope, intercept,
                                      [(round(xs[0] - 32), int(ys[0])), (round(xs[-1] - 32), int(ys[-1]))]))

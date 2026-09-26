@@ -16,47 +16,47 @@ unit_id = "grand_warden"
 edge = "first"
 
 [[steps]]
-action = "wait"
-unit_id = "grand_warden"
-target = "hero_ready"
-timeout_sec = 15
-
-[[steps]]
-action = "activate_ability"
-unit_id = "grand_warden"
-
-[[steps]]
 action = "deploy_hero"
 unit_id = "minion_prince"
 edge = "first"
 
 [[steps]]
-action = "wait"
-unit_id = "minion_prince"
-target = "hero_ready"
-timeout_sec = 15
-
-[[steps]]
-action = "activate_ability"
-unit_id = "minion_prince"
-
-[[steps]]
 action = "deploy_hero"
 unit_id = "archer_queen"
 edge = "first"
-
-[[steps]]
-action = "wait"
-unit_id = "archer_queen"
-target = "hero_ready"
-timeout_sec = 15
-
-[[steps]]
-action = "activate_ability"
-unit_id = "archer_queen"
 
 [[steps]]
 action = "deploy_hero"
 unit_id = "dragon_duke"
 edge = "first"
+
+[[steps]]
+action = "wait"
+unit_id = "grand_warden"
+target = "hero_ready"
+timeout_sec = 15
+
+[[steps]]
+action = "activate_ability"
+unit_id = "grand_warden"
+
+[[steps]]
+action = "wait"
+unit_id = "minion_prince"
+target = "hero_ready"
+timeout_sec = 15
+
+[[steps]]
+action = "activate_ability"
+unit_id = "minion_prince"
+
+[[steps]]
+action = "wait"
+unit_id = "archer_queen"
+target = "hero_ready"
+timeout_sec = 15
+
+[[steps]]
+action = "activate_ability"
+unit_id = "archer_queen"
 

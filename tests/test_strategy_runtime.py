@@ -6,7 +6,7 @@ import pytest
 from autococ.errors import ConfigError, DeploymentError, FlowError, StopRequested
 from autococ.scene import SceneSnapshot
 from autococ.strategy_config import StrategyDefinition, StrategyStep, load_strategy, planned_steps
-from autococ.strategy_execution import (_battle_bar_viewport, _end_battle_confirmation,
+from autococ.strategy_execution import (_battle_bar_viewport, _consume, _end_battle_confirmation,
                                          declared_building_targets,
                                          _find_named_card, _match_card, _points,
                                          _same_battle_bar_view,
@@ -180,31 +180,23 @@ def test_unknown_consumption_never_reissues_placement(monkeypatch):
     assert exc.value.partial_receipt["spells_used"] == 0
 
 
-def test_one_step_timeout_preserves_first_consumption_without_second_tap(monkeypatch):
-    class Clock:
-        after_consumption = False
-        reads_after_consumption = 0
-
-        def monotonic(self):
-            if not self.after_consumption:
-                return 0.0
-            self.reads_after_consumption += 1
-            return 0.8 if self.reads_after_consumption == 1 else 1.1
-
-    clock = Clock()
+def test_one_step_timeout_stops_line_before_second_tap(monkeypatch):
+    clock = SimpleNamespace(now=0.0)
     monkeypatch.setattr("autococ.strategy_execution.time",
-                        SimpleNamespace(monotonic=clock.monotonic, sleep=lambda _: None))
-
-    def remaining(frame, card, recognizer=None):
-        if frame.screenshot_path.name == "consumed-first.png":
-            clock.after_consumption = True
-        return frame.observations["counts"][card["unit_id"]]
-
-    monkeypatch.setattr("autococ.strategy_execution._remaining", remaining)
+                        SimpleNamespace(monotonic=lambda: clock.now, sleep=lambda _: None))
+    monkeypatch.setattr("autococ.strategy_execution._remaining",
+                        lambda frame, card, recognizer=None: frame.observations["counts"][card["unit_id"]])
     troop = dict(_troop("barbarian", (100, 650)), count=2)
     scout = _troop_frame("start", [troop], {"barbarian": 2}, terrain=True)
-    session = _Session([_troop_frame("selected", [troop], {"barbarian": 2}),
-                        _troop_frame("consumed-first", [troop], {"barbarian": 1})])
+    session = _Session([_troop_frame("selected", [troop], {"barbarian": 2})])
+    tap = session.tap
+
+    def first_placement_expires(frame, point, *, reason):
+        tap(frame, point, reason=reason)
+        if reason.startswith("Place selected troop"):
+            clock.now = 1.1
+
+    session.tap = first_placement_expires
     session.config.battle.deploy_timeout_sec = 1
     definition = StrategyDefinition("bounded", "bounded",
         ArmyRecipe((ArmyRequirement("barbarian", 2),)),
@@ -214,9 +206,100 @@ def test_one_step_timeout_preserves_first_consumption_without_second_tap(monkeyp
         execute_strategy(session, scout, definition)
     assert len(session.taps) == 2  # Card selection and exactly one placement.
     receipt = exc.value.partial_receipt
-    assert receipt["issued_placements"] == receipt["deployed_units"] == 1
-    assert receipt["actions"][0]["consumed"] == 1
+    assert receipt["issued_placements"] == 1
+    assert receipt["deployed_units"] == receipt["actions"][0]["consumed"] == 0
     assert receipt["completed"] is False
+
+
+def test_troop_line_batches_three_of_ten_without_intermediate_observation(monkeypatch):
+    clock = SimpleNamespace(now=0.0)
+    monkeypatch.setattr("autococ.strategy_execution.time",
+                        SimpleNamespace(monotonic=lambda: clock.now,
+                                        sleep=lambda seconds: setattr(clock, "now", clock.now + seconds)))
+    monkeypatch.setattr("autococ.strategy_execution._remaining",
+                        lambda frame, card, recognizer=None: frame.observations["counts"][card["unit_id"]])
+    card = dict(_troop("barbarian", (100, 650)), count=10)
+    scout = _troop_frame("scout", [card], {"barbarian": 10})
+    session = _Session([_troop_frame("selected", [card], {"barbarian": 10}),
+                        _troop_frame("consumed", [card], {"barbarian": 7}),
+                        _troop_frame("complete", [card], {"barbarian": 7})])
+    trace = []
+    observe, tap = session.observe, session.tap
+    session.observe = lambda label, **kwargs: (trace.append(("observe", label, clock.now)) or
+                                               observe(label, **kwargs))
+    session.tap = lambda frame, point, *, reason: (trace.append(("tap", tuple(point), clock.now)) or
+                                                  tap(frame, point, reason=reason))
+    receipt = {"actions": [], "evidence": [], "issued_placements": 0,
+               "deployed_units": 0, "offensive_actions": 0, "verified": False}
+    result = _consume(session, scout, card, [[250, 150], [250, 200], [250, 250]],
+                      receipt, 10.0, kind="troop")
+    assert result.screenshot_path.name == "complete.png"
+    assert [item[:2] for item in trace] == [
+        ("tap", (100, 650)), ("observe", "strategy-selected"),
+        ("tap", (250, 150)), ("tap", (250, 200)), ("tap", (250, 250)),
+        ("observe", "strategy-consumption"), ("observe", "strategy-action-complete")]
+    assert [round(item[2], 2) for item in trace if item[0] == "tap"][1:] == [0.0, 0.12, 0.24]
+    assert receipt["issued_placements"] == receipt["deployed_units"] == receipt["offensive_actions"] == 3
+    assert receipt["actions"][0]["after_count"] == 7
+    assert receipt["actions"][0]["consumed"] == 3
+
+
+def test_troop_line_partial_count_is_recorded_without_replaying(monkeypatch):
+    monkeypatch.setattr("autococ.strategy_execution.time",
+                        SimpleNamespace(monotonic=lambda: 0.0, sleep=lambda _: None))
+    monkeypatch.setattr("autococ.strategy_execution._remaining",
+                        lambda frame, card, recognizer=None: frame.observations["counts"][card["unit_id"]])
+    card = dict(_troop("barbarian", (100, 650)), count=10)
+    session = _Session([_troop_frame("selected", [card], {"barbarian": 10}),
+                        *[_troop_frame(f"partial-{index}", [card], {"barbarian": count})
+                          for index, count in enumerate((9, 8, 8))]])
+    receipt = {"actions": [], "evidence": [], "issued_placements": 0,
+               "deployed_units": 0, "offensive_actions": 0, "verified": False}
+    with pytest.raises(FlowError, match="could not be verified"):
+        _consume(session, _troop_frame("scout", [card], {"barbarian": 10}), card,
+                 [[250, 150], [250, 200], [250, 250]], receipt, 10.0, kind="troop")
+    assert len(session.taps) == 4
+    assert receipt["issued_placements"] == 3
+    assert receipt["deployed_units"] == receipt["offensive_actions"] == 2
+    assert receipt["actions"][0]["consumed"] == 2
+    assert receipt["actions"][0]["after_count"] == 8
+
+
+@pytest.mark.parametrize("after,reason", [(11, "quantity increased"), (6, "exceeds issued")])
+def test_troop_line_rejects_increased_or_excess_consumption(monkeypatch, after, reason):
+    monkeypatch.setattr("autococ.strategy_execution.time",
+                        SimpleNamespace(monotonic=lambda: 0.0, sleep=lambda _: None))
+    monkeypatch.setattr("autococ.strategy_execution._remaining",
+                        lambda frame, card, recognizer=None: frame.observations["counts"][card["unit_id"]])
+    card = dict(_troop("barbarian", (100, 650)), count=10)
+    session = _Session([_troop_frame("selected", [card], {"barbarian": 10}),
+                        _troop_frame("invalid", [card], {"barbarian": after})])
+    receipt = {"actions": [], "evidence": [], "issued_placements": 0,
+               "deployed_units": 0, "offensive_actions": 0, "verified": False}
+    with pytest.raises(FlowError, match=reason):
+        _consume(session, _troop_frame("scout", [card], {"barbarian": 10}), card,
+                 [[250, 150], [250, 200], [250, 250]], receipt, 10.0, kind="troop")
+    assert len(session.taps) == 4
+    assert receipt["issued_placements"] == 3
+    assert receipt["deployed_units"] == 0
+
+
+def test_troop_line_stop_blocks_next_tap_without_observation(monkeypatch):
+    monkeypatch.setattr("autococ.strategy_execution.time",
+                        SimpleNamespace(monotonic=lambda: 0.0, sleep=lambda _: None))
+    monkeypatch.setattr("autococ.strategy_execution._remaining",
+                        lambda frame, card, recognizer=None: frame.observations["counts"][card["unit_id"]])
+    card = dict(_troop("barbarian", (100, 650)), count=10)
+    session = _Session([_troop_frame("selected", [card], {"barbarian": 10})])
+    session.check_deadline = lambda: (_ for _ in ()).throw(StopRequested()) if len(session.taps) >= 2 else None
+    receipt = {"actions": [], "evidence": [], "issued_placements": 0,
+               "deployed_units": 0, "offensive_actions": 0, "verified": False}
+    with pytest.raises(StopRequested):
+        _consume(session, _troop_frame("scout", [card], {"barbarian": 10}), card,
+                 [[250, 150], [250, 200], [250, 250]], receipt, 10.0, kind="troop")
+    assert len(session.taps) == 2
+    assert receipt["issued_placements"] == 1
+    assert receipt["deployed_units"] == 0
 
 
 def test_observation_crossing_deadline_blocks_next_hero_input(monkeypatch):
