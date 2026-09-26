@@ -243,6 +243,34 @@ class DailyRunnerTests(unittest.TestCase):
         self.assertEqual(battle.call_count,1);self.assertEqual(stats.battles_completed,0)
         self.assertEqual(stats.failures, 1)
 
+    def test_unavailable_army_skips_task_without_counting_a_battle(self):
+        skipped = TaskResult("battle", "skipped", "unit_locked:barbarian",
+                             metrics={"returned_home": True, "search_count": 0})
+        with patch("autococ.daily.read_progress", return_value=GoalProgress(False)), \
+                patch("autococ.combat.run_battle", side_effect=[skipped, self.success()]) as battle:
+            stats = self.runner().run_routine(RoutineConfig((TaskSpec("first", "resources"),
+                                                           TaskSpec("second", "resources", max_battles=1))))
+        self.assertEqual(battle.call_count, 2)
+        self.assertEqual(stats.failures, 0)
+        self.assertEqual(stats.battles_completed, 1)
+        self.assertEqual(stats.goals_completed, 0)
+        self.assertTrue(any(result.task == "first" and result.status == "skipped"
+                            for result in stats.task_results))
+
+    def test_unavailable_army_never_switches_task_if_safe_home_is_uncertain(self):
+        skipped = TaskResult("battle", "skipped", "unit_locked:barbarian")
+        launched = TaskResult("launch", "succeeded", "home verified", evidence=[self.frame.screenshot_path])
+        with patch("autococ.flow.verify_home", return_value=launched), \
+                patch("autococ.flow.return_to_village", side_effect=FlowError("Home unknown")), \
+                patch("autococ.daily.read_progress", return_value=GoalProgress(False)), \
+                patch("autococ.combat.run_battle", return_value=skipped) as battle:
+            stats = self.runner().run_routine(RoutineConfig((TaskSpec("first", "resources"),
+                                                           TaskSpec("second", "resources"))))
+        self.assertEqual(battle.call_count, 1)
+        self.assertEqual(stats.battles_completed, 0)
+        self.assertEqual(stats.failures, 1)
+        self.assertIn("Home unknown", stats.stop_reason)
+
     def test_settled_partial_battle_counts_once_then_stops_queue(self):
         result = replace(self.success(), status="failed", reason="Last action unverified",
                          metrics={**self.success().metrics, "victory": True})

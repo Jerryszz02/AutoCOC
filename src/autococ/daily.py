@@ -221,9 +221,9 @@ def run_routine(runner, routine: RoutineConfig) -> RunStats:
                 record(result, notify=False)
                 if settled_home:
                     progress("已回村", resources=result.metrics.get("resources_after"))
-                if result.status == "not_supported":
+                if result.status in {"not_supported", "skipped"}:
                     home = return_to_village(session)
-                    runner._notify("task_result", task=task.id, status="not_supported", reason=result.reason,
+                    runner._notify("task_result", task=task.id, status=result.status, reason=result.reason,
                                    evidence=[home.screenshot_path], metrics=result.metrics)
                     break
                 if result.status == "limited":

@@ -562,6 +562,35 @@ class CombatTests(unittest.TestCase):
         self.assertEqual(result.metrics["rounds_completed"], 1)
         self.assertEqual(session.last_snapshot.scene, "village")
 
+    def test_unavailable_recipe_skips_only_after_confirming_home_without_search(self):
+        from autococ.reporting import TaskResult
+        from autococ.strategy_config import StrategyDefinition, StrategyStep
+        from autococ.unit_catalog import ArmyRecipe, ArmyRequirement
+        strategy = StrategyDefinition("recipe", "recipe", ArmyRecipe((ArmyRequirement("barbarian", 1),)),
+                                      (StrategyStep("deploy_troop", "barbarian"),))
+        for safe_home, actions, expected in ((True, 0, "skipped"), (False, 0, "failed"),
+                                             (True, 1, "failed")):
+            with self.subTest(safe_home=safe_home, actions=actions):
+                session = FakeSession([])
+                session.config.battle = replace(session.config.battle,
+                                                strategy_file=str(Path("recipe.toml").resolve()))
+                home = frame(0, "village", resources=deepcopy(BEFORE))
+                prepared = TaskResult("prepare_army", "skipped", "unit_locked:barbarian",
+                                     evidence=[Path("army-lock.png")], metrics={"actions": actions})
+                returns = [home, home if safe_home else FlowError("Cannot verify home")]
+                with patch("autococ.strategy_config.load_strategy", return_value=strategy), \
+                        patch("autococ.army_control.ensure_army", return_value=prepared), \
+                        patch("autococ.combat.return_to_village", side_effect=returns):
+                    result = run_battle(session)
+                self.assertEqual(result.status, expected, result.reason)
+                self.assertEqual(result.metrics["search_count"], 0)
+                self.assertNotIn("rounds_completed", result.metrics)
+                self.assertEqual(session.taps, [])
+                self.assertEqual(session.deploy_calls, 0)
+                if expected == "skipped":
+                    self.assertTrue(result.metrics["returned_home"])
+                    self.assertEqual(result.reason, "unit_locked:barbarian")
+
     def test_scout_to_battle_transition_requires_positive_consumption_before_settlement_recovery(self) -> None:
         for scene, verified, units, recover in (("enemy_village", True, 1, True),
                                                 ("enemy_village", False, 0, False),
