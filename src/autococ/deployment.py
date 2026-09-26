@@ -17,6 +17,49 @@ def _battle_frame(snapshot: SceneSnapshot) -> None:
         raise FlowError(f"Deployment requires a recognized battle view, got {snapshot.scene}")
 
 
+def _trusted_count_roi_anchor(slot: dict) -> tuple[int, int, int, int] | None:
+    """Use a prior glyph box only after this same card was reidentified selected."""
+    evidence = slot.get("evidence") or {}
+    anchor, current = evidence.get("count_roi_anchor"), evidence.get("count") or {}
+    if not isinstance(anchor, dict) or not isinstance(current, dict):
+        return None
+    count, unit_id = slot.get("count"), slot.get("unit_id")
+    source_text = anchor.get("source_text")
+    match = re.fullmatch(r"[xX×]\s*([0-9]+)", source_text.strip()) if isinstance(source_text, str) else None
+    def valid_score(value, minimum):
+        return type(value) in (int, float) and math.isfinite(value) and minimum <= value <= 1
+    if (type(count) is not int or count <= 0 or not isinstance(unit_id, str) or not unit_id
+            or match is None or int(match[1]) != count
+            or anchor.get("unit_id") != unit_id or anchor.get("verified_count") != count
+            or current.get("count") != count
+            or not valid_score(anchor.get("source_confidence"), .9)
+            or not valid_score(anchor.get("verified_portrait_score"), .92)
+            or not valid_score(current.get("portrait_score"), .92)
+            or anchor.get("verified_slot_bbox") != list(slot["bbox"])):
+        return None
+    source_frame, verified_frame = anchor.get("source_frame"), anchor.get("verified_frame")
+    source_box, glyph_box = anchor.get("source_slot_bbox"), anchor.get("bbox")
+    if (not isinstance(source_frame, str) or not source_frame
+            or not isinstance(verified_frame, str) or not verified_frame or source_frame == verified_frame
+            or current.get("frame") != verified_frame or current.get("slot_bbox") != source_box
+            or not isinstance(source_box, list) or len(source_box) != 4
+            or not isinstance(glyph_box, list) or len(glyph_box) != 4
+            or any(type(value) is not int for value in (*source_box, *glyph_box))):
+        return None
+    left, top, right, bottom = glyph_box
+    if not left < right or not top < bottom:
+        return None
+    source_left, source_top, source_right, _ = source_box
+    if not (source_left - 4 <= left < right <= source_right + 4
+            and source_top - 16 <= top < bottom <= source_top + 40):
+        return None
+    current_left, current_top, current_right, _ = slot["bbox"]
+    if not (current_left <= left < right <= current_right
+            and current_top - 16 <= top < bottom <= current_top + 40):
+        return None
+    return tuple(glyph_box)
+
+
 def _remaining(snapshot: SceneSnapshot, slot: dict, *, recognizer: ScreenshotRecognizer | None = None) -> int | None:
     """Read even an exhausted gray card from its original, still visible header."""
     left, top, right, bottom = slot["bbox"]
@@ -44,7 +87,9 @@ def _remaining(snapshot: SceneSnapshot, slot: dict, *, recognizer: ScreenshotRec
                 and re.fullmatch(r"[xX×]\s*[0-9]+", evidence.get("text", "").strip())):
             reading = recognizer.recognize_slot_count(snapshot.screenshot_path, tuple(slot["bbox"]), count_bbox=tuple(count_bbox))
         else:
-            reading = recognizer.recognize_slot_count(snapshot.screenshot_path, tuple(slot["bbox"]))
+            anchor = _trusted_count_roi_anchor(slot)
+            reading = recognizer.recognize_slot_count(snapshot.screenshot_path, tuple(slot["bbox"]),
+                                                       **({"count_bbox": anchor} if anchor is not None else {}))
         reads.append(reading)
     count, confidence = reading.get("count"), reading.get("confidence", 0.0)
     if (type(count) is int and count >= 0 and math.isfinite(confidence) and .9 <= confidence <= 1
@@ -503,11 +548,25 @@ def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt
             if reading.get("portrait_score", 0) < .92 or reading.get("count") != troop["count"]:
                 break
             box = selected_box if index == 0 else troop["bbox"]
+            new_evidence = {**troop.get("evidence", {}), "count": reading,
+                            "identity_reference": identity_frame,
+                            "portrait_score": reading["portrait_score"]}
+            prior = troop.get("evidence", {}).get("count") or {}
+            if isinstance(prior, dict):
+                prior_box = prior.get("bbox")
+                anchor = {"bbox": list(prior_box) if isinstance(prior_box, (list, tuple)) else [],
+                          "source_frame": identity_frame,
+                          "source_slot_bbox": list(troop["bbox"]), "source_text": prior.get("text"),
+                          "source_confidence": prior.get("confidence"),
+                          "verified_frame": str(current.screenshot_path), "verified_count": reading["count"],
+                          "verified_portrait_score": reading["portrait_score"],
+                          "verified_slot_bbox": list(box), "unit_id": troop.get("unit_id")}
+                if _trusted_count_roi_anchor({**troop, "bbox": list(box),
+                                              "evidence": {**new_evidence, "count_roi_anchor": anchor}}) is not None:
+                    new_evidence["count_roi_anchor"] = anchor
             refreshed.append({**troop, "bbox": list(box),
                 "point": [(box[0] + box[2]) // 2, (box[1] + box[3]) // 2],
-                "count": reading["count"], "evidence": {**troop.get("evidence", {}),
-                "count": reading, "identity_reference": identity_frame,
-                "portrait_score": reading["portrait_score"]}})
+                "count": reading["count"], "evidence": new_evidence})
         if len(refreshed) != len(troops):
             continue
         slots = current.observations["battle"]["slots"]

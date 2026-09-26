@@ -5,10 +5,11 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from autococ.deployment import _remaining, deploy_army, spread_along_edges
+from autococ.deployment import _prepare_two_edge_view, _remaining, deploy_army, spread_along_edges
 from autococ.errors import CaptureError, DeploymentError, FlowError, StopRequested
 from autococ.scene import SceneSnapshot
 from autococ.session import GameSession
+from autococ.vision import ScreenshotRecognizer
 
 
 def card(kind: str = "troop", count: int | None = 10, left: int = 180) -> dict:
@@ -143,6 +144,60 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(frame.observations["battle"]["slots"], [])
         self.assertEqual(original["count"], 10)
 
+    def test_selected_gray_zero_uses_verified_old_glyph_box_only_as_roi_anchor(self) -> None:
+        path = Path(__file__).resolve().parent / "fixtures/battle_gray_electro_selected_x0.png"
+        slot = {"kind": "troop", "unit_id": "electro_dragon", "count": 10,
+                "bbox": [90, 589, 184, 709], "point": [137, 649],
+                "evidence": {"count": {"count": 10, "confidence": .99, "portrait_score": .99,
+                                        "frame": "selected.png", "slot_bbox": [93, 595, 181, 711]},
+                             "count_roi_anchor": {
+                                 "bbox": [130, 593, 180, 622], "source_frame": "before-selection.png",
+                                 "source_slot_bbox": [93, 595, 181, 711],
+                                 "source_text": "x10", "source_confidence": .99,
+                                 "verified_frame": "selected.png", "verified_count": 10,
+                                 "verified_portrait_score": .99,
+                                 "verified_slot_bbox": [90, 589, 184, 709],
+                                 "unit_id": "electro_dragon"}}}
+
+        def frame():
+            return SceneSnapshot("battle", .95, path, {"ocr": []})
+
+        recognizer = ScreenshotRecognizer()
+        unanchored = deepcopy(slot)
+        del unanchored["evidence"]["count_roi_anchor"]
+        self.assertIsNone(_remaining(frame(), unanchored, recognizer=recognizer))
+        current = frame()
+        self.assertEqual(_remaining(current, slot, recognizer=recognizer), 0)
+        reading = current.observations["deployment_count_reads"][0]
+        self.assertEqual(reading["count_bbox"], [130, 593, 180, 622])
+        self.assertEqual(reading["frame"], str(path))
+        self.assertGreaterEqual(reading["confidence"], .9)
+
+    def test_roi_anchor_rejects_changed_identity_count_and_geometry(self) -> None:
+        slot = {"kind": "troop", "unit_id": "electro_dragon", "count": 10,
+                "bbox": [90, 589, 184, 709], "point": [137, 649],
+                "evidence": {"count": {"count": 10, "portrait_score": .99, "frame": "selected.png",
+                                        "slot_bbox": [93, 595, 181, 711]}, "count_roi_anchor": {
+                    "bbox": [130, 593, 180, 622], "source_frame": "before-selection.png",
+                    "source_slot_bbox": [93, 595, 181, 711], "source_text": "x10",
+                    "source_confidence": .99, "verified_frame": "selected.png",
+                    "verified_count": 10, "verified_portrait_score": .99,
+                    "verified_slot_bbox": [90, 589, 184, 709], "unit_id": "electro_dragon"}}}
+        for key, value in (("source_text", "x9"), ("source_confidence", .89),
+                           ("verified_count", 9), ("verified_portrait_score", .91),
+                           ("verified_slot_bbox", [90, 589, 185, 709]), ("unit_id", "balloon"),
+                           ("bbox", [130, 593, 185, 622])):
+            with self.subTest(key=key):
+                candidate = deepcopy(slot)
+                candidate["evidence"]["count_roi_anchor"][key] = value
+                recognizer = Mock()
+                recognizer.recognize_slot_count.return_value = {"count": None, "confidence": 0,
+                    "frame": "current.png", "slot_bbox": candidate["bbox"]}
+                _remaining(SceneSnapshot("battle", .95, Path("current.png"), {"ocr": []}),
+                           candidate, recognizer=recognizer)
+                recognizer.recognize_slot_count.assert_called_once_with(Path("current.png"),
+                                                                          tuple(candidate["bbox"]))
+
     def line_session(self, cards=None):
         session = FakeSession(self.clock, cards or [card(count=40)])
         session.config.battle.strategy = "two_edge"
@@ -272,6 +327,33 @@ class DeploymentTests(unittest.TestCase):
             receipt = deploy_army(session, session.scout).observations["deployment"]
         self.assertTrue(receipt["completed"])
         self.assertEqual(receipt["deployed_units"], 11)
+
+    def test_boundary_selection_keeps_only_reidentified_card_glyph_roi(self):
+        original = {**card(count=10), "unit_id": "electro_dragon",
+                    "evidence": {"count": {"text": "x10", "confidence": .99,
+                                            "bbox": [205, 590, 245, 618]}}}
+        session = FakeSession(self.clock, [original])
+        session.native = Mock()
+        session.recognizer = Mock()
+        session.recognizer.recognize_slot_count.side_effect = lambda path, bbox: {
+            "frame": str(path), "slot_bbox": list(bbox), "count": 10, "portrait_score": .99,
+        }
+        self.camera_motion.return_value = {"stationary": True}
+        selected_box = [177, 587, 253, 703]
+        terrain = [{"edge": edge, "point": point} for edge, points in
+                   ((0, ([450, 210], [300, 320])), (1, ([300, 370], [440, 470]))) for point in points]
+        with patch("autococ.battle_vision.selected_card_bbox", return_value=selected_box), \
+             patch("autococ.terrain.find_line_deployment_edges", return_value=terrain):
+            current, observed = _prepare_two_edge_view(session, session.scout, {"evidence": []})
+        self.assertEqual(observed, terrain)
+        slot = current.observations["battle"]["slots"][0]
+        anchor = slot["evidence"]["count_roi_anchor"]
+        self.assertEqual(anchor["bbox"], [205, 590, 245, 618])
+        self.assertEqual(anchor["source_frame"], str(session.frames[2].screenshot_path))
+        self.assertEqual(anchor["verified_frame"], str(current.screenshot_path))
+        self.assertEqual(anchor["verified_slot_bbox"], selected_box)
+        self.assertEqual(anchor["unit_id"], "electro_dragon")
+        self.assertNotIn("bbox", slot["evidence"]["count"], "Fast count ROI is not a glyph box")
 
     def test_edrag_waits_for_selection_animation_without_clicking_again(self):
         session, _ = self.line_session([card(count=1), card("hero", None, 280)])

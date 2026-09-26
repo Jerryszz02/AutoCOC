@@ -768,7 +768,7 @@ class ScreenshotRecognizer:
         for name, labels, roi in (
             ("defeat", {"失败", "defeat"}, (545, 175, 745, 260)),
             ("victory", {"胜利", "victory"}, (545, 175, 745, 260)),
-            ("received", {"您得到了", "lootgained"}, (555, 275, 730, 330)),
+            ("received", {"您得到了", "您得到", "lootgained"}, (555, 275, 730, 330)),
             ("losses", {"损耗的部队", "损耗部队"}, (550, 450, 735, 495)),
             ("return", {"回营", "returnhome"}, (520, 570, 760, 675)),
         ):
