@@ -12,7 +12,7 @@ from .actions import AutomationContext
 from .adb import ADBClient
 from .config import AppConfig
 from .errors import FlowError, StopRequested
-from .recovery import recover_connection
+from .recovery import confirm_welcome_back, recover_connection, welcome_back_point
 from .reporting import RunStats, TaskResult, capture_run_provenance, write_report
 from .scene import SceneSnapshot
 from .session import GameSession
@@ -25,12 +25,20 @@ FlowFunction = Callable[[AutomationContext], None]
 def return_to_village(session: GameSession, *, initial_snapshot: SceneSnapshot | None = None):
     exit_scenes = {"training", "request", "donation", "clan_chat", "search", "popup"}
     snapshot = initial_snapshot if initial_snapshot is not None else session.observe("home-check")
+    welcome_confirmed = False
     for exits in range(5):
         session.check_deadline()
         if snapshot.scene == "village":
             break
         if exits == 4:
             raise FlowError("Village recovery exceeded four verified scene exits")
+        if snapshot.scene == "popup" and welcome_back_point(snapshot) is not None:
+            if not welcome_confirmed:
+                confirm_welcome_back(session, snapshot)
+                welcome_confirmed = True
+            snapshot = session.wait_for((exit_scenes | {"village", "settlement"}) - {"popup"},
+                                        timeout_sec=20, label="welcome-home")
+            continue
         if snapshot.scene in exit_scenes:
             session.back(snapshot, reason=f"Return from {snapshot.scene} before selected task")
             snapshot = session.wait_for((exit_scenes | {"village", "settlement"}) - {snapshot.scene},
@@ -41,8 +49,11 @@ def return_to_village(session: GameSession, *, initial_snapshot: SceneSnapshot |
         else:
             snapshot = session.wait_for({"village"} | exit_scenes,
                                         timeout_sec=session.config.game.startup_timeout_sec, label="starting-home")
-    controls = {button["name"] for button in snapshot.observations.get("buttons", [])}
-    if not math.isfinite(snapshot.confidence) or snapshot.confidence < 0.8 or not {"attack", "shop"} <= controls:
+    buttons = snapshot.observations.get("buttons", [])
+    if (not math.isfinite(snapshot.confidence) or snapshot.confidence < 0.8
+            or not isinstance(buttons, list)
+            or any(sum(button.get("name") == name for button in buttons if isinstance(button, dict)) != 1
+                   for name in ("attack", "shop"))):
         raise FlowError("Village is not verified by confident scene and both navigation controls")
     return snapshot
 
