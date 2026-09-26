@@ -13,7 +13,7 @@ from .images import read_frame, read_template
 from .errors import LocatorError, SceneError
 from .locator import find_template, scale_box
 from .ocr import OCRProvider, OCRText, create_ocr_provider, filter_ocr_results
-from .scene import SCENE_BATTLE, SCENE_CLAN_CHAT, SCENE_DISCONNECTED, SCENE_ENEMY_VILLAGE, SCENE_MAINTENANCE, SCENE_REQUEST, SCENE_SEARCH, SCENE_SETTLEMENT, SCENE_STARTING, SCENE_TRAINING, SCENE_UNKNOWN, SCENE_VILLAGE, SceneSnapshot, classify_scene_text
+from .scene import SCENE_BATTLE, SCENE_CLAN_CHAT, SCENE_DISCONNECTED, SCENE_ENEMY_VILLAGE, SCENE_MAINTENANCE, SCENE_POPUP, SCENE_REQUEST, SCENE_SEARCH, SCENE_SETTLEMENT, SCENE_STARTING, SCENE_TRAINING, SCENE_UNKNOWN, SCENE_VILLAGE, SceneSnapshot, classify_scene_text, surrender_dialog_evidence
 
 
 BUTTON_LABELS: dict[str, tuple[str, ...]] = {
@@ -208,6 +208,13 @@ class ScreenshotRecognizer:
         ocr_finished = time.monotonic()
         texts = [self._baseline_result(result, resolution) for result in results]
         scene, confidence, reasons = classify_scene_text("\n".join(result.text for result in texts))
+        surrender_dialog = None
+        if scene in {SCENE_BATTLE, SCENE_ENEMY_VILLAGE, SCENE_POPUP, SCENE_UNKNOWN}:
+            surrender_dialog = surrender_dialog_evidence([asdict(item) for item in texts])
+            if surrender_dialog is not None:
+                # The pale dialog is not cloud cover and its background HUD is
+                # not an active battle surface while confirmation is pending.
+                scene, confidence, reasons = SCENE_POPUP, .95, ["surrender_dialog_geometry_verified"]
         startup_logo = self._startup_logo(path) if scene == SCENE_UNKNOWN else None
         if startup_logo is not None:
             scene, confidence, reasons = SCENE_STARTING, 0.65, ["supercell_startup_logo"]
@@ -249,6 +256,11 @@ class ScreenshotRecognizer:
                 continue
             normalized = normalize_label(result.text)
             for name, labels in BUTTON_LABELS.items():
+                if surrender_dialog is not None and (
+                    name not in {"confirm", "cancel"} or
+                    list(result.bbox) != list(surrender_dialog[name]["bbox"])
+                ):
+                    continue
                 if scene in {SCENE_UNKNOWN, SCENE_MAINTENANCE}:
                     continue
                 if scene == SCENE_DISCONNECTED and not (
@@ -311,6 +323,7 @@ class ScreenshotRecognizer:
             "buildings": [],
             "settlement": None,
             "request_dialog": request_dialog,
+            "surrender_dialog": surrender_dialog,
             "cloud_cover": cloud_cover,
             "startup_logo": startup_logo,
         }

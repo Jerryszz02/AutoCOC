@@ -7,7 +7,7 @@ from dataclasses import asdict
 
 from .deployment import _battle_frame, _remaining, _prepare_two_edge_view
 from .errors import DeploymentError, FlowError, StopRequested
-from .scene import SceneSnapshot
+from .scene import SceneSnapshot, surrender_dialog_evidence
 from .strategies import BattleContext, spread_on_edge
 from .strategy_config import StrategyDefinition, StrategyStep, planned_steps
 from .unit_catalog import get_unit
@@ -644,7 +644,8 @@ def _end_battle_confirmation(frame: SceneSnapshot) -> tuple[int, int, int, int]:
                                                  "surrender", "endbattle", "endthebattle"))
     question = any(phrase in joined for phrase in ("确定", "确认", "是否", "吗", "?", "？",
                                                   "sure", "confirm"))
-    if not subject or not question:
+    observed_dialog = surrender_dialog_evidence(frame.observations.get("ocr", []))
+    if (not subject or not question) and observed_dialog is None:
         raise FlowError("Popup has no positive surrender prompt evidence")
     buttons = [button for button in frame.observations.get("buttons", [])
                if button.get("name") == "confirm" and
@@ -653,6 +654,11 @@ def _end_battle_confirmation(frame: SceneSnapshot) -> tuple[int, int, int, int]:
                300 <= button["point"][0] <= 980 and 200 <= button["point"][1] <= 650]
     if len(buttons) != 1:
         raise FlowError("Surrender dialog has no unique central confirm button")
+    if observed_dialog is not None:
+        box = observed_dialog["confirm"]["bbox"]
+        expected = [(box[0] + box[2]) // 2, (box[1] + box[3]) // 2]
+        if list(buttons[0]["point"]) != expected:
+            raise FlowError("Surrender confirmation button is not bound to the observed dialog")
     return (300, 200, 980, 650)
 
 
