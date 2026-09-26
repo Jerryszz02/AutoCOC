@@ -10,6 +10,7 @@ import warnings
 
 from .errors import ConfigError
 from .strategies import STRATEGIES
+from .routine_config import ResourceFilter, RoutineConfig, routine_from_dict
 
 
 VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR"}
@@ -84,16 +85,27 @@ class BattleConfig:
     max_searches: int = 30
     deploy_timeout_sec: int = 180
     strategy: str = "verified"
+    resource_filter: ResourceFilter | None = None
+    strategy_file: str = ""
+    target_building: str = ""
+    settlement_timeout_sec: int | None = None
 
     def __post_init__(self) -> None:
         if self.strategy not in STRATEGIES:
             raise ConfigError(f"battle.strategy must be one of {tuple(STRATEGIES)}")
-        if self.objective != "resources":
-            raise ConfigError("battle.objective supports only 'resources' (gold + elixir threshold)")
+        if self.objective not in {"resources", "event", "clan_games"}:
+            raise ConfigError("battle.objective must be resources, event or clan_games")
+        if self.resource_filter is not None:
+            self.resource_filter.validate()
+        if not isinstance(self.strategy_file, str) or self.target_building not in {"", "air_defense", "spell_factory"}:
+            raise ConfigError("Invalid strategy_file or target_building")
         for name, minimum in (("min_expected_resources", 0), ("max_searches", 1), ("deploy_timeout_sec", 1)):
             value = getattr(self, name)
             if type(value) is not int or value < minimum:
                 raise ConfigError(f"battle.{name} must be an integer >= {minimum}")
+        if self.settlement_timeout_sec is not None and (
+                type(self.settlement_timeout_sec) is not int or self.settlement_timeout_sec < 1):
+            raise ConfigError("battle.settlement_timeout_sec must be a positive integer")
 
 
 @dataclass(frozen=True)
@@ -124,6 +136,7 @@ class AppConfig:
     stop: StopConfig
     source_path: Path
     mumu: MuMuConfig | None = None
+    routine: RoutineConfig | None = None
 
 
 def load_config(path: str | Path = "config.toml") -> AppConfig:
@@ -162,6 +175,7 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
         stop=stop_config,
         source_path=config_path,
         mumu=_load_mumu(_section(raw, "mumu")) if "mumu" in raw else None,
+        routine=routine_from_dict(_section(raw, "routine")) if "routine" in raw else None,
     )
 
 
@@ -273,12 +287,23 @@ def _load_battle(section: dict[str, Any]) -> BattleConfig:
             + ". Remove these keys; resources selection uses only the gold + elixir threshold.",
             UserWarning, stacklevel=2,
         )
+    resource_filter = None
+    if "resource_filter" in section:
+        try:
+            resource_filter = ResourceFilter(**_section(section, "resource_filter"))
+        except TypeError as exc:
+            raise ConfigError(f"Invalid battle.resource_filter: {exc}") from exc
     return BattleConfig(
         objective=_string(section, "objective", "resources"),
         min_expected_resources=_non_negative_int(section, "min_expected_resources", 300000),
         max_searches=_positive_int(section, "max_searches", 30),
         deploy_timeout_sec=_positive_int(section, "deploy_timeout_sec", 180),
         strategy=_string(section, "strategy", "verified"),
+        resource_filter=resource_filter,
+        strategy_file=_string(section, "strategy_file", ""),
+        target_building=_string(section, "target_building", ""),
+        settlement_timeout_sec=(_positive_int(section, "settlement_timeout_sec", 180)
+                                if "settlement_timeout_sec" in section else None),
     )
 
 

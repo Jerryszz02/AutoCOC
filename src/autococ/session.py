@@ -6,6 +6,7 @@ from dataclasses import replace
 import json
 import logging
 import math
+import re
 from pathlib import Path
 from threading import Event
 import time
@@ -43,6 +44,8 @@ class GameSession:
         self.frame_number = 0
         self.action_count = 0
         self.logger = logger or logging.getLogger(__name__)
+        self.client_version = "unknown"
+        self.client_version_code: int | None = None
 
     @classmethod
     def connect(cls, config: AppConfig, adb: ADBClient, serial: str, directory: Path,
@@ -110,11 +113,29 @@ class GameSession:
             check_stop()
             session.deadline = min(session.deadline, started + config.stop.max_duration_sec)
             session.task_deadline = session.deadline
+            # Read-only package metadata is provenance, never a connection
+            # prerequisite. Do not persist the raw package dump.
+            try:
+                metadata = adb.run(["shell", "dumpsys", "package", config.game.package_name],
+                                   serial=serial, timeout_sec=min(5, config.runtime.step_timeout_sec),
+                                   check=False)
+                if metadata.returncode == 0:
+                    name = re.search(r"(?m)^\s*versionName=([^\s]+)", metadata.stdout)
+                    code = re.search(r"(?m)^\s*versionCode=(\d+)", metadata.stdout)
+                    if name:
+                        session.client_version = name.group(1)
+                    if code:
+                        session.client_version_code = int(code.group(1))
+            except Exception:
+                pass
+            session.recognizer.client_version = session.client_version
             session.event("session_connected", launch_requested=launch,
                           launch_issued=launch and not already_foreground,
                           reused_foreground=already_foreground,
                           transport="mumu_native" if native is not None else "adb",
-                          logical_display_id=target.logical_id, physical_display_id=target.physical_id)
+                          logical_display_id=target.logical_id, physical_display_id=target.physical_id,
+                          client_version=session.client_version,
+                          client_version_code=session.client_version_code)
             return session
         except BaseException:
             if native is not None:
@@ -226,6 +247,108 @@ class GameSession:
         self.context.swipe(*start, *end, duration_ms)
         self.action_count += 1
 
+    def swipe_battle_bar(self, snapshot: SceneSnapshot, *, direction: str, reason: str) -> None:
+        """Scroll only the positively observed deployment toolbar.
+
+        Left/right describe the finger gesture. No old card coordinate remains
+        actionable after a swipe; the caller must capture the new viewport.
+        """
+        self._validate_snapshot(snapshot)
+        if (snapshot.scene not in {"enemy_village", "battle"} or direction not in {"left", "right"}
+                or tuple(self.config.game.baseline_resolution) != (1280, 720)):
+            raise FlowError("Battle toolbar scroll requires a recognized battle and supported layout")
+        battle = snapshot.observations.get("battle")
+        slots = battle.get("slots", []) if isinstance(battle, dict) else []
+        anchors = []
+        for card in slots:
+            if not isinstance(card, dict) or card.get("kind") not in {"troop", "spell", "hero", "siege"}:
+                continue
+            box, point = card.get("bbox"), card.get("point")
+            evidence = card.get("evidence")
+            if (not isinstance(box, (tuple, list)) or len(box) != 4
+                    or not isinstance(point, (tuple, list)) or len(point) != 2
+                    or any(type(v) not in (int, float) or not math.isfinite(v) for v in (*box, *point))
+                    or not (0 <= box[0] < point[0] < box[2] <= 1280
+                            and 575 <= box[1] < point[1] < box[3] <= 720)
+                    or not (40 <= box[2] - box[0] <= 180 and 70 <= box[3] - box[1] <= 145)
+                    or not isinstance(evidence, dict) or evidence.get("method") != "independent_card_border"):
+                continue
+            identity = card.get("confidence")
+            reading = evidence.get("count")
+            quantity = reading.get("confidence") if isinstance(reading, dict) else None
+            known_identity = bool(card.get("unit_id")) and type(identity) in (int, float) and .9 <= identity <= 1
+            known_count = (type(card.get("count")) is int and card["count"] >= 0
+                           and type(quantity) in (int, float) and .9 <= quantity <= 1)
+            if known_identity or known_count:
+                anchors.append(box)
+        if len(anchors) < 2 or len({round(box[0]) for box in anchors}) < 2:
+            raise FlowError("Battle toolbar lacks independent current-frame card anchors")
+        top, bottom = max(box[1] for box in anchors), min(box[3] for box in anchors)
+        if bottom - top < 60:
+            raise FlowError("Battle toolbar cards do not share one confirmed row")
+        y = round((top + bottom) / 2)
+        start, end = ((1060, y), (220, y)) if direction == "left" else ((220, y), (1060, y))
+        self.event("swipe_battle_bar", frame=str(snapshot.screenshot_path), scene=snapshot.scene,
+                   start=list(start), end=list(end), direction=direction, reason=reason)
+        self.context.swipe(*start, *end, 550)
+        self.action_count += 1
+        self.last_snapshot = None
+
+    def swipe_army_catalog(self, snapshot: SceneSnapshot, *, direction: str, reason: str) -> None:
+        """Page the open troop/spell picker, after validating its current frame.
+
+        The gesture stays inside the card grid and never reaches the add/remove
+        controls above it or the edge arrow. A new observation is required for
+        each page; callers cannot reuse an old editor position.
+        """
+        self._validate_snapshot(snapshot)
+        if snapshot.scene != "training" or direction not in {"next", "previous"}:
+            raise FlowError("Army catalog swipe requires an observed training editor and direction")
+        texts = snapshot.observations.get("ocr") or []
+        if not any("编辑军队配置" in str(item.get("text", ""))
+                   and 450 <= (item.get("bbox") or [0])[0] <= 750 for item in texts):
+            raise FlowError("Army configuration editor title is not visible")
+        import cv2
+        import numpy as np
+        image = cv2.imread(str(snapshot.screenshot_path))
+        if image is None:
+            raise FlowError("Army catalog frame cannot be decoded")
+        height, width = image.shape[:2]
+        x1, x2 = round(250 * width / 1280), round(1100 * width / 1280)
+        y1, y2 = round(480 * height / 720), round(555 * height / 720)
+        hsv = cv2.cvtColor(image[y1:y2, x1:x2], cv2.COLOR_BGR2HSV)
+        # The expanded picker has saturated blue or red/gold super-troop
+        # cards here; a collapsed picker leaves the dark panel in this area.
+        card_fraction = float(np.mean((hsv[:, :, 1] >= 75) & (hsv[:, :, 2] >= 125)))
+        if card_fraction < 0.22:
+            raise FlowError("Expanded army card catalog is not visible")
+        start, end = ((980, 500), (330, 500)) if direction == "next" else ((330, 500), (980, 500))
+        self.event("swipe_army_catalog", frame=str(snapshot.screenshot_path),
+                   scene=snapshot.scene, start=list(start), end=list(end),
+                   direction=direction, reason=reason)
+        self.context.swipe(*start, *end, 550)
+        self.action_count += 1
+
+    def close_army_catalog(self, snapshot: SceneSnapshot, *, reason: str) -> None:
+        """Dismiss the open army picker without editing a card or the preset."""
+        self.check_deadline()
+        if snapshot is not self.last_snapshot:
+            raise FlowError("Army picker close refers to an obsolete observation")
+        age = time.monotonic() - float(snapshot.observations.get("observed_at_monotonic", 0))
+        if not 0 <= age <= 30 or snapshot.scene not in {"training", "unknown"}:
+            raise FlowError("Army picker close requires a fresh editor frame")
+        texts = snapshot.observations.get("ocr") or []
+        has_capacity = any(re.fullmatch(r"\d+/\d+", str(x.get("text", "")))
+                           and 450 <= (x.get("bbox") or [0])[0] <= 750
+                           and 50 <= (x.get("bbox") or [0, 0])[1] <= 200 for x in texts)
+        picker_numbers = sum(bool(re.fullmatch(r"\d{1,2}", str(x.get("text", ""))))
+                             and (x.get("bbox") or [0, 0])[1] >= 480 for x in texts)
+        if not has_capacity or picker_numbers < 8:
+            raise FlowError("Expanded army picker cannot be confirmed in this frame")
+        self.event("close_army_catalog", frame=str(snapshot.screenshot_path), reason=reason)
+        self.context.back()
+        self.action_count += 1
+
     @staticmethod
     def buttons(snapshot: SceneSnapshot, name: str) -> list[dict]:
         return [button for button in snapshot.observations.get("buttons", []) if button["name"] == name]
@@ -250,7 +373,7 @@ class GameSession:
 
     def back(self, snapshot: SceneSnapshot, *, reason: str) -> None:
         self._validate_snapshot(snapshot)
-        if snapshot.scene not in {"training", "request", "donation", "clan_chat", "search", "popup"}:
+        if snapshot.scene not in {"training", "request", "donation", "clan_chat", "search", "popup", "goal_panel"}:
             raise FlowError(f"Back is not permitted in {snapshot.scene}")
         self.event("back", frame=str(snapshot.screenshot_path), reason=reason)
         self.context.back()

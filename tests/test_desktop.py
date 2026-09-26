@@ -11,6 +11,7 @@ from autococ.desktop import (DesktopController, RunOptions, desktop_config, load
                              report_history, report_text, save_options)
 from autococ.errors import ConfigError
 from autococ.reporting import RunStats
+from autococ.routine_config import GoalConfig, ResourceFilter, RoutineConfig, TaskSpec
 
 
 class DesktopTests(unittest.TestCase):
@@ -45,12 +46,92 @@ class DesktopTests(unittest.TestCase):
         path = self.root / "desktop.json"
         options = replace(self.options, dry_run=False, max_runs=7, serial="127.0.0.1:1234")
         save_options(path, options)
-        self.assertEqual(load_options(path, self.config), replace(options, dry_run=True))
+        loaded = load_options(path, self.config)
+        self.assertEqual(replace(loaded, routine=None), replace(options, dry_run=True))
+        self.assertIsNotNone(loaded.routine)
+        self.assertEqual(next(task for task in loaded.routine.tasks if task.id == "resources").max_battles, 7)
         payload = json.loads(path.read_text(encoding="utf-8"))
         payload["dry_run"] = False
         path.write_text(json.dumps(payload), encoding="utf-8")
         self.assertTrue(load_options(path, self.config).dry_run)
         self.assertEqual(list(self.root.glob("*.tmp")), [])
+
+    def test_routine_settings_round_trip_keeps_order_and_independent_goals(self):
+        routine = RoutineConfig((
+            TaskSpec("event", "event", goal=GoalConfig(adapter_path="events/current.toml", target=30),
+                     resource_filter=ResourceFilter(enabled=False)),
+            TaskSpec("resources", "resources", strategy="edrag_line",
+                     resource_filter=ResourceFilter(min_gold=600000, min_total=None),
+                     goal=GoalConfig(resource_targets={"gold": 24000000})),
+            TaskSpec("clan_games", "clan_games", goal=GoalConfig(building_type="spell_factory", target=4))),
+            maintenance_interval_sec=600)
+        options = replace(self.options, routine=routine, dry_run=False)
+        path = self.root / "desktop.json"
+        save_options(path, options)
+        loaded = load_options(path, self.config)
+        self.assertEqual(loaded.routine, routine)
+        self.assertTrue(loaded.dry_run)
+        self.assertEqual(desktop_config(self.path, loaded).routine, routine)
+
+    def test_routine_worker_uses_routine_entrypoint(self):
+        routine = RoutineConfig((TaskSpec("resources", "resources"),))
+        controller = DesktopController()
+        stats = RunStats(profile="routine", mode="dry-run", stop_reason="completed")
+        with patch("autococ.desktop.FlowRunner") as runner:
+            runner.return_value.run_routine.return_value = stats
+            controller.start(self.path, replace(self.options, routine=routine))
+            controller.thread.join(3)
+            runner.return_value.run_routine.assert_called_once_with(routine)
+            runner.return_value.run_profile.assert_not_called()
+
+    def test_multi_goal_dry_run_reports_order_without_contacting_device(self):
+        routine = RoutineConfig((TaskSpec("collect", "collect"), TaskSpec("resources", "resources"),
+                                 TaskSpec("event", "event"), TaskSpec("clan_games", "clan_games")))
+        controller = DesktopController()
+        with patch("autococ.desktop.DeviceManager") as device:
+            controller.start(self.path, replace(self.options, routine=routine))
+            controller.thread.join(5)
+            device.assert_not_called()
+        events = []
+        while not controller.events.empty():
+            events.append(controller.events.get_nowait())
+        finished = next(event for event in events if event["kind"] == "finished")
+        self.assertEqual([result["task"] for result in finished["summary"]["task_results"]],
+                         ["collect", "resources", "event", "clan_games"])
+        self.assertEqual(finished["summary"]["simulated"], 4)
+        self.assertEqual(finished["summary"]["battles_completed"], 0)
+
+    def test_missing_routine_file_fails_before_worker_or_device_connection(self):
+        routine = RoutineConfig((TaskSpec("resources", "resources", strategy_file="missing.toml"),))
+        controller = DesktopController()
+        with patch("autococ.desktop.DeviceManager") as device, self.assertRaises(ConfigError):
+            controller.start(self.path, replace(self.options, routine=routine, dry_run=False))
+        self.assertIsNone(controller.thread)
+        device.assert_not_called()
+
+    def test_empty_selection_fails_before_live_connection(self):
+        routine = RoutineConfig((TaskSpec("resources", "resources", enabled=False),))
+        controller = DesktopController()
+        with patch("autococ.desktop.DeviceManager") as device, self.assertRaises(ConfigError):
+            controller.start(self.path, replace(self.options, routine=routine, dry_run=False))
+        self.assertIsNone(controller.thread)
+        device.assert_not_called()
+
+    def test_relative_strategy_file_uses_selected_config_directory(self):
+        (self.root / "battle.toml").write_text(
+            'id = "single_edge"\nlabel = "单边"\narmy_mode = "captured"\n'
+            '[[steps]]\naction = "deploy_troop"\nunit_id = "*"\ncount = "all"\nedge = "first"\n',
+            encoding="utf-8")
+        routine = RoutineConfig((TaskSpec("resources", "resources", strategy_file="battle.toml"),))
+        controller = DesktopController()
+        with patch("autococ.desktop.DeviceManager") as device:
+            controller.start(self.path, replace(self.options, routine=routine))
+            controller.thread.join(5)
+            device.assert_not_called()
+        self.assertFalse(controller.running)
+        reports, errors = report_history(self.root / "reports")
+        self.assertEqual(errors, [])
+        self.assertEqual(reports[0][1]["simulated"], 1)
 
     def test_two_edge_desktop_configuration_and_saved_selection(self):
         options = replace(self.options, strategy="two_edge", tasks=("launch", "battle"))
@@ -58,6 +139,8 @@ class DesktopTests(unittest.TestCase):
         path = self.root / "desktop.json"
         save_options(path, options)
         self.assertEqual(load_options(path, self.config).strategy, "two_edge")
+        resource = next(task for task in load_options(path, self.config).routine.tasks if task.kind == "resources")
+        self.assertFalse(resource.resource_filter.enabled)
 
     def test_malformed_settings_do_not_silently_enable_defaults(self):
         path = self.root / "desktop.json"
@@ -115,6 +198,18 @@ class DesktopTests(unittest.TestCase):
         reports, _ = report_history(self.root / "reports")
         self.assertEqual(reports[0][1]["failures"], 1)
         self.assertIn("test device unavailable", reports[0][1]["stop_reason"])
+
+    def test_cancelled_connection_is_not_reported_as_failure(self):
+        from autococ.errors import StopRequested
+        controller = DesktopController()
+        with patch("autococ.desktop.DeviceManager") as manager, patch("autococ.desktop.FlowRunner") as runner:
+            manager.return_value.connect.side_effect = StopRequested()
+            controller.start(self.path, replace(self.options, dry_run=False))
+            controller.thread.join(3)
+            runner.assert_not_called()
+        reports, _ = report_history(self.root / "reports")
+        self.assertEqual(reports[0][1]["failures"], 0)
+        self.assertEqual(reports[0][1]["cancelled"], 1)
 
     def test_corrupt_history_is_skipped_and_unknown_income_stays_unknown(self):
         good = {"mode": "live", "task_results": [], "resource_metrics": {"net_gold_elixir_per_hour": None}}

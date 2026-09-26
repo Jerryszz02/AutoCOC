@@ -1,7 +1,7 @@
 """Pure deployment planners; game input and verification belong to the executor."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from .errors import FlowError
@@ -12,6 +12,10 @@ class BattleContext:
     troops: tuple[dict, ...]
     heroes: tuple[dict, ...]
     terrain: tuple[dict, ...]
+    spells: tuple[dict, ...] = ()
+    buildings: tuple[dict, ...] = ()
+    hero_states: tuple[dict, ...] = ()
+    target_progress: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

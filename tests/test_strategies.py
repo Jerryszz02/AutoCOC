@@ -31,6 +31,18 @@ class StrategyTests(unittest.TestCase):
         self.assertTrue(all(y <= 260 for step in plan.troops for x, y in step.points))
         self.assertEqual(plan.heroes[0].points, ((400, 180),))
 
+    def test_battle_context_extends_old_planners_with_objective_evidence(self):
+        original = self.context()
+        self.assertEqual(original.spells, ())
+        self.assertEqual(original.buildings, ())
+        extended = BattleContext(original.troops, original.heroes, original.terrain,
+                                 spells=({"unit_id": "lightning_spell", "count": 4},),
+                                 buildings=({"type": "air_defense", "state": "alive"},),
+                                 hero_states=({"ability_ready": True},),
+                                 target_progress={"destroyed": 1, "required": 3})
+        self.assertEqual(extended.target_progress["required"], 3)
+        self.assertEqual(len(STRATEGIES["two_edge"].planner.build_plan(extended).troops), 3)
+
     def test_new_strategy_survives_config_and_saved_gui_options(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "config.toml"

@@ -1,0 +1,8 @@
+{
+  "client": "Clash of Clans 18.600.7 (versionCode 180600008), MuMu 2026-09-26, 1280x720 baseline",
+  "templates": [
+    {"type": "home", "file": "village_home_attack.png", "source": "reports/live-army-probe/frames/00002-boat-after.png", "crop_at_1280x720": [45, 580, 119, 648]},
+    {"type": "home", "file": "village_home_attack_stars.png", "source": "reports/live-army-editor-probe/frames/00003-army-return-return-1.png", "crop_at_1280x720": [40, 590, 115, 659], "state": "attack_icon_with_stars"},
+    {"type": "builder_base", "file": "village_builder_attack.png", "source": "reports/live-capabilities/frames/00006-returning-home.png", "crop_at_1280x720": [45, 580, 119, 648]}
+  ]
+}

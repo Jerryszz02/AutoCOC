@@ -6,6 +6,7 @@ import logging
 import math
 from threading import Event
 import time
+from uuid import uuid4
 
 from .actions import AutomationContext
 from .adb import ADBClient
@@ -73,6 +74,10 @@ class FlowRunner:
         if self.stop_event is not None and self.stop_event.is_set():
             raise StopRequested("interrupted by user")
 
+    def run_routine(self, routine) -> RunStats:
+        from .daily import run_routine
+        return run_routine(self, routine)
+
     def _notify(self, kind: str, **data: object) -> None:
         if self.progress is not None:
             try:
@@ -131,6 +136,9 @@ class FlowRunner:
                                            launch="launch" in profile.enabled_tasks, logger=self.logger,
                                            **connection_options)
             stats.events_path = session.events_path
+            version = getattr(session, "client_version", None)
+            if isinstance(version, str) and version:
+                stats.provenance["client_version"] = version
             while True:
                 self._check_stop()
                 stop = stops.check()
@@ -154,6 +162,14 @@ class FlowRunner:
                         frame = session.last_snapshot
                         result = TaskResult(task, "failed", str(exc), elapsed_sec=time.monotonic() - started,
                                             evidence=[frame.screenshot_path] if frame else [])
+                    if task == "battle":
+                        result = replace(result, metrics={**result.metrics,
+                                         "receipt_kind": "battle", "battle_id": uuid4().hex})
+                        if (result.metrics.get("returned_home") is True and
+                                type(result.metrics.get("rounds_completed")) is int and
+                                result.metrics["rounds_completed"] == 1):
+                            stats.battles_completed += 1
+                            stats.battles_won += int(result.metrics.get("victory") is True)
                     stats.record_task(result)
                     active_task = None
                     self._record_resolution(session, stats)

@@ -45,6 +45,10 @@ class FlowError(AutoCOCError):
     """Raised when a flow cannot be executed."""
 
 
+class CapabilityUnavailable(FlowError):
+    """A required adapter/asset is unavailable before any uncertain action."""
+
+
 class StopRequested(KeyboardInterrupt):
     """Cooperative user stop; task failure handlers must not swallow it."""
 

@@ -82,6 +82,18 @@ class ReportingTests(unittest.TestCase):
         stats = RunStats(task_results=[TaskResult("donate", "failed", "partial donation", metrics={"donation_cost_elixir": 30})])
         self.assertEqual(resource_metrics(stats)["resources"]["elixir"]["donation_spend"], 30)
 
+    def test_daily_task_ids_preserve_collection_donation_and_battle_ledger(self) -> None:
+        stats = RunStats(task_results=[
+            success("morning", receipt_kind="collect", collected_gold=50),
+            success("help-clan", receipt_kind="donate", donation_cost_gold=2),
+            success("gold-farm", receipt_kind="battle", returned_home=True, rounds_completed=1,
+                    loot_gold=100, bonus_gold=10, search_cost_gold=3),
+            success("gold-farm", receipt_kind="goal_progress", battle_id="same-battle"),
+        ])
+        gold = resource_metrics(stats)["resources"]["gold"]
+        self.assertEqual(gold["battle_gross"], 110)
+        self.assertEqual(gold["operating_net"], 155)
+
     def test_absent_cost_events_are_zero(self) -> None:
         stats = RunStats(task_results=[
             success("collect", collected_gold=100, collected_elixir=0, collected_dark_elixir=0),
@@ -90,6 +102,17 @@ class ReportingTests(unittest.TestCase):
         for values in resource_metrics(stats)["resources"].values():
             self.assertEqual(values["donation_spend"], 0)
             self.assertEqual(values["search_spend"], 0)
+
+    def test_verified_daily_partial_battle_keeps_known_loot_only(self) -> None:
+        result = TaskResult("farm", "failed", "Last action unverified", metrics={
+            "receipt_kind": "battle", "rounds_completed": 1, "returned_home": True,
+            "loot_gold": 100, "bonus_gold": 10, "loot_elixir": None, "bonus_elixir": None})
+        stats = RunStats(task_results=[result])
+        values = resource_metrics(stats)["resources"]
+        self.assertEqual(values["gold"]["battle_gross"], 110)
+        self.assertIsNone(values["elixir"]["battle_gross"])
+        result.metrics["rounds_completed"] = 0
+        self.assertIsNone(resource_metrics(stats)["resources"]["gold"]["battle_gross"])
 
     def test_observed_cost_events_with_missing_amounts_remain_unknown(self) -> None:
         stats = RunStats(task_results=[
@@ -219,6 +242,21 @@ class ProvenanceTests(unittest.TestCase):
         for config in (once, dry):
             with self.subTest(config=config):
                 self.assertNotEqual(initial["effective_config_sha256"], self.capture(config)["effective_config_sha256"])
+
+    def test_catalog_and_external_strategy_changes_are_fingerprinted(self) -> None:
+        catalog = self.root / "assets/catalogs/units/sample.png"
+        catalog.parent.mkdir(parents=True)
+        catalog.write_bytes(b"identity template")
+        strategy = self.root / "custom.toml"
+        strategy.write_text('planner="planner.py"\n', encoding="utf-8")
+        planner = self.root / "planner.py"
+        planner.write_bytes(b"local planner")
+        config = replace(self.config, battle=replace(self.config.battle, strategy_file=str(strategy)))
+        first = self.capture(config)
+        self.assertIn("assets/catalogs/units/sample.png", first["files_sha256"])
+        self.assertIn("planner.py", first["files_sha256"])
+        planner.write_bytes(b"updated local planner")
+        self.assertNotEqual(first["source_fingerprint_sha256"], self.capture(config)["source_fingerprint_sha256"])
 
     def test_file_edits_and_additions_change_new_snapshot_not_saved_report(self) -> None:
         initial = self.capture()

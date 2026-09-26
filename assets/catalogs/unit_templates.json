@@ -1,0 +1,487 @@
+{
+  "client": "18.600.7",
+  "version_code": 180600008,
+  "coordinate_resolution": [
+    1280,
+    720
+  ],
+  "templates": [
+    {
+      "unit_id": "meteor_golem",
+      "surface": "army",
+      "path": "units/meteor_golem_army_18_600_7.png",
+      "source_frame": "tests/fixtures/army_confirmation_counts_20260926.png",
+      "source_bbox_1280": [
+        580,
+        226,
+        625,
+        268
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "bowler",
+      "surface": "army",
+      "path": "units/bowler_army_18_600_7.png",
+      "source_frame": "tests/fixtures/army_confirmation_counts_20260926.png",
+      "source_bbox_1280": [
+        683,
+        226,
+        728,
+        268
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "wall_breaker",
+      "surface": "army",
+      "path": "units/wall_breaker_army_18_600_7.png",
+      "source_frame": "tests/fixtures/army_confirmation_counts_20260926.png",
+      "source_bbox_1280": [
+        785,
+        226,
+        830,
+        268
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "archer",
+      "surface": "army",
+      "path": "units/archer_army_18_600_7.png",
+      "source_frame": "tests/fixtures/army_confirmation_counts_20260926.png",
+      "source_bbox_1280": [
+        888,
+        226,
+        933,
+        268
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "totem_spell",
+      "surface": "army",
+      "path": "units/totem_spell_army_18_600_7.png",
+      "source_frame": "tests/fixtures/army_confirmation_counts_20260926.png",
+      "source_bbox_1280": [
+        580,
+        405,
+        625,
+        447
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "overgrowth_spell",
+      "surface": "army",
+      "path": "units/overgrowth_spell_army_18_600_7.png",
+      "source_frame": "tests/fixtures/army_confirmation_counts_20260926.png",
+      "source_bbox_1280": [
+        683,
+        405,
+        728,
+        447
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "revival_spell",
+      "surface": "army",
+      "path": "units/revival_spell_army_18_600_7.png",
+      "source_frame": "tests/fixtures/army_confirmation_counts_20260926.png",
+      "source_bbox_1280": [
+        785,
+        405,
+        830,
+        447
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "freeze_spell",
+      "surface": "army",
+      "path": "units/freeze_spell_army_18_600_7.png",
+      "source_frame": "tests/fixtures/army_confirmation_counts_20260926.png",
+      "source_bbox_1280": [
+        888,
+        405,
+        933,
+        447
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "meteor_golem",
+      "surface": "battle",
+      "path": "units/meteor_golem_battle_18_600_7.png",
+      "source_frame": "tests/fixtures/scout_battle_bar_20260926.png",
+      "source_bbox_1280": [
+        36,
+        636,
+        81,
+        678
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "bowler",
+      "surface": "battle",
+      "path": "units/bowler_battle_18_600_7.png",
+      "source_frame": "tests/fixtures/scout_battle_bar_20260926.png",
+      "source_bbox_1280": [
+        133,
+        636,
+        178,
+        678
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "wall_breaker",
+      "surface": "battle",
+      "path": "units/wall_breaker_battle_18_600_7.png",
+      "source_frame": "tests/fixtures/scout_battle_bar_20260926.png",
+      "source_bbox_1280": [
+        230,
+        636,
+        275,
+        678
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "archer",
+      "surface": "battle",
+      "path": "units/archer_battle_18_600_7.png",
+      "source_frame": "tests/fixtures/scout_battle_bar_20260926.png",
+      "source_bbox_1280": [
+        326,
+        636,
+        371,
+        678
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "grand_warden",
+      "surface": "battle",
+      "path": "units/grand_warden_battle_18_600_7.png",
+      "source_frame": "tests/fixtures/scout_battle_bar_20260926.png",
+      "source_bbox_1280": [
+        543,
+        636,
+        588,
+        678
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "dragon_duke",
+      "surface": "battle",
+      "path": "units/dragon_duke_battle_18_600_7.png",
+      "source_frame": "tests/fixtures/scout_battle_bar_20260926.png",
+      "source_bbox_1280": [
+        638,
+        636,
+        683,
+        678
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "battle",
+      "path": "units/minion_prince_battle_18_600_7.png",
+      "source_frame": "tests/fixtures/scout_battle_bar_20260926.png",
+      "source_bbox_1280": [
+        735,
+        636,
+        780,
+        678
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "battle",
+      "path": "units/archer_queen_battle_18_600_7.png",
+      "source_frame": "tests/fixtures/scout_battle_bar_20260926.png",
+      "source_bbox_1280": [
+        831,
+        636,
+        876,
+        678
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "totem_spell",
+      "surface": "battle",
+      "path": "units/totem_spell_battle_18_600_7.png",
+      "source_frame": "tests/fixtures/scout_battle_bar_20260926.png",
+      "source_bbox_1280": [
+        941,
+        636,
+        986,
+        678
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "overgrowth_spell",
+      "surface": "battle",
+      "path": "units/overgrowth_spell_battle_18_600_7.png",
+      "source_frame": "tests/fixtures/scout_battle_bar_20260926.png",
+      "source_bbox_1280": [
+        1039,
+        636,
+        1084,
+        678
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "revival_spell",
+      "surface": "battle",
+      "path": "units/revival_spell_battle_18_600_7.png",
+      "source_frame": "tests/fixtures/scout_battle_bar_20260926.png",
+      "source_bbox_1280": [
+        1136,
+        636,
+        1181,
+        678
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "grand_warden",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/grand_warden_army_face_1_18_600_7.png",
+      "source_frame": "reports/live-army-probe/frames/00002-verify-current-army-after.png",
+      "source_bbox_1280": [
+        60,
+        330,
+        95,
+        360
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "grand_warden",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/grand_warden_army_face_2_18_600_7.png",
+      "source_frame": "reports/live-army-probe/frames/00001-current-before.png",
+      "source_bbox_1280": [
+        60,
+        330,
+        95,
+        360
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "grand_warden",
+      "surface": "army_hero",
+      "role": "color_profile",
+      "path": "units/grand_warden_army_color_18_600_7.png",
+      "source_frame": "reports/live-army-probe/frames/00002-verify-current-army-after.png",
+      "source_bbox_1280": [
+        28,
+        220,
+        142,
+        540
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "dragon_duke",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/dragon_duke_army_face_1_18_600_7.png",
+      "source_frame": "reports/live-army-probe/frames/00002-verify-current-army-after.png",
+      "source_bbox_1280": [
+        180,
+        270,
+        215,
+        300
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "dragon_duke",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/dragon_duke_army_face_2_18_600_7.png",
+      "source_frame": "reports/live-army-probe/frames/00001-current-before.png",
+      "source_bbox_1280": [
+        180,
+        270,
+        215,
+        300
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "dragon_duke",
+      "surface": "army_hero",
+      "role": "color_profile",
+      "path": "units/dragon_duke_army_color_18_600_7.png",
+      "source_frame": "reports/live-army-probe/frames/00002-verify-current-army-after.png",
+      "source_bbox_1280": [
+        158,
+        220,
+        272,
+        540
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/minion_prince_army_face_1_18_600_7.png",
+      "source_frame": "reports/live-army-probe/frames/00002-verify-current-army-after.png",
+      "source_bbox_1280": [
+        325,
+        290,
+        360,
+        320
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/minion_prince_army_face_2_18_600_7.png",
+      "source_frame": "reports/live-army-probe/frames/00001-current-before.png",
+      "source_bbox_1280": [
+        325,
+        290,
+        360,
+        320
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "army_hero",
+      "role": "color_profile",
+      "path": "units/minion_prince_army_color_18_600_7.png",
+      "source_frame": "reports/live-army-probe/frames/00002-verify-current-army-after.png",
+      "source_bbox_1280": [
+        288,
+        220,
+        402,
+        540
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/archer_queen_army_face_1_18_600_7.png",
+      "source_frame": "reports/live-army-probe/frames/00002-verify-current-army-after.png",
+      "source_bbox_1280": [
+        445,
+        255,
+        480,
+        285
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/archer_queen_army_face_2_18_600_7.png",
+      "source_frame": "reports/live-army-probe/frames/00001-current-before.png",
+      "source_bbox_1280": [
+        445,
+        255,
+        480,
+        285
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "army_hero",
+      "role": "color_profile",
+      "path": "units/archer_queen_army_color_18_600_7.png",
+      "source_frame": "reports/live-army-probe/frames/00002-verify-current-army-after.png",
+      "source_bbox_1280": [
+        418,
+        220,
+        532,
+        540
+      ],
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
+    }
+  ]
+}

@@ -57,6 +57,29 @@ class FlowTests(unittest.TestCase):
     def succeeded(self, task: str) -> TaskResult:
         return TaskResult(task, "succeeded", "postcondition verified", evidence=[self.frame])
 
+    def test_legacy_profile_keeps_physical_battle_counts_and_unique_receipts(self):
+        runner = self.runner(("battle",), stop=replace(self.config.stop, max_runs=2))
+        successful = replace(self.succeeded("battle"), metrics={
+            "returned_home": True, "rounds_completed": 1, "victory": False})
+        partial = replace(successful, status="failed", reason="partial deployment",
+                          metrics={**successful.metrics, "victory": True})
+        with patch("autococ.combat.run_battle", side_effect=[successful, partial]):
+            stats = runner.run_profile("test")
+        self.assertEqual((stats.battles_completed, stats.battles_won), (2, 1))
+        receipts = [r for r in stats.task_results if r.task == "battle"]
+        self.assertEqual(len({r.metrics["battle_id"] for r in receipts}), 2)
+        self.assertTrue(all(r.metrics["receipt_kind"] == "battle" for r in receipts))
+        self.assertEqual(self.report(stats)["battles_completed"], 2)
+        self.assertEqual(stats.failures, 1)
+
+    def test_legacy_task_success_and_search_return_are_not_completed_battles(self):
+        for metrics in ({}, {"returned_home": True}, {"returned_home": True, "rounds_completed": True}):
+            with self.subTest(metrics=metrics):
+                runner = self.runner(("battle",))
+                with patch("autococ.combat.run_battle", return_value=replace(self.succeeded("battle"), metrics=metrics)):
+                    stats = runner.run_profile("test")
+                self.assertEqual(stats.battles_completed, 0)
+
     def recovery_frames(self, *, retry_button: bool = True,
                         after_scene: str = "village") -> tuple[SceneSnapshot, SceneSnapshot]:
         disconnected = SceneSnapshot("disconnected", 0.95, self.root / "disconnected.png", {

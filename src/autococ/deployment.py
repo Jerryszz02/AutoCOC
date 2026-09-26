@@ -506,7 +506,7 @@ def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt
             refreshed.append({**troop, "bbox": list(box),
                 "point": [(box[0] + box[2]) // 2, (box[1] + box[3]) // 2],
                 "count": reading["count"], "evidence": {**troop.get("evidence", {}),
-                "count": reading["readings"][0], "identity_reference": identity_frame,
+                "count": reading, "identity_reference": identity_frame,
                 "portrait_score": reading["portrait_score"]}})
         if len(refreshed) != len(troops):
             continue

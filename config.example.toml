@@ -69,6 +69,9 @@ min_expected_resources = 300000
 # Maximum observed candidates, including the first. Never attack below the threshold to exhaust this budget.
 max_searches = 30
 deploy_timeout_sec = 180
+# Optional independent wait for settlement after deployment. If omitted, reuses
+# deploy_timeout_sec for compatibility. Session/task deadlines still apply.
+# settlement_timeout_sec = 300
 
 [reporting]
 write_markdown = true

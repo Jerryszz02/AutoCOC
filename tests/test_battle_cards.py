@@ -39,6 +39,34 @@ class BattleCardTests(unittest.TestCase):
             self.assertGreaterEqual(right - left, 80)
             self.assertGreaterEqual(bottom - top, 105)
 
+    def test_live_scout_recovers_leftmost_meteor_card_at_screen_edge(self) -> None:
+        # The real 18.600.7 scout frame's first card has only .724 cyan side
+        # support where it meets the map. Its own x8 label, edge gradients and
+        # bottom border must locate it without inferring a missing army slot.
+        path = self.root / "tests/fixtures/scout_battle_bar_20260926.png"
+        texts = [OCRText(value, .98, bbox) for value, bbox in (
+            ("x8", (61, 592, 104, 622)), ("x2", (160, 592, 200, 621)),
+            ("x1", (264, 594, 295, 621)), ("x1", (358, 592, 392, 622)),
+        )]
+        slots = self.observe((path, texts, "enemy_village"))
+        self.assert_independent(slots)
+        self.assertEqual([slot["count"] for slot in slots if slot["kind"] == "troop"], [8, 2, 1, 1])
+        self.assertEqual(slots[0]["bbox"], [16, 595, 104, 711])
+
+    def test_zoomed_battle_bar_refines_header_overlap_without_losing_neighbors(self) -> None:
+        path = self.root / "tests/fixtures/zoomed_battle_bar_20260926.png"
+        texts = [OCRText(value, .99, bbox) for value, bbox in (
+            ("x8", (61, 592, 104, 622)), ("x2", (161, 592, 200, 621)),
+            ("x1", (264, 594, 295, 621)), ("x1", (360, 594, 392, 621)),
+        )]
+        vision = ScreenshotRecognizer(provider=Mock())
+        vision.client_version = "18.600.7"
+        slots = vision._battle_observation(path, texts, "enemy_village")["slots"]
+        self.assert_independent(slots)
+        troops = [slot for slot in slots if slot["kind"] == "troop"]
+        self.assertEqual([(slot["count"], slot["unit_id"]) for slot in troops],
+                         [(8, "meteor_golem"), (2, "bowler"), (1, "wall_breaker"), (1, "archer")])
+
     def test_background_bridges_do_not_duplicate_siege_or_split_last_spell(self) -> None:
         fixtures = (("reports/live-20260922/terrain-stop-check-015411", 1),
                     ("reports/20260923-015217-869637-e2129181", 13))

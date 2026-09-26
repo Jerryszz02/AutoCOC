@@ -11,6 +11,7 @@ dist/
 
 # Machine-specific configuration and credentials
 /config.toml
+*.desktop.json
 .env
 .env.*
 !.env.example

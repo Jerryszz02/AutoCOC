@@ -12,6 +12,7 @@ from autococ.errors import CaptureError, DeploymentError, FlowError
 from autococ.reporting import RunStats, resource_metrics
 from autococ.scene import SceneSnapshot
 from autococ.session import GameSession
+from autococ.routine_config import ResourceFilter
 
 
 def frame(index: int, scene: str, *, resources: dict | None = None, army: dict | None = None,
@@ -37,7 +38,9 @@ DEPLOYMENT = {"completed": True, "verified": True, "deployed_units": 10,
               "evidence": ["units-before.png", "units-after.png"]}
 SETTLEMENT = {"loot": {"gold": 100, "elixir": 50, "dark_elixir": 10},
               "bonus": {"gold": 20, "elixir": 5, "dark_elixir": 0},
-              "percentage": 67, "stars": 2, "evidence": {"source": "settlement_fixture"}}
+              "percentage": 67, "stars": 2, "evidence": {"source": "settlement_fixture",
+                  "stars": {"source": "explicit_victory_star_shapes", "result": {"confidence": .99},
+                            "shapes": [{"verified": True}, {"verified": True}]}}}
 
 
 def complete_frames() -> list[SceneSnapshot]:
@@ -134,6 +137,8 @@ class CombatTests(unittest.TestCase):
         frames = complete_frames()
         frames[3].observations["resources"] = {"gold": 0, "elixir": 0}
         frames[5].observations["settlement"].update(stars=0, percentage=20)
+        frames[5].observations["settlement"]["evidence"]["stars"] = {
+            "source": "explicit_defeat_result", "result": {"confidence": .99}}
         frames[6].observations["resources"] = deepcopy(BEFORE)
         session = FakeSession(frames)
         session.config.battle = replace(session.config.battle, strategy="two_edge")
@@ -145,6 +150,26 @@ class CombatTests(unittest.TestCase):
         self.assertTrue(result.metrics["searches"][0]["decision"]["should_attack"])
         self.assertEqual(session.last_snapshot.scene, "village")
 
+    def test_line_missing_star_evidence_keeps_victory_unknown(self):
+        frames = complete_frames()
+        frames[5].observations["settlement"]["evidence"] = {}
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle, strategy="two_edge")
+        result = battle(session)
+        self.assertEqual(result.status, "succeeded")
+        self.assertEqual(result.metrics["rounds_completed"], 1)
+        self.assertIsNone(result.metrics["victory"])
+        self.assertIsNone(result.metrics["stars"])
+        self.assertIsNone(result.metrics["loot_gold"])
+
+    def test_unverified_star_shapes_never_claim_victory(self):
+        frames = complete_frames()
+        frames[5].observations["settlement"]["evidence"]["stars"]["shapes"][0]["verified"] = False
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle, strategy="two_edge")
+        result = battle(session)
+        self.assertIsNone(result.metrics["victory"])
+
     def test_two_edge_requires_native_zoom_before_any_game_input(self):
         session = FakeSession(complete_frames())
         session.config.battle = replace(session.config.battle, strategy="two_edge")
@@ -153,6 +178,65 @@ class CombatTests(unittest.TestCase):
         self.assertEqual(result.status, "failed")
         self.assertIn("MuMu native", result.reason)
         self.assertEqual(session.taps, [])
+
+    def test_shared_filter_skips_low_resource_then_deploys_same_line_strategy(self):
+        frames = complete_frames()
+        low = frame(30, "enemy_village", resources={"gold": 10, "elixir": 10, "dark_elixir": 0})
+        frames.insert(3, low)
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle, strategy="two_edge",
+            resource_filter=ResourceFilter(min_total=200))
+        result = battle(session)
+        self.assertEqual(result.status, "succeeded")
+        self.assertEqual([s["decision"]["should_attack"] for s in result.metrics["searches"]], [False, True])
+        self.assertEqual(session.deploy_calls, 1)
+
+    def test_unknown_resource_at_search_limit_returns_home_without_deploying(self):
+        frames = complete_frames()[:4]
+        frames[3].observations["resources"] = {"gold": None, "elixir": 100}
+        frames.extend([frame(40, "village", resources=BEFORE), frame(41, "village", resources=BEFORE)])
+        session = FakeSession(frames, max_searches=1)
+        session.config.battle = replace(session.config.battle, strategy="two_edge", resource_filter=ResourceFilter(min_total=300000))
+        result = battle(session)
+        self.assertEqual(result.status, "limited")
+        self.assertTrue(result.metrics["returned_home"])
+        self.assertEqual(session.deploy_calls, 0)
+        self.assertFalse(any("next" in reason for _, reason in session.taps))
+
+    def test_dark_elixir_only_filter_can_accept_next_target_with_unknown_gold_elixir(self):
+        frames = complete_frames()
+        low = frame(30, "enemy_village", resources={"gold": None, "elixir": None, "dark_elixir": 8000})
+        unchanged = frame(31, "enemy_village", resources={"gold": None, "elixir": None, "dark_elixir": 8000})
+        high = frame(32, "enemy_village", resources={"gold": None, "elixir": None, "dark_elixir": 10000})
+        session = FakeSession(frames[:3] + [low, unchanged, high] + frames[4:])
+        session.config.battle = replace(session.config.battle, strategy="two_edge",
+                                       resource_filter=ResourceFilter(min_dark_elixir=9000))
+        result = battle(session)
+        self.assertEqual(result.status, "succeeded")
+        self.assertEqual(result.metrics["search_count"], 2)
+        self.assertEqual(result.metrics["selected_target"]["dark_elixir"], 10000)
+        self.assertIsNone(result.metrics["selected_target"]["gold"])
+        self.assertEqual(sum("next:" in reason for _, reason in session.taps), 1)
+        self.assertEqual(session.deploy_calls, 1)
+
+    def test_verified_spell_only_receipt_can_complete_a_battle(self):
+        from autococ.strategy_config import StrategyDefinition, StrategyStep
+        frames = complete_frames()
+        frames[2].observations["army"]["troops"]["used"] = 0
+        frames[2].observations["army"]["manifest"]["troops"] = []
+        frames[4].observations["deployment"].update(deployed_units=0, offensive_actions=2, spells_used=2)
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle, strategy_file=str(Path("spells.toml").resolve()),
+                                       resource_filter=ResourceFilter(enabled=False))
+        strategy = StrategyDefinition("spells", "法术", None,
+            (StrategyStep("cast_spell", "lightning_spell", 2, target="relative:center"),), "captured")
+        with patch("autococ.strategy_config.load_strategy", return_value=strategy), \
+                patch("autococ.strategy_execution.execute_strategy", side_effect=lambda s, scout, definition: s.deploy(s, scout)):
+            result = run_battle(session)
+        self.assertEqual(result.status, "succeeded", result.reason)
+        self.assertTrue(result.metrics["returned_home"])
+        self.assertEqual(result.metrics["deployment"]["deployed_units"], 0)
+        self.assertEqual(result.metrics["deployment"]["spells_used"], 2)
 
     def test_star_bonus_receipt_is_confirmed_once_before_verifying_home(self):
         for strategy in ("verified", "edrag_line"):
@@ -190,6 +274,8 @@ class CombatTests(unittest.TestCase):
         frames = complete_frames()
         frames[3].observations["resources"] = {"gold": 0, "elixir": 0}
         frames[5].observations["settlement"].update(stars=0, percentage=20)
+        frames[5].observations["settlement"]["evidence"]["stars"] = {
+            "source": "explicit_defeat_result", "result": {"confidence": .99}}
         frames[6].observations["resources"] = deepcopy(BEFORE)
         session = FakeSession(frames)
         session.config.battle = replace(session.config.battle, strategy="edrag_line")
@@ -197,6 +283,39 @@ class CombatTests(unittest.TestCase):
         self.assertEqual(result.status, "succeeded")
         self.assertEqual(result.reason, "edrag_line_troops_settlement_and_return_verified")
         self.assertEqual(session.last_snapshot.scene, "village")
+
+    def test_settlement_wait_can_be_longer_without_relaxing_deployment_deadline(self):
+        for configured, expected in ((None, 180), (1200, 1200)):
+            with self.subTest(configured=configured):
+                session = FakeSession(complete_frames())
+                session.config.battle = replace(session.config.battle, settlement_timeout_sec=configured)
+                with patch.object(session, "wait_for", wraps=session.wait_for) as wait:
+                    result = battle(session)
+                self.assertEqual(result.status, "succeeded")
+                settlement = [call for call in wait.call_args_list if call.kwargs.get("label") == "battle-settlement"]
+                self.assertEqual(settlement[0].kwargs["timeout_sec"], expected)
+                self.assertEqual(session.config.battle.deploy_timeout_sec, 180)
+
+    def test_completion_event_write_failure_retains_settled_battle_receipt(self):
+        for strategy, event_name in (("verified", "battle_verified"), ("two_edge", "battle_round_verified")):
+            with self.subTest(strategy=strategy):
+                session = FakeSession(complete_frames())
+                session.config.battle = replace(session.config.battle, strategy=strategy)
+                original = session.event
+
+                def event(kind, **data):
+                    if kind == event_name:
+                        raise OSError("event storage unavailable")
+                    return original(kind, **data)
+
+                session.event = event
+                result = battle(session)
+                self.assertEqual(result.status, "failed")
+                self.assertIn("event storage unavailable", result.reason)
+                self.assertIs(result.metrics["returned_home"], True)
+                self.assertEqual(result.metrics["rounds_completed"], 1)
+                self.assertIs(result.metrics["victory"], True)
+                self.assertEqual(session.last_snapshot.scene, "village")
 
     def test_edrag_incomplete_hero_receipt_is_failure_even_after_return_home(self):
         frames = complete_frames()
@@ -356,6 +475,8 @@ class CombatTests(unittest.TestCase):
         self.assertEqual(session.deploy_calls, 1)
         self.assertTrue(result.metrics["inventory_reconciled"])
         self.assertEqual(result.metrics["deployment_error"], "Final quantity unreadable")
+        self.assertTrue(result.metrics["returned_home"])
+        self.assertEqual(result.metrics["rounds_completed"], 1)
         self.assertEqual(session.last_snapshot.scene, "village")
 
     def test_scout_to_battle_transition_requires_positive_consumption_before_settlement_recovery(self) -> None:
@@ -418,11 +539,15 @@ class CombatTests(unittest.TestCase):
         frames = complete_frames()[:3] + [
             frame(3, "enemy_village", resources={"gold": 20, "elixir": 30, "dark_elixir": 100000}, price=12),
             frame(4, "enemy_village", resources={"gold": 25, "elixir": 30, "dark_elixir": 100000}),
+            frame(5, "village", resources=BEFORE),
+            frame(6, "village", resources=BEFORE),
         ]
         session = FakeSession(frames)
         result = battle(session)
-        self.assertEqual(result.status, "failed")
-        self.assertIn("Search budget", result.reason)
+        self.assertEqual(result.status, "limited")
+        self.assertEqual(result.reason, "search_limit_reached_without_target")
+        self.assertTrue(result.metrics["returned_home"])
+        self.assertEqual(session.last_snapshot.scene, "village")
         self.assertEqual(result.metrics["search_cost_gold"], 22)
         self.assertEqual(result.metrics["search_count"], 2)
         self.assertEqual(session.deploy_calls, 0)
@@ -558,7 +683,8 @@ class CombatTests(unittest.TestCase):
         self.assertEqual(len(result.metrics["settlement_reads"]), 4)
         self.assertIsNone(result.metrics["settlement_observed"]["stars"])
         self.assertNotIn("bonus_gold", result.metrics)
-        self.assertNotIn("victory", result.metrics)
+        self.assertIsNone(result.metrics.get("victory"))
+        self.assertEqual(result.metrics["rounds_completed"], 1)
 
     def test_stars_and_recognition_evidence_must_also_be_valid_before_return(self) -> None:
         for field, missing in (("stars", None), ("evidence", {})):
@@ -675,6 +801,8 @@ class CombatTests(unittest.TestCase):
     def test_loss_and_task_completion_are_separate(self) -> None:
         frames = complete_frames()
         frames[5].observations["settlement"].update({"stars": 0, "percentage": 20})
+        frames[5].observations["settlement"]["evidence"]["stars"] = {
+            "source": "explicit_defeat_result", "result": {"confidence": .99}}
         result = battle(FakeSession(frames))
         self.assertEqual(result.status, "succeeded")
         self.assertFalse(result.metrics["victory"])

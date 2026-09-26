@@ -30,6 +30,37 @@ def selected_card_bbox(path, bbox, baseline_resolution=(1280, 720)):
                 and cv2.contourArea(contour) / (width * height) >= .85):
             return scale_box((x + x0, y + 565, x + x0 + width, y + 565 + height),
                              from_resolution=(1280, 720), to_resolution=baseline_resolution)
+    # The live selected-card outline can be bright but discontinuous where the
+    # card overlaps the bottom HUD. Its external contour then encloses almost
+    # no area despite four visible sides. Require independent support on each
+    # side at the selected card's expanded geometry; portrait highlights or an
+    # unselected header cannot satisfy all four bands.
+    if 12 <= left < right <= 1270 and 575 <= top < bottom <= 718:
+        bright = cv2.inRange(hsv, np.array([0, 0, 190]), np.array([180, 95, 255])) > 0
+
+        def vertical(start, stop):
+            return max(((float(bright[top + 20 - 565:bottom - 10 - 565,
+                                      x - x0 - 1:x - x0 + 2].mean()), x)
+                        for x in range(start, stop + 1)
+                        if x0 + 1 <= x <= x1 - 2), default=(0.0, 0))
+
+        def horizontal(start, stop):
+            return max(((float(bright[y - 566:y - 563,
+                                      left + 10 - x0:right - 10 - x0].mean()), y)
+                        for y in range(start, stop + 1) if 566 <= y <= 718),
+                       default=(0.0, 0))
+
+        left_support, selected_left = vertical(left - 8, left + 2)
+        right_support, selected_right = vertical(right - 2, right + 6)
+        top_support, selected_top = horizontal(top - 10, top - 2)
+        bottom_support, selected_bottom = horizontal(bottom - 5, bottom + 1)
+        width, height = selected_right - selected_left + 1, selected_bottom - selected_top + 1
+        if (left_support >= .38 and right_support >= .50 and
+                top_support >= .75 and bottom_support >= .65 and
+                80 <= width <= 108 and 105 <= height <= 135 and
+                abs((selected_left + selected_right) / 2 - (left + right) / 2) <= 7):
+            return scale_box((selected_left, selected_top, selected_right + 1, selected_bottom + 1),
+                             from_resolution=(1280, 720), to_resolution=baseline_resolution)
     return None
 
 

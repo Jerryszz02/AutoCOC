@@ -1,0 +1,27 @@
+# Observed read-only entrance chain, 1280x720 baseline. The accepted building task
+# and its progress are NOT calibrated; do not enable this adapter for live play.
+version = 1
+id = "clan-air-defense-needs-calibration"
+kind = "clan_games"
+entry_template = "daily_event_calendar"
+entry_roi = [270, 610, 365, 720]
+
+# This is only the challenge page title. The accepted task title/marker below
+# must be replaced with exact evidence from an actually accepted building task.
+title = "部落竞赛"
+title_roi = [0, 0, 1280, 240]
+accepted_label = "待校准的已接受防空火箭任务标题"
+unavailable_label = "待校准的未接取任务提示"
+progress_roi = [400, 250, 900, 600] # Replace with accepted task's own progress region.
+progress_pattern = '(?P<current>\d[\d, ]*)\s*/\s*(?P<target>\d[\d, ]*)'
+building_type = "air_defense"
+# Personal clan-games points such as 3600 / 10000 are not task progress.
+
+# The calendar page titled 活动 has a 部落竞赛 section with one 打开 control.
+[[navigation]]
+page_title = "活动"
+title_roi = [0, 0, 1280, 240]
+section_label = "部落竞赛"
+section_roi = [200, 330, 1040, 550] # Observed heading and its Open control, client 18.600.7.
+open_text = "打开"
+open_roi = [850, 470, 1040, 550]

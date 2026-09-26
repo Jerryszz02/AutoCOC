@@ -1,0 +1,68 @@
+# Relative paths below resolve against this file, not the shell directory.
+# Copy before editing. This example is not a calibrated event/clan adapter.
+[routine]
+version = 1
+maintenance_interval_sec = 0 # Set 600 to recheck selected daily tasks between battles.
+
+[[routine.tasks]]
+id = "collect"
+kind = "collect"
+enabled = true
+
+[[routine.tasks]]
+id = "request"
+kind = "request"
+enabled = true
+
+[[routine.tasks]]
+id = "donate"
+kind = "donate"
+enabled = false # Entry retained; actual donation-window recognition is incomplete.
+
+[[routine.tasks]]
+id = "resources"
+kind = "resources"
+enabled = true
+strategy_file = "strategies/two_edge.toml"
+max_battles = 10
+max_duration_sec = 1800
+max_searches = 30
+[routine.tasks.resource_filter]
+enabled = true
+min_total = 300000
+# min_gold = 200000
+# min_elixir = 200000
+# min_dark_elixir = 3000
+[routine.tasks.goal]
+full_resources = []
+# [routine.tasks.goal.resource_targets]
+# gold = 15000000
+# elixir = 15000000
+
+[[routine.tasks]]
+id = "event"
+kind = "event"
+enabled = false
+strategy_file = "strategies/two_edge.toml"
+max_battles = 10
+max_duration_sec = 1800
+max_searches = 30
+[routine.tasks.resource_filter]
+enabled = false
+[routine.tasks.goal]
+# Select an adapter calibrated against the currently active event before enabling.
+adapter_path = "docs/examples/event.adapter.toml"
+
+[[routine.tasks]]
+id = "clan_games"
+kind = "clan_games"
+enabled = false
+strategy_file = "strategies/lightning_snipe.toml"
+max_battles = 10
+max_duration_sec = 1800
+max_searches = 30
+[routine.tasks.resource_filter]
+enabled = false
+[routine.tasks.goal]
+adapter_path = "docs/examples/clan-games.adapter.toml"
+building_type = "air_defense"

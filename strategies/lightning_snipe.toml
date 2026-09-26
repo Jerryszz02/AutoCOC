@@ -1,0 +1,18 @@
+id = "lightning_snipe"
+label = "雷电定点摧毁建筑"
+army_mode = "recipe"
+
+[[army.units]]
+unit_id = "lightning_spell"
+count = 4
+
+[[steps]]
+action = "cast_spell"
+unit_id = "lightning_spell"
+count = 4
+target = "objective"
+
+[[steps]]
+action = "end_battle"
+target = "target_destroyed"
+timeout_sec = 60

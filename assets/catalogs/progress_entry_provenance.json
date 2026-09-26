@@ -1,0 +1,20 @@
+{
+  "client_version": "18.600.7",
+  "package": "com.supercell.clashofclans",
+  "baseline_resolution": [
+    1280,
+    720
+  ],
+  "template": "assets/templates/daily_event_calendar.png",
+  "source_frame": "reports/goal-entry-c94dcfef/frames/00003-returning-home.png",
+  "source_sha256": "B368BE9520CD7F4EBEBF8E785E72DD8454B1F2C1FF3F0719BA95C6DFD3185903",
+  "bbox": [
+    284,
+    631,
+    341,
+    696
+  ],
+  "verified_navigation_frame": "reports/goal-entry-85f569f3/frames/00003-calendar-settled.png",
+  "verified_page_title": "活动",
+  "scope": "Read-only navigation only; event scoring and accepted clan challenge progress are not calibrated."
+}

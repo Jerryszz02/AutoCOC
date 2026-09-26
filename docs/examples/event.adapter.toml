@@ -1,0 +1,17 @@
+# Schema example only: replace exact text/regions with current screenshot evidence.
+# This is deliberately not the name of an actual event and will not open a live page.
+version = 1
+id = "event-example-needs-calibration"
+kind = "event"
+entry_text = "待校准的活动入口"
+entry_roi = [800, 150, 1280, 600]
+title = "待校准的当前活动标题"
+title_roi = [0, 0, 1280, 240]
+active_label = "活动进行中"
+unavailable_label = "活动已结束"
+progress_roi = [400, 240, 900, 500]
+progress_pattern = '(?P<current>\d[\d, ]*)\s*/\s*(?P<target>\d[\d, ]*)'
+# Supported: battle, destroy_building, deploy_units. Declare the actual game rule.
+scoring_condition = "battle"
+# For deploy_units: scoring_units = ["electro_dragon"] and explicit matching actions.
+# For destroy_building: building_type = "air_defense" or "spell_factory".
