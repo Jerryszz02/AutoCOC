@@ -376,17 +376,23 @@ class ScreenshotRecognizer:
             if (scene == SCENE_TRAINING and editor.get("surface") == "current"
                     and isinstance(observations.get("army"), dict)
                     and observations["army"].get("manifest", {}).get("supported_layout") is True):
-                from .army_manifest import recognize_army_heroes
+                from .army_manifest import recognize_army_heroes, recognize_army_siege
                 from .army_editor import recognize_hero_loadout
 
                 army = observations["army"]
                 heroes = recognize_army_heroes(
                     path, army.get("heroes"), baseline_resolution=self.baseline_resolution,
                     client_version=self.client_version)
-                army["identity_cards"] = heroes["cards"]
-                army["identity_coverage"] = {"hero": heroes["complete"], "siege": False}
+                siege = recognize_army_siege(
+                    path, self.provider, army.get("siege"),
+                    baseline_resolution=self.baseline_resolution,
+                    client_version=self.client_version)
+                army["identity_cards"] = heroes["cards"] + siege["cards"]
+                army["identity_coverage"] = {"hero": heroes["complete"],
+                                             "siege": siege["complete"]}
                 army["heroes_complete"] = heroes["complete"]
                 army["hero_evidence"] = heroes
+                army["siege_evidence"] = siege
                 army["hero_loadout_complete"] = False
                 army["hero_loadout"] = {}
                 if heroes["complete"]:

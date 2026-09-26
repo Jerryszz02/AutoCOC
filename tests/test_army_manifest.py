@@ -8,7 +8,7 @@ from unittest.mock import Mock
 import cv2
 import numpy as np
 
-from autococ.army_manifest import recognize_army_heroes, recognize_army_manifest
+from autococ.army_manifest import recognize_army_heroes, recognize_army_manifest, recognize_army_siege
 from autococ.army_editor import recognize_hero_loadout, visual_fingerprint_matches
 from autococ.ocr import OCRText, RapidOCRProvider
 
@@ -214,3 +214,38 @@ class ArmyManifestTests(unittest.TestCase):
                                            client_version="18.600.8")
         self.assertFalse(mismatched["complete"])
         self.assertTrue(all(card["unit_id"] is None for card in mismatched["cards"]))
+
+    def test_real_siege_cards_verify_quantity_without_naming_unknown_machines(self) -> None:
+        for name in ("army_confirmation_counts_20260926.png",
+                     "army_current_second_frame_20260926.png"):
+            with self.subTest(frame=name):
+                path = Path(__file__).parent / "fixtures" / name
+                result = recognize_army_siege(path, RapidOCRProvider(),
+                                              {"used": 3, "capacity": 3},
+                                              client_version="18.600.7")
+                self.assertEqual([card["count"] for card in result["cards"]], [1, 1, 1])
+                self.assertEqual([card["unit_id"] for card in result["cards"]],
+                                 ["siege_barracks", None, None])
+                self.assertTrue(all(card["level"] is None and card["available"] is None
+                                    for card in result["cards"]))
+                self.assertFalse(result["complete"])
+                self.assertEqual(result["unknowns"].count("siege_identity_unavailable"), 2)
+                self.assertTrue(all(card["evidence"]["count_reads"] for card in result["cards"]))
+
+    def test_siege_identity_requires_observed_capacity_quantity_and_client_version(self) -> None:
+        path = Path(__file__).parent / "fixtures/army_confirmation_counts_20260926.png"
+        for capacity, version, reason in (
+            (None, "18.600.7", "siege_capacity_unreadable"),
+            ({"used": 0, "capacity": 3}, "18.600.7", "empty_siege_row_not_calibrated"),
+            ({"used": 2, "capacity": 3}, "18.600.7", "siege_card_count_disagrees_with_capacity"),
+            ({"used": 3, "capacity": 3}, "18.600.8", "siege_client_version_unverified"),
+        ):
+            with self.subTest(capacity=capacity, version=version):
+                result = recognize_army_siege(path, RapidOCRProvider(), capacity,
+                                              client_version=version)
+                self.assertFalse(result["complete"])
+                self.assertIn(reason, result["unknowns"])
+        unreadable = recognize_army_siege(path, Mock(), {"used": 3, "capacity": 3},
+                                          client_version="18.600.7")
+        self.assertFalse(unreadable["complete"])
+        self.assertTrue(all(card["count"] is None for card in unreadable["cards"]))

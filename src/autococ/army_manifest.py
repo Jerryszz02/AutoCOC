@@ -1,12 +1,13 @@
-"""Independent numeric-card manifest for the observed Chinese My Army row layout.
+"""Independent My Army card evidence for the observed Chinese client layout.
 
-This checks visible contiguous troop/spell rows, not troop identity, housing space,
-siege machines, clan reinforcements, or heroes. Scrolled/clipped rows are incomplete.
+Troop and spell numeric rows, large hero portraits, and overlapping siege cards
+have separate readers. Scrolled/clipped rows and unidentified cards are incomplete.
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict
+import json
 import math
 from pathlib import Path
 import re
@@ -18,10 +19,105 @@ import numpy as np
 from .locator import scale_box
 from .ocr import OCRProvider, OCRText
 from .unit_catalog import recognize_card_identity, recognize_large_hero_identity
+from .unit_catalog import CATALOG_ROOT, template_manifest
 
 
 _BASE = (1280, 720)
 _ROWS = {"troops": (545, 188, 1255, 305), "spells": (545, 365, 995, 483)}
+
+
+def recognize_army_siege(
+    screenshot_path: str | Path, provider: OCRProvider,
+    capacity: dict[str, object] | None, *,
+    baseline_resolution: tuple[int, int] = _BASE, client_version: str | None = None,
+) -> dict[str, object]:
+    """Read overlapping siege cards using visible count headers and portraits.
+
+    The 18.600.7 My Army cards overlap, so their outer contours cannot be
+    counted as separate rectangles. The sampled ``x1`` header only locates
+    cards; local OCR verifies that quantity, and a separate portrait sample
+    names each machine. Other quantity appearances remain unsupported.
+    """
+    path = Path(screenshot_path)
+    result: dict[str, object] = {"frame": str(path), "cards": [], "complete": False,
+                                  "unknowns": [], "layout": "my_army_siege_overlap_v1"}
+    try:
+        image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+    except OSError:
+        image = None
+    if image is None or abs(image.shape[1] / image.shape[0] - 16 / 9) > .01:
+        result["unknowns"].append("siege_image_unreadable_or_aspect_changed")
+        return result
+    if not isinstance(capacity, dict) or type(capacity.get("used")) is not int or type(capacity.get("capacity")) is not int:
+        result["unknowns"].append("siege_capacity_unreadable")
+        return result
+    used, total = capacity["used"], capacity["capacity"]
+    if not (0 <= used <= total <= 9):
+        result["unknowns"].append("siege_capacity_invalid")
+        return result
+    if used == 0:
+        result["unknowns"].append("empty_siege_row_not_calibrated")
+        return result
+    provenance_path = CATALOG_ROOT / "siege_count_provenance.json"
+    try:
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        provenance = {}
+    if (not client_version or client_version != template_manifest().get("client")
+            or client_version != provenance.get("client")):
+        result["unknowns"].append("siege_client_version_unverified")
+        return result
+    image = cv2.resize(image, _BASE, interpolation=cv2.INTER_AREA)
+    sample_path = CATALOG_ROOT / "siege_count_x1_18_600_7.png"
+    sample = cv2.imdecode(np.fromfile(sample_path, dtype=np.uint8), cv2.IMREAD_COLOR) if sample_path.is_file() else None
+    if sample is None:
+        result["unknowns"].append("siege_count_header_sample_missing")
+        return result
+    search = cv2.matchTemplate(image[372:410, 1005:1250], sample, cv2.TM_CCOEFF_NORMED)
+    matches = []
+    for _ in range(9):
+        _, score, _, (x, y) = cv2.minMaxLoc(search)
+        if score < .79:
+            break
+        absolute_x, absolute_y = x + 1005, y + 372
+        search[max(0, y - 8):min(search.shape[0], y + 9),
+               max(0, x - 30):min(search.shape[1], x + 31)] = -1
+        if 374 <= absolute_y <= 378:
+            matches.append((absolute_x, absolute_y, float(score)))
+    matches.sort()
+    result["count_header_matches"] = [{"point": [x, y], "score": round(score, 5)}
+                                      for x, y, score in matches]
+    if len(matches) != used:
+        result["unknowns"].append("siege_card_count_disagrees_with_capacity")
+    for x, y, score in matches:
+        crop = image[y:y + 27, x:x + 25]
+        reader = getattr(provider, "recognize_line_image", None)
+        readings = reader(crop) if callable(reader) else []
+        if not isinstance(readings, (list, tuple)):
+            readings = []
+        valid = [item for item in readings if isinstance(item, OCRText)
+                 and _confident(item) and re.fullmatch(r"[xX×]\s*[0-9]+", item.text.strip())]
+        counts = {int(re.sub(r"\D", "", item.text)) for item in valid}
+        count = next(iter(counts)) if counts == {1} else None
+        if count is None:
+            result["unknowns"].append("siege_quantity_unverified")
+        box = (x - 1, 372, x + 94, 470)
+        identity = recognize_card_identity(image, box, "siege", surface="army",
+                                           client_version=client_version)
+        if identity["unit_id"] is None:
+            result["unknowns"].append("siege_identity_unavailable")
+        card_box = list(scale_box(box, from_resolution=_BASE, to_resolution=baseline_resolution))
+        result["cards"].append({"unit_id": identity["unit_id"], "kind": "siege",
+                                "source": "army", "count": count, "level": None,
+                                "available": None, "confidence": identity["confidence"],
+                                "bbox": card_box,
+                                "point": [(card_box[0] + card_box[2]) // 2,
+                                          (card_box[1] + card_box[3]) // 2],
+                                "evidence": {"header_score": round(score, 5),
+                                             "count_reads": [asdict(item) for item in valid],
+                                             "identity": identity}})
+    result["complete"] = not result["unknowns"]
+    return result
 
 
 def recognize_army_heroes(

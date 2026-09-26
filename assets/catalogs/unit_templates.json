@@ -498,6 +498,23 @@
       "client_version": "18.600.7",
       "version_code": 180600008,
       "evidence": "ice-vial portrait visually agrees with earlier army-surface freeze sample; no information-panel proof; battle card count x2 read separately"
+    },
+    {
+      "unit_id": "siege_barracks",
+      "surface": "army",
+      "path": "units/siege_barracks_army_18_600_7.png",
+      "source_frame": "tests/fixtures/army_confirmation_counts_20260926.png",
+      "source_bbox_1280": [
+        1035,
+        398,
+        1080,
+        440
+      ],
+      "information_panel": "reports/live-army-editor-probe/frames/00002-siege-info4-after.png",
+      "visual_mapping": "current first red box matches independently named picker fourth red box",
+      "state": "active",
+      "client_version": "18.600.7",
+      "version_code": 180600008
     }
   ]
 }
