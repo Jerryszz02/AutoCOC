@@ -578,29 +578,67 @@ def test_captured_line_rejects_stacks_missing_after_boundary_reveal(monkeypatch)
     assert exc.value.partial_receipt["issued_placements"] == 0
 
 
-def test_captured_event_stack_is_counted_but_same_unit_clan_card_is_excluded(monkeypatch):
+@pytest.mark.parametrize("strategy", ["single_edge", "two_edge"])
+def test_captured_event_stack_is_counted_but_same_unit_clan_card_is_excluded(monkeypatch, strategy):
     own = dict(_troop("barbarian", (60, 650)), count=1)
-    event = dict(_troop("event_super_pekka", (156, 650)), count=40, source="event")
+    event = dict(_troop("event_super_pekka", (156, 650)), count=40, source="event",
+                 evidence={"event_portrait": {"confidence": .95}})
     clan = dict(_troop("event_super_pekka", (253, 650)), count=5,
                 source="clan_reinforcement")
-    scout = _troop_frame("event-stacks", [own, event, clan], {}, terrain=True)
+    cards = [own, event, clan]
+    counts = {"barbarian": 1, "event_super_pekka": 40}
+    scout = _troop_frame("event-stacks", cards, counts, terrain=True)
+    scout.observations["expected_army_manifest"] = {
+        "complete": True, "troops": [{"count": 1}]}
+    monkeypatch.setattr("autococ.strategy_execution._remaining",
+                        lambda frame, card, recognizer=None: frame.observations["counts"][card["unit_id"]])
+    monkeypatch.setattr("autococ.strategy_execution.time.sleep", lambda _: None)
+    after_own = dict(counts, barbarian=0)
+    after_event = dict(after_own, event_super_pekka=0)
+    session = _Session([
+        _troop_frame("selected-own", cards, counts),
+        _troop_frame("consumed-own", cards, after_own),
+        _troop_frame("after-own", cards, after_own),
+        _troop_frame("selected-event", cards, after_own),
+        _troop_frame("consumed-event", cards, after_event),
+        _troop_frame("after-event", cards, after_event),
+    ])
+    receipt = execute_strategy(session, scout,
+        load_strategy(ROOT / "strategies" / f"{strategy}.toml")).observations["deployment"]
+    assert receipt["completed"] is True
+    assert receipt["deployed_units"] == receipt["issued_placements"] == 41
+    assert [(action["unit_id"], action["consumed"]) for action in receipt["actions"]] == [
+        ("barbarian", 1), ("event_super_pekka", 40)]
+    selected = [point for _, point, reason in session.taps if reason.startswith("Select")]
+    assert selected == [(60, 650), (156, 650)]
+
+
+@pytest.mark.parametrize("confidence", [None, .94, float("nan"), float("inf"), 1.01, "0.99"])
+def test_captured_event_requires_verified_portrait_before_input(confidence):
+    own = _troop("barbarian", (60, 650))
+    event = dict(_troop("event_super_pekka", (156, 650)), count=40, source="event",
+                 evidence={"event_portrait": {"confidence": confidence}} if confidence is not None else {})
+    scout = _troop_frame("unverified-event", [own, event], {}, terrain=True)
+    scout.observations["expected_army_manifest"] = {"complete": True, "troops": [{"count": 1}]}
+    session = _Session([])
+    with pytest.raises(DeploymentError, match="event troop has no verified portrait") as exc:
+        execute_strategy(session, scout, load_strategy(ROOT / "strategies/two_edge.toml"))
+    assert session.taps == session.swipes == session.clicks == []
+    assert exc.value.partial_receipt["issued_placements"] == 0
+
+
+def test_captured_event_cannot_replace_a_missing_owned_stack():
+    own = _troop("barbarian", (60, 650))
+    event = dict(_troop("event_super_pekka", (156, 650)), count=40, source="event",
+                 evidence={"event_portrait": {"confidence": .99}})
+    scout = _troop_frame("missing-owned-stack", [own, event], {}, terrain=True)
     scout.observations["expected_army_manifest"] = {
         "complete": True, "troops": [{"count": 1}, {"count": 40}]}
-    selected = []
-
-    def consume(session, frame, card, points, receipt, deadline, *, kind):
-        selected.append((card["source"], card["count"], card["point"]))
-        receipt["offensive_actions"] += 1
-        receipt["deployed_units"] += 1
-        receipt["verified"] = True
-        return frame
-
-    monkeypatch.setattr("autococ.strategy_execution._consume", consume)
-    definition = StrategyDefinition("captured", "captured", None,
-        (StrategyStep("deploy_troop", "*", count=1, edge="two"),), "captured")
-    receipt = execute_strategy(_Session([]), scout, definition).observations["deployment"]
-    assert selected == [("army", 1, [60, 650]), ("event", 40, [156, 650])]
-    assert receipt["offensive_actions"] == 2
+    session = _Session([])
+    with pytest.raises(DeploymentError, match="do not match the independent army manifest") as exc:
+        execute_strategy(session, scout, load_strategy(ROOT / "strategies/two_edge.toml"))
+    assert session.taps == session.swipes == session.clicks == []
+    assert exc.value.partial_receipt["issued_placements"] == 0
 
 
 def _hero_frame(name, *, terrain=False):

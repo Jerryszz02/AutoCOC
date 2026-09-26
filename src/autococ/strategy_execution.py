@@ -779,8 +779,9 @@ def execute_strategy(session, scout: SceneSnapshot, definition: StrategyDefiniti
             manifest = frame.observations.get("expected_army_manifest")
             if not isinstance(manifest, dict) or manifest.get("complete") is not True:
                 raise FlowError("Captured army has no independent complete manifest")
+            # My Army lists owned troops; battle-only event stacks are extra.
             observed = sorted(c["count"] for c in _cards(frame)
-                              if c.get("kind") == "troop" and c.get("source", "army") in {"army", "event"}
+                              if c.get("kind") == "troop" and c.get("source", "army") == "army"
                               and type(c.get("count")) is int)
             expected = sorted(c["count"] for c in manifest.get("troops", [])
                               if type(c.get("count")) is int and c["count"] > 0)
@@ -790,6 +791,12 @@ def execute_strategy(session, scout: SceneSnapshot, definition: StrategyDefiniti
                                     if card.get("kind") == "troop" and
                                     card.get("source", "army") in {"army", "event"} and
                                     type(card.get("count")) is int and card["count"] > 0)
+            for card in captured_stacks:
+                if card.get("source") == "event":
+                    portrait = (card.get("evidence") or {}).get("event_portrait") or {}
+                    confidence = portrait.get("confidence")
+                    if (type(confidence) not in {int, float} or not .95 <= confidence <= 1):
+                        raise FlowError("Additional event troop has no verified portrait")
         slots = _cards(frame)
         context = BattleContext(
             troops=tuple(item for item in slots if item.get("kind") == "troop"),
