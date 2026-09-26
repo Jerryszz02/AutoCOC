@@ -173,8 +173,27 @@ def _battle_bar_viewport(frame: SceneSnapshot) -> tuple:
     """Recognized card identities, not screenshot names or old click positions."""
     slots = _cards(frame)
     return tuple((card.get("kind"), card.get("unit_id"), card.get("source", "army"),
-                  card.get("count"), tuple(round(value / 8) for value in card.get("point", ())))
-                 for card in slots if isinstance(card, dict))
+                  card.get("count"), tuple(card["point"]))
+                 for card in slots if isinstance(card, dict) and
+                 isinstance(card.get("point"), (list, tuple)) and len(card["point"]) == 2 and
+                 all(type(value) in (int, float) and math.isfinite(value)
+                     for value in card["point"]))
+
+
+def _same_battle_bar_view(a: tuple, b: tuple) -> bool:
+    """Tolerate OCR edge flicker and 1-5px card-border jitter, not a moving bar."""
+    if len(a) < 2 or len(b) < 2:
+        return False
+    used = set()
+    matched = 0
+    for old in a:
+        for index, new in enumerate(b):
+            if (index not in used and old[:4] == new[:4] and
+                    all(abs(old[4][axis] - new[4][axis]) <= 5 for axis in (0, 1))):
+                used.add(index)
+                matched += 1
+                break
+    return matched >= 2 and matched >= math.ceil(.6 * min(len(a), len(b)))
 
 
 def _observe_swiped_bar(session, before_view: tuple, direction: str,
@@ -182,26 +201,26 @@ def _observe_swiped_bar(session, before_view: tuple, direction: str,
     """Observe an animated swipe; never swipe again on its first old frame."""
     previous_new = None
     old_reads = 0
-    for attempt in range(3):
+    for attempt in range(6):
         _check(session, deadline)
         frame = session.observe(f"strategy-bar-{direction}")
         receipt["evidence"].append(str(frame.screenshot_path))
         _check(session, deadline)
         if frame.scene in {"enemy_village", "battle"} and math.isfinite(frame.confidence) and frame.confidence >= .8:
             view = _battle_bar_viewport(frame)
-            if view and view == before_view:
+            if view and _same_battle_bar_view(view, before_view):
                 old_reads += 1
                 previous_new = None
-                if old_reads == 3:
+                if old_reads == 4:
                     return frame, view, True
-            elif view and view == previous_new:
+            elif view and previous_new and _same_battle_bar_view(view, previous_new):
                 return frame, view, False
             else:
                 previous_new = view or None
                 old_reads = 0
         elif frame.scene != "unknown":
             raise FlowError(f"Battle bar swipe entered unexpected scene {frame.scene}")
-        if attempt < 2:
+        if attempt < 5:
             _check(session, deadline)
             time.sleep(.1)
     raise FlowError("Battle bar viewport did not stabilize after one swipe")

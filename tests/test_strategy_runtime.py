@@ -6,7 +6,9 @@ import pytest
 from autococ.errors import ConfigError, DeploymentError, FlowError, StopRequested
 from autococ.scene import SceneSnapshot
 from autococ.strategy_config import StrategyDefinition, StrategyStep, load_strategy, planned_steps
-from autococ.strategy_execution import (_end_battle_confirmation, _find_named_card, _match_card, _points,
+from autococ.strategy_execution import (_battle_bar_viewport, _end_battle_confirmation,
+                                         _find_named_card, _match_card, _points,
+                                         _same_battle_bar_view,
                                          _terrain, _wait_step, execute_strategy)
 from autococ.unit_catalog import ArmyRecipe, ArmyRequirement
 
@@ -561,8 +563,8 @@ def test_named_preflight_finds_fresh_card_across_battle_bar_and_ignores_clan(mon
 
 
 def test_battle_bar_repeated_viewport_stops_without_repeating_same_swipe():
-    page = [_troop("barbarian", (100, 650))]
-    session = _Session([_troop_frame(f"repeat-{index}", page, {}) for index in range(6)])
+    page = [_troop("barbarian", (100, 650)), _troop("wall_breaker", (200, 650))]
+    session = _Session([_troop_frame(f"repeat-{index}", page, {}) for index in range(8)])
     receipt = {"evidence": []}
     with pytest.raises(FlowError, match="not identified in bounded battle bar search"):
         _find_named_card(session, _troop_frame("start", page, {}), "archer", "troop",
@@ -572,8 +574,8 @@ def test_battle_bar_repeated_viewport_stops_without_repeating_same_swipe():
 
 
 def test_battle_bar_waits_for_old_then_two_stable_new_views():
-    old = [_troop("barbarian", (100, 650))]
-    new = [_troop("archer", (420, 650))]
+    old = [_troop("barbarian", (100, 650)), _troop("wall_breaker", (200, 650))]
+    new = [_troop("archer", (420, 650)), _troop("wall_breaker", (320, 650))]
     session = _Session([_troop_frame("old-animation", old, {}),
                         _troop_frame("new-animation", new, {}),
                         _troop_frame("new-stable", new, {})])
@@ -584,20 +586,67 @@ def test_battle_bar_waits_for_old_then_two_stable_new_views():
     assert len(session.swipes) == 1
 
 
+def test_battle_bar_waits_through_realistic_inertial_rebound_without_second_swipe():
+    initial = [_troop("barbarian", (100, 650)), _troop("wall_breaker", (200, 650))]
+    moving = [_troop("barbarian", (40, 650)), _troop("wall_breaker", (140, 650)),
+              _troop("archer", (400, 650))]
+    rebound = [_troop("barbarian", (70, 650)), _troop("wall_breaker", (170, 650)),
+               _troop("archer", (430, 650))]
+    settled = [_troop("barbarian", (72, 651)), _troop("wall_breaker", (171, 650)),
+               _troop("archer", (431, 650))]
+    session = _Session([_troop_frame("old-after-swipe", initial, {}),
+                        _troop_frame("moving", moving, {}),
+                        _troop_frame("rebound", rebound, {}),
+                        _troop_frame("settled", settled, {})])
+    frame, card = _find_named_card(session, _troop_frame("start", initial, {}),
+                                   "archer", "troop", "auto", {"evidence": []}, float("inf"))
+    assert frame.screenshot_path.name == "settled.png"
+    assert card["point"] == [431, 650]
+    assert len(session.swipes) == 1
+
+
+def test_spell_smoke_sanitized_bar_shows_old_view_then_moving_rebound():
+    # Original 18-21 battle frames are ignored runtime data. These tracked
+    # samples keep only the bottom toolbar at native recognition scale.
+    import cv2
+    from autococ.images import read_frame
+    from autococ.ocr import filter_ocr_results
+    from autococ.vision import ScreenshotRecognizer
+    recognizer = ScreenshotRecognizer()
+    recognizer.client_version = "18.600.7"
+    frames = []
+    for number in (18, 19, 20, 21):
+        path = ROOT / "tests/fixtures" / f"spell_smoke1_bar_{number:02d}.png"
+        image = read_frame(path, cv2.IMREAD_COLOR)
+        assert image.shape == (720, 1280, 3)
+        assert not image[:585].any()  # Opponent village and account data removed.
+        texts = filter_ocr_results(recognizer.provider.recognize(path),
+                                   recognizer.ocr_config.confidence_threshold)
+        battle = recognizer._battle_observation(path, texts, "enemy_village")
+        frames.append(SceneSnapshot("enemy_village", .95, path, {"battle": battle}))
+    views = [_battle_bar_viewport(frame) for frame in frames]
+    assert _same_battle_bar_view(views[0], views[1])
+    assert not _same_battle_bar_view(views[1], views[2])
+    assert not _same_battle_bar_view(views[2], views[3])
+    assert any(card.get("unit_id") == "totem_spell" for card in frames[2].observations["battle"]["slots"])
+
+
 def test_battle_bar_scans_at_most_three_times_each_direction():
     frames = []
     for page in range(1, 7):
-        cards = [_troop("barbarian", (100 + 16 * page, 650))]
+        cards = [_troop("barbarian", (100 + 16 * page, 650)),
+                 _troop("wall_breaker", (200 + 16 * page, 650))]
         frames.extend(_troop_frame(f"page-{page}-{sample}", cards, {}) for sample in (1, 2))
     session = _Session(frames)
     with pytest.raises(FlowError, match="not identified in bounded battle bar search"):
-        _find_named_card(session, _troop_frame("start", [_troop("barbarian", (100, 650))], {}),
+        _find_named_card(session, _troop_frame("start", [_troop("barbarian", (100, 650)),
+                                                 _troop("wall_breaker", (200, 650))], {}),
                          "archer", "troop", "auto", {"evidence": []}, float("inf"))
     assert [direction for _, direction, _ in session.swipes] == ["left"] * 3 + ["right"] * 3
 
 
 def test_battle_bar_unknown_scene_stops_before_another_swipe():
-    session = _Session([SceneSnapshot("unknown", 0, Path(f"unknown-{i}.png"), {}) for i in range(3)])
+    session = _Session([SceneSnapshot("unknown", 0, Path(f"unknown-{i}.png"), {}) for i in range(6)])
     with pytest.raises(FlowError, match="did not stabilize"):
         _find_named_card(session, _troop_frame("start", [_troop("barbarian", (100, 650))], {}),
                          "archer", "troop", "auto", {"evidence": []}, float("inf"))
