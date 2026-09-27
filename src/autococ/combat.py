@@ -266,8 +266,27 @@ def run_battle(session: GameSession) -> TaskResult:
         try:
             if vision_mode:
                 from .prepared_battle import run_prepared_battle
-                deployed = run_prepared_battle(session, scout, model=vision_model,
-                                               decider=vision_decider, guides=vision_guides)
+                try:
+                    deployed = run_prepared_battle(session, scout, model=vision_model,
+                                                   decider=vision_decider, guides=vision_guides)
+                except AutoCOCError as exc:
+                    if session.prepared_battle_receipt is None:
+                        # Preparation may have changed the camera or exhausted
+                        # the preview timer. Never exit using the old scout.
+                        metrics["preparation_error"] = str(exc)
+                        try:
+                            current = session.observe("preparation-failure-check")
+                            evidence.append(current.screenshot_path)
+                            _require_scene(current, {"enemy_village"})
+                            _leave_scout(session, current)
+                            home = return_to_village(session)
+                            evidence.append(home.screenshot_path)
+                            metrics["returned_home"] = True
+                        except AutoCOCError as recovery_error:
+                            metrics["preparation_recovery_error"] = str(recovery_error)
+                    # Preserve the preparation failure even after a safe return.
+                    # StopRequested bypasses both handlers and sends no input.
+                    raise
             elif definition is None:
                 deployed = deploy_army(session, scout)
             else:

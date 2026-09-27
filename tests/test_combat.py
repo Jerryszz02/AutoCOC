@@ -11,7 +11,7 @@ import numpy as np
 
 from autococ.combat import _candidate_changed, _next_candidate, _wait_for_clear_scout, inspect_army, run_battle
 from autococ.config import BattleConfig, VisionAgentConfig
-from autococ.errors import CaptureError, DeploymentError, FlowError
+from autococ.errors import CaptureError, DeploymentError, FlowError, StopRequested
 from autococ.reporting import RunStats, resource_metrics
 from autococ.scene import SceneSnapshot
 from autococ.session import GameSession
@@ -211,6 +211,61 @@ class CombatTests(unittest.TestCase):
             self.assertTrue(result.metrics["vision_agent"]["input_sent"])
             self.assertTrue(result.metrics["vision_agent"]["consumption_verified"])
             self.assertTrue(result.metrics["returned_home"])
+
+    def _vision_failure(self, session, failure):
+        session.config.vision_agent = VisionAgentConfig(enabled=True, model_dir="models")
+        session.config.source_path = Path("config.toml").resolve()
+        session.client_version = "18.1"
+        model = SimpleNamespace(detect=Mock(return_value=()), metadata={
+            "validation": {"status": "evaluated", "report_id": "offline-1"},
+            "applicability": {"source_width_range": [1280, 1280], "source_height_range": [720, 720]}})
+        with patch("autococ.model_vision.BuildingModel", return_value=model), \
+                patch("autococ.prepared_battle.validate_prepared_capability"), \
+                patch("autococ.prepared_battle.run_prepared_battle", side_effect=failure):
+            return run_battle(session)
+
+    def test_vision_preparation_failure_exits_fresh_preview_and_verifies_home(self):
+        for error in ("Current preparation countdown is unavailable", "Core confidence too low",
+                      "Observed cards differ from accepted layout"):
+            with self.subTest(error=error):
+                frames = complete_frames()[:4] + [frame(7, "enemy_village"),
+                    frame(8, "village"), frame(9, "village")]
+                session = FakeSession(frames)
+                result = self._vision_failure(session, FlowError(error))
+                self.assertEqual(result.status, "failed")
+                self.assertEqual(result.reason, error)
+                self.assertTrue(result.metrics.get("returned_home"))
+                self.assertIn(frames[-1].screenshot_path, result.evidence)
+                exits = [(path, reason) for path, reason in session.taps if "end_battle" in reason]
+                self.assertEqual(len(exits), 1)
+                self.assertEqual(exits[0][0], frames[4].screenshot_path)
+                self.assertEqual(session.deploy_calls, 0)
+                self.assertFalse(result.metrics["vision_agent"]["input_sent"])
+                self.assertNotIn("rounds_completed", result.metrics)
+
+    def test_vision_preparation_failure_cannot_exit_unverified_or_started_battle(self):
+        for scene, confidence in (("unknown", .99), ("battle", .99), ("enemy_village", .7)):
+            with self.subTest(scene=scene, confidence=confidence):
+                current = replace(frame(7, scene), confidence=confidence)
+                session = FakeSession(complete_frames()[:4] + [current])
+                result = self._vision_failure(session, FlowError("preparation failed"))
+                self.assertEqual(result.reason, "preparation failed")
+                self.assertIn("preparation_recovery_error", result.metrics)
+                self.assertFalse(result.metrics.get("returned_home", False))
+                self.assertFalse(any("end_battle" in reason for _, reason in session.taps))
+
+    def test_vision_stop_or_existing_input_receipt_does_not_trigger_preview_recovery(self):
+        session = FakeSession(complete_frames()[:4])
+        with self.assertRaises(StopRequested):
+            self._vision_failure(session, StopRequested("stopped"))
+        self.assertNotIn("preparation-failure-check", session.observe_labels)
+        def after_input(active, scout, **kwargs):
+            active.prepared_battle_receipt = {"attempted_placements": 1}
+            raise FlowError("after input")
+        session = FakeSession(complete_frames()[:4])
+        result = self._vision_failure(session, after_input)
+        self.assertEqual(result.reason, "after input")
+        self.assertNotIn("preparation-failure-check", session.observe_labels)
 
     def test_two_edge_round_accepts_loss_capped_inventory_and_first_low_loot_opponent(self):
         frames = complete_frames()
