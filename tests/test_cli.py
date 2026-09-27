@@ -95,7 +95,8 @@ class CLITests(unittest.TestCase):
         self.assertEqual(payload["physical_display_id"], "physical-two")
         self.assertEqual(payload["device_serial"], "test-device")
         self.assertTrue(Path(payload["screenshot_path"]).is_file())
-        self.assertEqual(self.capture_class.call_args.kwargs, {"screenshot_display_id": "physical-two", "input_display_id": 2, "native": None})
+        self.assertEqual(self.capture_class.call_args.kwargs, {"screenshot_display_id": "physical-two", "input_display_id": 2,
+                         "native": None, "prefer_raw": False, "png_compression_level": 1})
         self.manager.adb.run.assert_not_called()
 
     def test_check_and_capture_require_actual_game_display(self) -> None:

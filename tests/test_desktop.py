@@ -15,6 +15,15 @@ from autococ.routine_config import GoalConfig, ResourceFilter, RoutineConfig, Ta
 
 
 class DesktopTests(unittest.TestCase):
+    def test_report_keeps_plan_input_consumption_and_battle_separate(self):
+        text = report_text({"mode": "live", "task_results": [{"task": "battle", "status": "failed",
+            "metrics": {"vision_agent": {"plan_ready": True, "input_sent": True,
+                "consumption_verified": False, "burst_elapsed_sec": .8, "burst_limit_sec": 2},
+                "returned_home": True, "rounds_completed": 1}}]})
+        self.assertIn("计划就绪：已确认", text)
+        self.assertIn("消费已核验：未确认", text)
+        self.assertIn("战斗完成：已确认", text)
+
     def setUp(self):
         temporary = TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

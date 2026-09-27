@@ -15,10 +15,47 @@ import cv2
 import numpy as np
 
 from .errors import SceneError
+from .model_vision import BuildingModel, ModelUnavailable
 
 
 CATALOG_ROOT = Path(__file__).resolve().parents[2] / "assets" / "catalogs"
 BUILDING_TYPES = frozenset({"air_defense", "spell_factory"})
+
+
+def detect_model_buildings(
+    screenshot_path: str | Path, *, model: BuildingModel,
+    captured_at: float | None, baseline_resolution: tuple[int, int] = (1280, 720),
+) -> dict[str, object]:
+    """Expose model detections separately from positively tracked template states.
+
+    A model frame never establishes that a missing building was destroyed.
+    The caller must supply the timestamp from the start of screenshot capture.
+    """
+    if captured_at is None:
+        return {"status": "unavailable", "reason": "capture_time_missing", "detections": []}
+    frame = Path(screenshot_path)
+    image = _read(frame)
+    if image is None:
+        return {"status": "unavailable", "reason": "frame_decode_failed", "detections": []}
+    try:
+        detections = model.detect(image, captured_at=captured_at)
+    except ModelUnavailable as exc:
+        return {"status": "unavailable", "reason": str(exc), "detections": []}
+    sx, sy = baseline_resolution[0] / image.shape[1], baseline_resolution[1] / image.shape[0]
+    items = []
+    for index, detection in enumerate(detections):
+        box = [detection.bbox[0] * sx, detection.bbox[1] * sy,
+               detection.bbox[2] * sx, detection.bbox[3] * sy]
+        items.append({"building_id": f"model:{detection.kind}:{index}",
+                      "type": detection.kind, "bbox": box,
+                      "point": [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2],
+                      "confidence": detection.confidence,
+                      "state": "visible", "status": "visible", "frame": str(frame),
+                      "frame_captured_at": detection.frame_captured_at,
+                      "evidence": {"method": "onnx_detection",
+                                   "model_sha256": detection.model_sha256}})
+    return {"status": "recognized", "reason": None,
+            "model_sha256": model.model_sha256, "detections": items}
 
 
 def _validated(entry: dict) -> bool:

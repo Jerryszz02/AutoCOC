@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 import tomllib
 import warnings
+import math
 
 from .errors import ConfigError
 from .strategies import STRATEGIES
@@ -43,6 +44,39 @@ class RuntimeConfig:
     dry_run: bool = False
     task_timeout_sec: int = 300
     poll_interval_sec: float = 1.0
+    png_compression_level: int = 1
+
+
+@dataclass(frozen=True)
+class VisionAgentConfig:
+    enabled: bool = False
+    model_dir: str = ""
+    preparation_reserve_sec: float = 5.0
+    mode: str = "continuous"
+    evidence_limit_mb: int = 256
+    layout_profile: str = ""
+    jev_enabled: bool = False
+    jev_model: str = "jev-1.13.0"
+    jev_timeout_sec: float = 2.0
+    guide_file: str = ""
+
+    def __post_init__(self) -> None:
+        for name in ("enabled", "jev_enabled"):
+            if type(getattr(self, name)) is not bool:
+                raise ConfigError(f"vision_agent.{name} must be a boolean")
+        for name in ("model_dir", "layout_profile", "guide_file", "jev_model"):
+            if not isinstance(getattr(self, name), str):
+                raise ConfigError(f"vision_agent.{name} must be a string")
+        if self.mode not in {"continuous", "enhanced"}:
+            raise ConfigError("vision_agent.mode must be continuous or enhanced")
+        for name, lower, upper in (("preparation_reserve_sec", 1, 30), ("jev_timeout_sec", .05, 10)):
+            value = getattr(self, name)
+            if type(value) not in (int, float) or not math.isfinite(value) or not lower <= value <= upper:
+                raise ConfigError(f"vision_agent.{name} must be finite and between {lower} and {upper}")
+        if type(self.evidence_limit_mb) is not int or not 1 <= self.evidence_limit_mb <= 4096:
+            raise ConfigError("vision_agent.evidence_limit_mb must be an integer between 1 and 4096")
+        if not self.jev_model or self.jev_model in {"jev-latest", "jev-preview"}:
+            raise ConfigError("vision_agent.jev_model must name a pinned model version")
 
 
 @dataclass(frozen=True)
@@ -137,6 +171,7 @@ class AppConfig:
     source_path: Path
     mumu: MuMuConfig | None = None
     routine: RoutineConfig | None = None
+    vision_agent: VisionAgentConfig = VisionAgentConfig()
 
 
 def load_config(path: str | Path = "config.toml") -> AppConfig:
@@ -176,6 +211,7 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
         source_path=config_path,
         mumu=_load_mumu(_section(raw, "mumu")) if "mumu" in raw else None,
         routine=routine_from_dict(_section(raw, "routine")) if "routine" in raw else None,
+        vision_agent=load_vision_agent(_section(raw, "vision_agent")),
     )
 
 
@@ -206,6 +242,9 @@ def _load_runtime(section: dict[str, Any]) -> RuntimeConfig:
         raise ConfigError(
             f"runtime.log_level must be one of {sorted(VALID_LOG_LEVELS)}, got {log_level!r}"
         )
+    compression = _non_negative_int(section, "png_compression_level", 1)
+    if compression > 9:
+        raise ConfigError("runtime.png_compression_level must be between 0 and 9")
     return RuntimeConfig(
         log_level=log_level,
         screenshot_dir=Path(_string(section, "screenshot_dir", "screenshots")),
@@ -214,7 +253,15 @@ def _load_runtime(section: dict[str, Any]) -> RuntimeConfig:
         dry_run=_bool(section, "dry_run", False),
         task_timeout_sec=_positive_int(section, "task_timeout_sec", 300),
         poll_interval_sec=_non_negative_float(section, "poll_interval_sec", 1.0),
+        png_compression_level=compression,
     )
+
+
+def load_vision_agent(section: dict[str, Any]) -> VisionAgentConfig:
+    try:
+        return VisionAgentConfig(**section)
+    except TypeError as exc:
+        raise ConfigError(f"Invalid vision_agent settings: {exc}") from exc
 
 
 def _load_game(section: dict[str, Any]) -> GameConfig:

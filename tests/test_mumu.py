@@ -81,13 +81,37 @@ class MuMuRendererTests(unittest.TestCase):
         renderer = self.renderer()
         with TemporaryDirectory() as temp:
             path = Path(temp) / "native.png"
-            self.assertEqual(renderer.capture(str(path)), {"width": 4, "height": 3})
+            result = renderer.capture(str(path))
+            self.assertEqual((result["width"], result["height"]), (4, 3))
+            self.assertLessEqual(result["pixels_started_at_monotonic"], result["pixels_ready_at_monotonic"])
+            self.assertGreaterEqual(result["encode_elapsed_sec"], 0)
             rgba = np.array([(i * 13) % 256 for i in range(48)], dtype=np.uint8).reshape(3, 4, 4)
             np.testing.assert_array_equal(cv2.imread(str(path)), rgba[::-1, :, :3][:, :, ::-1])
         self.assertEqual(self.lib.nemu_capture_display.call_count, 2)
         renderer.close()
         renderer.close()
         self.lib.nemu_disconnect.assert_called_once_with(7)
+
+    def test_capture_level_zero_keeps_orientation_and_channel_values(self):
+        import cv2
+        import numpy as np
+
+        with patch("autococ.mumu.ctypes.CDLL", return_value=self.lib):
+            renderer = _Renderer("fixture.dll", "root", 1, "target.game", 2, png_compression_level=0)
+        with TemporaryDirectory() as temp, patch("cv2.imencode", wraps=cv2.imencode) as encoder:
+            path = Path(temp) / "native.png"
+            renderer.capture(str(path))
+            image = cv2.imread(str(path))
+        rgba = np.array([(i * 13) % 256 for i in range(48)], dtype=np.uint8).reshape(3, 4, 4)
+        np.testing.assert_array_equal(image, rgba[::-1, :, :3][:, :, ::-1])
+        self.assertEqual(encoder.call_args.args[2], [cv2.IMWRITE_PNG_COMPRESSION, 0])
+        renderer.close()
+
+    def test_invalid_compression_level_is_rejected_before_loading_sdk(self):
+        for level in (-1, 10, True, 1.0, "0"):
+            with self.subTest(level=level), self.assertRaises(ValueError):
+                _Renderer("fixture.dll", "root", 1, "target.game", 2, png_compression_level=level)
+        self.lib.nemu_connect.assert_not_called()
 
     def test_missing_or_changed_display_never_falls_back_or_clicks(self):
         renderer = self.renderer()
@@ -217,6 +241,56 @@ class MuMuWorkerTests(unittest.TestCase):
                 client.screenshot(path, timeout_sec=4)
             self.assertEqual(path.read_bytes(), b"previous evidence")
             self.assertEqual(list(Path(temp).iterdir()), [path])
+
+    def test_native_capture_reports_new_frame_and_worker_timing(self):
+        import cv2
+        import numpy as np
+
+        client = self.client()
+        png = cv2.imencode(".png", np.zeros((3, 4, 3), dtype=np.uint8))[1].tobytes()
+
+        def capture(operation, fresh, timeout_sec):
+            self.assertEqual(operation, "capture")
+            Path(fresh).write_bytes(png)
+            return {"width": 4, "height": 3, "pixels_ready_at_monotonic": 102,
+                    "encode_elapsed_sec": .5}
+
+        with TemporaryDirectory() as temp, patch.object(client, "_request", side_effect=capture):
+            path = Path(temp) / "screen.png"
+            path.write_bytes(b"previous frame")
+            with patch("autococ.mumu.time.monotonic", side_effect=[100, 103, 104]):
+                first = client.screenshot(path, timeout_sec=4)
+            self.assertEqual(path.read_bytes(), png)
+            self.assertEqual(first.requested_at_monotonic, 100)
+            self.assertEqual(first.pixels_ready_at_monotonic, 102)
+            self.assertEqual(first.payload_ready_at_monotonic, 102.5)
+            self.assertEqual(first.published_at_monotonic, 104)
+            self.assertEqual(first.pixels_elapsed_sec, 2)
+            self.assertEqual(first.encode_elapsed_sec, .5)
+            self.assertEqual(first.handoff_elapsed_sec, 1.5)
+            self.assertTrue(first.frame_id)
+
+    def test_invalid_worker_capture_response_preserves_previous_artifact(self):
+        import cv2
+        import numpy as np
+
+        client = self.client()
+        png = cv2.imencode(".png", np.zeros((3, 4, 3), dtype=np.uint8))[1].tobytes()
+        with TemporaryDirectory() as temp:
+            path = Path(temp) / "screen.png"
+            path.write_bytes(b"previous evidence")
+            for data, response in ((png[:-12], {"width": 4, "height": 3}),
+                                   (png, {"width": 3, "height": 4}),
+                                   (png, {"width": 4, "height": 3,
+                                          "pixels_ready_at_monotonic": float("inf")})):
+                with self.subTest(response=response):
+                    def capture(operation, fresh, timeout_sec):
+                        Path(fresh).write_bytes(data)
+                        return response
+
+                    with patch.object(client, "_request", side_effect=capture), self.assertRaises(FlowError):
+                        client.screenshot(path, timeout_sec=4)
+                    self.assertEqual(path.read_bytes(), b"previous evidence")
 
     def test_worker_death_is_reported_without_replaying(self):
         client = self.client()

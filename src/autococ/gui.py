@@ -13,7 +13,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
-from .config import load_config
+from .config import VisionAgentConfig, load_config
 from .desktop import (DesktopController, RunOptions, STATUS_LABELS, STRATEGY_LABELS, TASK_LABELS, desktop_config, display_reason,
                       load_options, report_history, report_text, save_options, settings_path)
 from .errors import AutoCOCError
@@ -233,6 +233,32 @@ class AutoCOCApp:
         self.save_button = ttk.Button(task_config, text="保存配置", command=self._save)
         self.save_button.grid(row=3, column=3, sticky="e", pady=6)
         task_config.rowconfigure(2, weight=1)
+        agent_card = ttk.LabelFrame(config_content, text="战前视觉规划", padding=12)
+        agent_card.grid(row=2, column=0, sticky="ew", pady=8)
+        self.agent_enabled = tk.BooleanVar(value=False)
+        self.agent_jev = tk.BooleanVar(value=False)
+        ttk.Checkbutton(agent_card, text="启用战前分析与连续投放", variable=self.agent_enabled).grid(
+            row=0, column=0, columnspan=2, sticky="w")
+        ttk.Checkbutton(agent_card, text="Jev 战前选择（需环境变量凭据）", variable=self.agent_jev).grid(
+            row=0, column=2, columnspan=2, sticky="w")
+        self.agent_values = {}
+        for row, (key, label, default) in enumerate((
+                ("model_dir", "本地模型目录", ""), ("layout_profile", "已验收布局文件", ""),
+                ("preparation_reserve_sec", "准备期预留 / 秒", "5"),
+                ("evidence_limit_mb", "本次证据额度 / MB", "256"),
+                ("guide_file", "打法条目 JSON", ""), ("jev_model", "Jev 固定版本", "jev-1.13.0"),
+                ("jev_timeout_sec", "Jev 最长等待 / 秒", "2")), start=1):
+            variable = tk.StringVar(value=default)
+            self.agent_values[key] = variable
+            ttk.Label(agent_card, text=label).grid(row=row, column=0, sticky="w", pady=3)
+            ttk.Entry(agent_card, textvariable=variable, width=52).grid(row=row, column=1, columnspan=3, sticky="ew")
+        self.agent_values["mode"] = tk.StringVar(value="continuous")
+        ttk.Label(agent_card, text="执行模式").grid(row=8, column=0, sticky="w")
+        ttk.Combobox(agent_card, textvariable=self.agent_values["mode"], values=("continuous", "enhanced"),
+                     state="readonly", width=20).grid(row=8, column=1, sticky="w")
+        ttk.Label(agent_card, text="continuous：战前规划后连续投放。enhanced：接口保留，尚未开放。\n"
+                  "模型或布局未验收时会拒绝投放；旧打法需关闭本开关。", style="Muted.TLabel").grid(
+                      row=9, column=0, columnspan=4, sticky="w", pady=6)
         self.editors = [self.mode_box, self.save_button, self.up_button, self.down_button]
         footer = tk.Frame(self.root, bg=BG, padx=18, pady=5)
         footer.pack(fill="x")
@@ -475,6 +501,11 @@ class AutoCOCApp:
 
     def _apply(self, options: RunOptions) -> None:
         config = desktop_config(self.config_path, replace(options, routine=None))
+        agent = config.vision_agent
+        self.agent_enabled.set(agent.enabled)
+        self.agent_jev.set(agent.jev_enabled)
+        for key, variable in self.agent_values.items():
+            variable.set(str(getattr(agent, key)))
         routine = options.routine or default_routine(config)
         self.task_kinds = {task.id: task.kind for task in routine.tasks}
         self.task_order = [task.id for task in routine.tasks]
@@ -564,7 +595,12 @@ class AutoCOCApp:
                              int(self.values["resources"].get()), int(self.values["searches"].get()),
                              self.values["serial"].get(), self.mode.get() == "离线预演",
                              strategy=self.task_fields[resource_id]["strategy"].get() if resource_id else "verified",
-                             routine=routine)
+                             routine=routine,
+                             vision_agent=VisionAgentConfig(
+                                 enabled=self.agent_enabled.get(), jev_enabled=self.agent_jev.get(),
+                                 **{key: (float(var.get()) if key in {"preparation_reserve_sec", "jev_timeout_sec"}
+                                          else int(var.get()) if key == "evidence_limit_mb" else var.get().strip())
+                                    for key, var in self.agent_values.items()}))
         options.validate()
         return options
 

@@ -46,6 +46,11 @@ class GameSession:
         self.logger = logger or logging.getLogger(__name__)
         self.client_version = "unknown"
         self.client_version_code: int | None = None
+        self.vision_model_error: str | None = None
+        self.prepared_building_model = None
+        from .evidence import EvidenceBudget
+        self.evidence_budget = (EvidenceBudget(directory / "frames", config.vision_agent.evidence_limit_mb * 1024 * 1024)
+                                if config.vision_agent.enabled else None)
 
     @classmethod
     def connect(cls, config: AppConfig, adb: ADBClient, serial: str, directory: Path,
@@ -96,7 +101,8 @@ class GameSession:
                     try:
                         native = MuMuClient(config.mumu.install_dir, config.mumu.instance_index, serial,
                                             config.game.package_name, target.logical_id,
-                                            timeout_sec=min(config.runtime.step_timeout_sec, remaining))
+                                            timeout_sec=min(config.runtime.step_timeout_sec, remaining),
+                                            png_compression_level=config.runtime.png_compression_level)
                     except MuMuDisplayUnavailable as exc:
                         pending_error = exc
                 remaining = deadline - time.monotonic()
@@ -107,7 +113,8 @@ class GameSession:
                 time.sleep(min(1, remaining))
             capture = CaptureClient(adb, serial, config.runtime.step_timeout_sec,
                                     screenshot_display_id=target.physical_id, input_display_id=target.logical_id,
-                                    prefer_raw=True, native=native)
+                                    prefer_raw=True, native=native,
+                                    png_compression_level=config.runtime.png_compression_level)
             session = cls(config, capture, ScreenshotRecognizer(config.ocr, config.game.baseline_resolution),
                           directory, logger=logger, native=native, stop_event=stop_event)
             check_stop()
@@ -129,6 +136,30 @@ class GameSession:
             except Exception:
                 pass
             session.recognizer.client_version = session.client_version
+            if getattr(config, "vision_agent", None) is not None and config.vision_agent.enabled:
+                from .model_vision import BuildingModel, SceneModel, ModelUnavailable
+                model_dir = Path(config.vision_agent.model_dir)
+                if not config.vision_agent.model_dir:
+                    session.vision_model_error = "Model directory is not configured"
+                else:
+                    if not model_dir.is_absolute():
+                        model_dir = config.source_path.resolve().parent / model_dir
+                    try:
+                        scene_model = SceneModel(model_dir / "scene", client_version=session.client_version)
+                        building_model = BuildingModel(model_dir / "building", client_version=session.client_version)
+                        for model in (scene_model, building_model):
+                            validation = model.metadata.get("validation", {})
+                            if (validation.get("status") != "evaluated" or
+                                    not isinstance(validation.get("report_id"), str) or
+                                    not validation["report_id"]):
+                                raise ModelUnavailable("Model has no recorded evaluation report")
+                        session.recognizer.scene_model = scene_model
+                        session.prepared_building_model = building_model
+                    except (ModelUnavailable, OSError, ValueError) as exc:
+                        session.vision_model_error = str(exc)
+                        session.recognizer.scene_model = None
+                        session.recognizer.building_model = None
+                        session.prepared_building_model = None
             session.event("session_connected", launch_requested=launch,
                           launch_issued=launch and not already_foreground,
                           reused_foreground=already_foreground,
@@ -161,7 +192,8 @@ class GameSession:
             output.write(json.dumps({"time": time.time(), "kind": kind, **data},
                                     ensure_ascii=False, default=str) + "\n")
 
-    def observe(self, label: str = "observe", *, purpose: str = "full", slot: dict | None = None) -> SceneSnapshot:
+    def observe(self, label: str = "observe", *, purpose: str = "full", slot: dict | None = None,
+                _transient: bool = False) -> SceneSnapshot:
         self.check_deadline()
         previous = self.last_snapshot
         self.last_snapshot = None
@@ -169,20 +201,38 @@ class GameSession:
         safe_label = "".join(c if c.isalnum() or c in "-_" else "-" for c in label)
         path = self.directory / "frames" / f"{self.frame_number:05d}-{safe_label}.png"
         captured_at = time.monotonic()
-        artifact = self.capture.capture_screenshot_artifact(path)
+        artifact = (self.evidence_budget.capture(self.capture, path, transient=_transient) if self.evidence_budget is not None
+                    else self.capture.capture_screenshot_artifact(path))
+        requested_at = getattr(artifact, "requested_at_monotonic", None)
+        if isinstance(requested_at, (int, float)) and math.isfinite(requested_at):
+            captured_at = min(captured_at, requested_at)
         self.context.screen_resolution = (artifact.width, artifact.height)
         recognition_started = time.monotonic()
         if purpose != "full":
             snapshot = self.recognizer.recognize_battle(path, purpose=purpose, slot=slot, previous=previous)
         else:
-            snapshot = self.recognizer.recognize(path)
+            if self.config.vision_agent.enabled and (
+                    getattr(self.recognizer, "scene_model", None) is not None or
+                    getattr(self.recognizer, "building_model", None) is not None):
+                snapshot = self.recognizer.recognize(path, captured_at=captured_at)
+            else:
+                snapshot = self.recognizer.recognize(path)
         snapshot.observations["recognition_elapsed_sec"] = time.monotonic() - recognition_started
         snapshot.observations["observation_elapsed_sec"] = time.monotonic() - captured_at
         snapshot.observations["observed_at_monotonic"] = captured_at
+        snapshot.observations["frame_id"] = getattr(artifact, "frame_id", None) or str(path)
+        for name in ("requested_at_monotonic", "pixels_ready_at_monotonic",
+                     "payload_ready_at_monotonic", "published_at_monotonic",
+                     "pixels_elapsed_sec", "encode_elapsed_sec", "handoff_elapsed_sec"):
+            value = getattr(artifact, name, None)
+            if value is not None:
+                snapshot.observations[name] = value
         snapshot.observations["capture_method"] = getattr(artifact, "capture_method", "unknown")
         capture_elapsed = getattr(artifact, "capture_elapsed_sec", None)
         snapshot.observations["capture_elapsed_sec"] = artifact.elapsed_sec if capture_elapsed is None else capture_elapsed
         self.last_snapshot = snapshot
+        if self.evidence_budget is not None:
+            snapshot.observations["evidence_retention"] = "transient" if _transient else "retained"
         self.event("observation", frame=str(path), scene=snapshot.scene, confidence=snapshot.confidence,
                    observations=snapshot.observations)
         self.logger.info("scene=%s confidence=%.2f capture=%.3fs recognition=%.3fs total=%.3fs frame=%s",
@@ -194,6 +244,14 @@ class GameSession:
     def wait_for(self, scenes: set[str], *, timeout_sec: float = 30, label: str = "wait",
                  purpose: str = "full", poll_interval_sec: float | None = None) -> SceneSnapshot:
         deadline = min(time.monotonic() + timeout_sec, self.deadline, self.task_deadline)
+        if self.evidence_budget is not None:
+            try:
+                return self._wait_for_bounded_evidence(scenes, deadline, label, purpose, poll_interval_sec)
+            finally:
+                if self.last_snapshot is not None:
+                    self.evidence_budget.retain(self.last_snapshot.screenshot_path)
+                    self.last_snapshot.observations["evidence_retention"] = "retained"
+                    self.event("wait_evidence_retained", frame=str(self.last_snapshot.screenshot_path))
         while True:
             if time.monotonic() >= deadline:
                 raise FlowError(f"Expected {sorted(scenes)} before deadline")
@@ -201,6 +259,25 @@ class GameSession:
             if time.monotonic() >= deadline:
                 raise FlowError(f"Expected {sorted(scenes)} before deadline; frame={snapshot.screenshot_path}")
             if snapshot.scene in scenes and math.isfinite(snapshot.confidence) and snapshot.confidence >= 0.8:
+                return snapshot
+            if snapshot.scene in {"maintenance", "disconnected"}:
+                raise FlowError(f"Game interruption: {snapshot.scene}")
+            interval = self.config.runtime.poll_interval_sec if poll_interval_sec is None else poll_interval_sec
+            next_poll = min(time.monotonic() + interval, deadline)
+            while time.monotonic() < next_poll:
+                self.check_deadline()
+                time.sleep(min(.1, max(0, next_poll - time.monotonic())))
+
+    def _wait_for_bounded_evidence(self, scenes: set[str], deadline: float, label: str,
+                                   purpose: str, poll_interval_sec: float | None) -> SceneSnapshot:
+        """Recycle this wait's intermediate polls; retain the result or last failure."""
+        while True:
+            if time.monotonic() >= deadline:
+                raise FlowError(f"Expected {sorted(scenes)} before deadline")
+            snapshot = self.observe(label, purpose=purpose, _transient=True)
+            if time.monotonic() >= deadline:
+                raise FlowError(f"Expected {sorted(scenes)} before deadline; frame={snapshot.screenshot_path}")
+            if snapshot.scene in scenes and math.isfinite(snapshot.confidence) and snapshot.confidence >= .8:
                 return snapshot
             if snapshot.scene in {"maintenance", "disconnected"}:
                 raise FlowError(f"Game interruption: {snapshot.scene}")
@@ -226,6 +303,40 @@ class GameSession:
             raise FlowError(f"Click is outside the screenshot: {point}")
         self.event("tap", frame=str(snapshot.screenshot_path), scene=snapshot.scene, point=[x, y], reason=reason)
         self.context.tap_xy(x, y, reason=reason)
+        self.action_count += 1
+
+    def frozen_battle_tap(self, point: tuple[int, int], *, timeout_sec: float, reason: str,
+                          plan_id: str) -> None:
+        """One bounded input for an already frozen battle plan, without observation.
+
+        Only prepared_battle calls this after validating its separate plan
+        permission. An uncertain transport result is never retried here.
+        """
+        self.check_deadline()
+        permission = getattr(self, "_active_frozen_plan", None)
+        if (not isinstance(permission, tuple) or len(permission) != 3 or
+                permission[0] != plan_id or permission[2] != tuple(point) or
+                time.monotonic() >= permission[1]):
+            raise FlowError("Frozen battle input has no active plan permission")
+        x, y = point
+        width, height = self.config.game.baseline_resolution
+        if (type(x) is not int or type(y) is not int or not 0 <= x < width or
+                not 0 <= y < height or not 0 < timeout_sec <= self.config.runtime.step_timeout_sec):
+            raise FlowError("Frozen battle input has invalid coordinates or timeout")
+        actual_x, actual_y = self.context._scale_point((x, y))
+        source_width, source_height = self.context.screen_resolution
+        if not (0 <= actual_x < source_width and 0 <= actual_y < source_height):
+            raise FlowError("Frozen battle input scales outside the physical display")
+        remaining = permission[1] - time.monotonic()
+        if remaining <= 0:
+            raise FlowError("Frozen battle input permission expired before send")
+        timeout_sec = min(timeout_sec, remaining)
+        if not self.config.runtime.dry_run:
+            if self.native is not None:
+                self.native._request("tap", actual_x, actual_y, timeout_sec=timeout_sec)
+            else:
+                self.capture.adb.run(self.context._input_command("tap", str(actual_x), str(actual_y)),
+                                     serial=self.capture.serial, timeout_sec=timeout_sec)
         self.action_count += 1
 
     def swipe(self, snapshot: SceneSnapshot, start: tuple[int, int], end: tuple[int, int], *,

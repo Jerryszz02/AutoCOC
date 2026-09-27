@@ -3,11 +3,14 @@ from dataclasses import replace
 import json
 from pathlib import Path
 from types import SimpleNamespace
+import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+import numpy as np
 
 from autococ.combat import _candidate_changed, _next_candidate, _wait_for_clear_scout, inspect_army, run_battle
-from autococ.config import BattleConfig
+from autococ.config import BattleConfig, VisionAgentConfig
 from autococ.errors import CaptureError, DeploymentError, FlowError
 from autococ.reporting import RunStats, resource_metrics
 from autococ.scene import SceneSnapshot
@@ -63,6 +66,7 @@ class FakeSession:
                                       game=SimpleNamespace(startup_timeout_sec=10),
                                       runtime=SimpleNamespace(poll_interval_sec=0))
         self.last_snapshot = None
+        self.evidence_budget = None
         self.native = object()
         self.taps, self.back_actions, self.templates, self.events = [], [], [], []
         self.observe_labels = []
@@ -132,6 +136,81 @@ class CombatTests(unittest.TestCase):
         self.assertEqual(len(result.metrics["settlement_reads"]), 1)
         self.assertTrue(result.metrics["settlement_reads"][0]["valid"])
         self.assertNotIn("battle-settlement-reread", session.observe_labels)
+
+    def test_vision_mode_simulates_preload_plan_burst_post_settlement_and_home(self):
+        frames = complete_frames()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            scout = frames[3]
+            army = frames[2].observations["army"]
+            army["troops"] = {"used": 2, "capacity": 2}
+            army["spells"] = {"used": 0, "capacity": 0}
+            army["manifest"].update(identity_complete=True,
+                                    troops=[{"unit_id": "archer", "count": 2}], spells=[])
+            card = {"kind": "troop", "unit_id": "archer", "source": "army", "count": 2,
+                    "point": [110, 630]}
+            profile = {"accepted": True, "cards_stable_after_deployment": True,
+                       "baseline_resolution": [1280, 720], "client_version": "18.1",
+                       "transport": "mumu_native", "display_id": 2, "model_sha256": "modelhash",
+                       "zoom": "minimum_stable",
+                       "model_validation_report_id": "offline-1",
+                       "cards": [card], "candidate_orders": [["archer"]],
+                       "core_classes": {"town_hall": .9}}
+            layout = root / "layout.json"
+            layout.write_text(json.dumps(profile), encoding="utf-8")
+            scout.observations.update(observed_at_monotonic=__import__("time").monotonic(),
+                minimum_zoom={"verified": True},
+                terrain=[{"edge": edge, "point": point,
+                          "evidence": {"frame": str(scout.screenshot_path)}}
+                         for edge, pair in ((0, ([250, 240], [350, 160])),
+                                            (1, ([250, 420], [350, 500]))) for point in pair],
+                battle={"countdown_seconds": 30, "countdown_evidence": {
+                    "frame": str(scout.screenshot_path), "confidence": .99,
+                    "source": "current_frame_ocr"},
+                        "slots": [{**card, "confidence": .99,
+                                   "evidence": {"count": {"confidence": .99}}}]})
+            frames[4].observations["battle"] = {"slots": [{**card, "count": 0,
+                "confidence": .99,
+                "evidence": {"count": {"confidence": .99}}}]}
+            session = FakeSession(frames)
+            session.config.vision_agent = VisionAgentConfig(enabled=True, model_dir=str(root),
+                layout_profile=str(layout))
+            session.config.source_path = root / "config.toml"
+            session.config.game.baseline_resolution = (1280, 720)
+            session.config.runtime.step_timeout_sec = 2.
+            session.capture = SimpleNamespace(input_display_id=2)
+            session.context = SimpleNamespace(screen_resolution=(1280, 720))
+            session.client_version = "18.1"
+            session.recognizer = SimpleNamespace(building_model=None)
+            session.deadline = session.task_deadline = __import__("time").monotonic() + 600
+            session._validate_snapshot = lambda snapshot: None if snapshot is session.last_snapshot else (_ for _ in ()).throw(FlowError("stale"))
+            original_observe = session.observe
+            def observed(label="observe", **options):
+                result = original_observe(label, **options)
+                if result is frames[4]:
+                    result.observations["observed_at_monotonic"] = __import__("time").monotonic()
+                return result
+            session.observe = observed
+            input_calls = []
+            session.frozen_battle_tap = lambda point, **kw: input_calls.append(point)
+            model = SimpleNamespace(model_sha256="modelhash", detect=Mock(return_value=()),
+                                    metadata={"applicability": {"zoom": "minimum_stable",
+                                               "source_width_range": [1280, 2560],
+                                               "source_height_range": [720, 1440]},
+                                              "validation": {"status": "evaluated", "report_id": "offline-1"}})
+            core = SimpleNamespace(center=(600., 260.), confidence=.99)
+            with patch("autococ.model_vision.BuildingModel", return_value=model), \
+                    patch("autococ.prepared_battle.measure_cloud_cover", return_value={"obscured": False}), \
+                    patch("autococ.images.read_frame", return_value=np.zeros((720, 1280, 3), dtype=np.uint8)), \
+                    patch("autococ.model_vision.infer_core_geometry", return_value=core):
+                result = run_battle(session)
+            self.assertEqual(result.status, "succeeded", result.reason)
+            self.assertEqual(len(input_calls), 3)
+            self.assertEqual(model.detect.call_count, 2)  # preload and this battle
+            self.assertTrue(result.metrics["vision_agent"]["plan_ready"])
+            self.assertTrue(result.metrics["vision_agent"]["input_sent"])
+            self.assertTrue(result.metrics["vision_agent"]["consumption_verified"])
+            self.assertTrue(result.metrics["returned_home"])
 
     def test_two_edge_round_accepts_loss_capped_inventory_and_first_low_loot_opponent(self):
         frames = complete_frames()

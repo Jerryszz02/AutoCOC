@@ -11,7 +11,7 @@ from queue import Queue
 from threading import Event, Thread
 from uuid import uuid4
 
-from .config import AppConfig, ProfileConfig, load_config
+from .config import AppConfig, ProfileConfig, VisionAgentConfig, load_config, load_vision_agent
 from .device import DeviceManager
 from .strategies import STRATEGIES
 from .errors import ConfigError, StopRequested
@@ -63,13 +63,14 @@ class RunOptions:
     dry_run: bool = True
     strategy: str = "verified"
     routine: RoutineConfig | None = None
+    vision_agent: VisionAgentConfig | None = None
 
     @classmethod
     def from_config(cls, config: AppConfig) -> "RunOptions":
         profile = config.profiles.get("core-loop", next(iter(config.profiles.values())))
         return cls(profile.enabled_tasks, config.stop.max_runs, config.stop.max_duration_sec,
                    config.battle.min_expected_resources, config.battle.max_searches, config.adb.manual_serial,
-                   strategy=config.battle.strategy, routine=config.routine)
+                   strategy=config.battle.strategy, routine=config.routine, vision_agent=config.vision_agent)
 
     def validate(self) -> None:
         if not self.tasks or self.tasks[0] != "launch":
@@ -86,6 +87,8 @@ class RunOptions:
             raise ConfigError("对战策略无效")
         if self.routine is not None:
             self.routine.validate()
+        if self.vision_agent is not None and not isinstance(self.vision_agent, VisionAgentConfig):
+            raise ConfigError("视觉代理配置无效")
 
 
 def desktop_config(path: Path, options: RunOptions) -> AppConfig:
@@ -107,7 +110,8 @@ def desktop_config(path: Path, options: RunOptions) -> AppConfig:
                    reporting=replace(config.reporting, write_markdown=True),
                    profiles={"desktop": ProfileConfig(tuple(task for task in options.tasks if task in
                                                              {"launch", "collect", "request", "donate", "train", "battle", "recover"}))},
-                   routine=options.routine)
+                   routine=options.routine,
+                   vision_agent=options.vision_agent or config.vision_agent)
 
 
 def settings_path(config_path: Path) -> Path:
@@ -139,6 +143,8 @@ def load_options(path: Path, config: AppConfig) -> RunOptions:
         payload["dry_run"] = True
         if payload.get("routine") is not None:
             payload["routine"] = routine_from_dict(payload["routine"])
+        if payload.get("vision_agent") is not None:
+            payload["vision_agent"] = load_vision_agent(payload["vision_agent"])
         options = RunOptions(**payload)
         options.validate()
         if options.routine is None:
@@ -179,6 +185,17 @@ def report_text(payload: dict) -> str:
             lines.extend([f"{TASK_LABELS.get(result.get('task'), result.get('task'))} · "
                           f"{STATUS_LABELS.get(result.get('status'), result.get('status'))}",
                           display_reason(str(result.get("reason", "未知"))), ""])
+            agent = (result.get("metrics") or {}).get("vision_agent")
+            if isinstance(agent, dict):
+                def phase(key):
+                    return "已确认" if agent.get(key) is True else "未确认"
+                lines.append(f"计划就绪：{phase('plan_ready')}；整批输入已发出：{phase('input_sent')}；"
+                             f"消费已核验：{phase('consumption_verified')}")
+                elapsed, limit = agent.get("burst_elapsed_sec"), agent.get("burst_limit_sec")
+                lines.append(f"整批输入耗时 / 上限：{elapsed if elapsed is not None else '未知'} / "
+                             f"{limit if limit is not None else '未知'} 秒")
+                lines.append("战斗完成：" + ("已确认" if (result.get("metrics") or {}).get("returned_home") is True
+                             and (result.get("metrics") or {}).get("rounds_completed") == 1 else "未确认"))
     if payload.get("mode") == "live":
         lines.append("战斗：完成 {battles_completed} / 胜利 {battles_won} / 目标达成 {goals_completed}".format(
             battles_completed=payload.get("battles_completed", 0),

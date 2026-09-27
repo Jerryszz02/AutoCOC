@@ -54,8 +54,19 @@ def run_battle(session: GameSession) -> TaskResult:
     }
     status, reason = "failed", "battle_verification_incomplete"
     settlement_error: str | None = None
+    vision_mode = bool(getattr(session.config, "vision_agent", None) and session.config.vision_agent.enabled)
     custom_mode = bool(session.config.battle.strategy_file)
-    line_mode = custom_mode or is_line_strategy(session.config.battle.strategy)
+    line_mode = vision_mode or custom_mode or is_line_strategy(session.config.battle.strategy)
+    vision_model = None
+    vision_decider = None
+    vision_guides = ()
+    if vision_mode:
+        session.prepared_battle_receipt = None
+        metrics["vision_agent"] = {"mode": session.config.vision_agent.mode, "status": "not_started",
+                                   "plan_ready": False, "input_sent": False,
+                                   "consumption_verified": False, "burst_elapsed_sec": None,
+                                   "burst_limit_sec": None, "input_count": 0,
+                                   "burst_pass": False, "attempted_placements": 0}
     definition = None
     prepared_army = None
     task_buildings = {session.config.battle.target_building} if session.config.battle.target_building else set()
@@ -77,6 +88,46 @@ def run_battle(session: GameSession) -> TaskResult:
             callback(phase)
     metrics["strategy"] = session.config.battle.strategy
     try:
+        if vision_mode:
+            if session.config.vision_agent.mode != "continuous":
+                raise CapabilityUnavailable("Battle enhancement mode has not passed action-specific acceptance")
+            from .model_vision import BuildingModel, ModelUnavailable
+            from .jev import JevDecider, load_guides
+            setting = session.config.vision_agent
+            directory = Path(setting.model_dir)
+            if not setting.model_dir:
+                raise CapabilityUnavailable("Building model directory is not configured")
+            if not directory.is_absolute():
+                directory = session.config.source_path.resolve().parent / directory
+            try:
+                if getattr(session, "vision_model_error", None):
+                    raise ModelUnavailable(session.vision_model_error)
+                vision_model = getattr(session, "prepared_building_model", None)
+                if vision_model is None:
+                    vision_model = BuildingModel(directory / "building", client_version=session.client_version)
+                validation = vision_model.metadata.get("validation", {})
+                if (validation.get("status") != "evaluated" or
+                        not isinstance(validation.get("report_id"), str) or
+                        not validation["report_id"]):
+                    raise ModelUnavailable("Building model has no recorded evaluation report")
+                # Load and warm local inference before starting enemy search.
+                import numpy as np
+                applicability = vision_model.metadata["applicability"]
+                source_width = max(1, int(applicability["source_width_range"][0]))
+                source_height = max(1, int(applicability["source_height_range"][0]))
+                vision_model.detect(np.zeros((source_height, source_width, 3), dtype=np.uint8),
+                                    captured_at=time.monotonic())
+            except (ModelUnavailable, OSError, ValueError) as exc:
+                raise CapabilityUnavailable(f"Building model unavailable: {exc}") from exc
+            from .prepared_battle import validate_prepared_capability
+            validate_prepared_capability(session, vision_model)
+            vision_decider = JevDecider(enabled=setting.jev_enabled, model=setting.jev_model,
+                                       timeout_sec=setting.jev_timeout_sec)
+            if setting.guide_file:
+                guide_path = Path(setting.guide_file)
+                if not guide_path.is_absolute():
+                    guide_path = session.config.source_path.resolve().parent / guide_path
+                vision_guides = load_guides(guide_path)
         if custom_mode:
             from .strategy_config import load_strategy
             path = Path(session.config.battle.strategy_file)
@@ -213,7 +264,11 @@ def run_battle(session: GameSession) -> TaskResult:
         scout.observations["target_progress"] = goal_progress if isinstance(goal_progress, dict) else {}
         progress("执行打法")
         try:
-            if definition is None:
+            if vision_mode:
+                from .prepared_battle import run_prepared_battle
+                deployed = run_prepared_battle(session, scout, model=vision_model,
+                                               decider=vision_decider, guides=vision_guides)
+            elif definition is None:
                 deployed = deploy_army(session, scout)
             else:
                 from .strategy_execution import execute_strategy
@@ -225,7 +280,8 @@ def run_battle(session: GameSession) -> TaskResult:
             issued = exc.partial_receipt.get("issued_placements", 0)
             offensive = exc.partial_receipt.get("offensive_actions", units)
             verified_partial = exc.partial_receipt.get("verified") is True and type(offensive) is int and offensive > 0
-            attempted_line = line_mode and type(issued) is int and issued > 0
+            attempted_line = line_mode and (type(issued) is int and issued > 0 or
+                                           vision_mode and exc.partial_receipt.get("attempted_placements", 0) > 0)
             if (last is None or not (verified_partial or attempted_line)
                     or last.scene not in {"enemy_village", "battle", "settlement"}):
                 raise
@@ -237,8 +293,27 @@ def run_battle(session: GameSession) -> TaskResult:
         evidence.append(deployed.screenshot_path)
         deployment = deployed.observations.get("deployment")
         metrics["deployment"] = deployment
+        if vision_mode and isinstance(deployment, dict):
+            metrics["vision_agent"].update(
+                status="verified" if deployment.get("verified") is True else "incomplete",
+                plan_ready=bool(deployment.get("plan_id")),
+                input_sent=deployment.get("input_sent") is True,
+                consumption_verified=deployment.get("verified") is True,
+                burst_pass=deployment.get("burst_pass") is True,
+                attempted_placements=deployment.get("attempted_placements", 0),
+                burst_elapsed_sec=deployment.get("burst_elapsed_sec"),
+                burst_limit_sec=deployment.get("burst_limit_sec"),
+                input_count=deployment.get("input_count", 0))
+            metrics["vision_agent"]["decision"] = {
+                "candidate_id": deployment.get("candidate_id"),
+                "source": deployment.get("decision_source"),
+                "reason": deployment.get("decision_reason"),
+                "model": deployment.get("decision_model"),
+                "elapsed_sec": deployment.get("decision_elapsed_sec"),
+                "confidence": deployment.get("decision_confidence")}
         _require_scene(deployed, {"enemy_village", "battle", "settlement"})
-        cleanup_only = line_mode and "deployment_error" in metrics
+        cleanup_only = line_mode and ("deployment_error" in metrics or vision_mode and
+                                      isinstance(deployment, dict) and deployment.get("verified") is not True)
         if not isinstance(deployment, dict) or not cleanup_only and deployment.get("verified") is not True:
             raise FlowError("Deployment has no verified receipt")
         positive_actions = deployment.get("offensive_actions") if custom_mode else deployment.get("deployed_units")
@@ -321,6 +396,8 @@ def run_battle(session: GameSession) -> TaskResult:
         observed_stars = _verified_stars(metrics["settlement_observed"])
         metrics.update(returned_home=True, rounds_completed=1,
                        victory=observed_stars > 0 if type(observed_stars) is int and 0 <= observed_stars <= 3 else None)
+        if vision_mode:
+            progress("战斗完成")
         metrics["resources_after"] = home_after.observations.get("resources")
         if line_mode:
             observed = metrics["settlement_observed"] or {}
@@ -355,6 +432,8 @@ def run_battle(session: GameSession) -> TaskResult:
                     raise FlowError("Gem balance changed during battle or could not be reverified")
             if deployment.get("completed") is not True:
                 raise FlowError(metrics.get("deployment_error") or "Line troop/hero deployment is incomplete")
+            if vision_mode:
+                metrics["vision_agent"]["status"] = "battle_completed"
             session.event("battle_round_verified", settlement_frame=str(settlement_frame.screenshot_path),
                           home_frame=str(home_after.screenshot_path), victory=metrics["victory"])
             completed_reason = ("strategy_actions_settlement_and_return_verified" if custom_mode else
@@ -390,6 +469,8 @@ def run_battle(session: GameSession) -> TaskResult:
         if isinstance(exc, CapabilityUnavailable):
             status = "not_supported"
         reason = settlement_error or str(exc)
+        if vision_mode and metrics["vision_agent"]["status"] == "not_started":
+            metrics["vision_agent"]["status"] = "unavailable" if isinstance(exc, CapabilityUnavailable) else "failed"
         if settlement_error is not None:
             metrics["settlement_validation_error"] = settlement_error
             if str(exc) != settlement_error:

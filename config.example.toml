@@ -20,6 +20,8 @@ report_dir = "reports"
 step_timeout_sec = 10
 task_timeout_sec = 300
 poll_interval_sec = 1.0
+# 0 uses uncompressed local PNG encoding (MuMu or ADB raw); 1 preserves the old default.
+png_compression_level = 1
 dry_run = false
 
 [game]
@@ -44,6 +46,20 @@ provider = "auto"
 language = "zh"
 confidence_threshold = 0.75
 roi_padding = 4
+
+# Explicit opt-in. Requires local scene/building models and an accepted layout profile.
+# See docs/VISION_AGENT.md. Credentials belong in TYPESAFE_API_KEY, never this file.
+[vision_agent]
+enabled = false
+model_dir = ""
+layout_profile = ""
+preparation_reserve_sec = 5.0
+mode = "continuous"
+evidence_limit_mb = 256
+jev_enabled = false
+jev_model = "jev-1.13.0"
+jev_timeout_sec = 2.0
+guide_file = ""
 
 [profiles.core-loop]
 enabled_tasks = ["launch", "collect", "request", "donate", "battle"]

@@ -9,7 +9,8 @@ import unittest
 from unittest.mock import patch
 
 from autococ.config import ProfileConfig, load_config
-from autococ.reporting import DecisionTrace, RunStats, TaskResult, capture_run_provenance, resource_metrics, summarize_run, write_report
+from autococ.reporting import (DecisionTrace, RunStats, TaskResult, capture_run_provenance,
+                               resource_metrics, summarize_run, vision_agent_metrics, write_report)
 
 
 def success(task: str, **metrics: object) -> TaskResult:
@@ -17,6 +18,45 @@ def success(task: str, **metrics: object) -> TaskResult:
 
 
 class ReportingTests(unittest.TestCase):
+    def test_vision_agent_report_keeps_failed_partial_and_unknown_attempts(self) -> None:
+        complete = {"mode": "continuous", "status": "consumption_verified", "plan_ready": True,
+                    "input_sent": True, "consumption_verified": True,
+                    "burst_elapsed_sec": 1.4, "burst_limit_sec": 1.5, "input_count": 2}
+        partial = {**complete, "status": "input_uncertain", "input_sent": False,
+                   "consumption_verified": False, "burst_elapsed_sec": .2}
+        unknown = {**complete, "status": "post_observation_failed", "input_sent": True,
+                   "consumption_verified": None, "burst_elapsed_sec": None}
+        inflated_limit = {**complete, "burst_elapsed_sec": 2, "burst_limit_sec": 10}
+        stats = RunStats(task_results=[
+            TaskResult("battle", "failed", "lost battle", metrics={"vision_agent": complete}),
+            TaskResult("battle", "failed", "partial input", metrics={"vision_agent": partial}),
+            TaskResult("battle", "cancelled", "post image missing", metrics={"vision_agent": unknown}),
+            TaskResult("battle", "failed", "bad limit", metrics={"vision_agent": inflated_limit}),
+        ])
+        summary = vision_agent_metrics(stats)
+        self.assertEqual(summary["attempts"], 4)
+        self.assertEqual(summary["within_burst_limit"], 1)
+        self.assertEqual(summary["not_within_burst_limit"], 3)
+        self.assertEqual([item["speed_status"] for item in summary["details"]],
+                         ["passed", "failed", "unknown", "failed"])
+        with TemporaryDirectory() as temp:
+            report = write_report(Path(temp), stats)
+            document = report.read_text(encoding="utf-8")
+            payload = json.loads(report.with_suffix(".json").read_text(encoding="utf-8"))
+            self.assertIn("Full batches within frozen limit: 1", document)
+            self.assertIn("speed=unknown", document)
+            self.assertIsNone(payload["vision_agent_metrics"]["details"][2]["burst_elapsed_sec"])
+
+    def test_simulated_vision_agent_attempt_does_not_claim_live_speed_pass(self) -> None:
+        metrics = {"mode": "continuous", "plan_ready": True, "input_sent": True,
+                   "consumption_verified": True, "burst_elapsed_sec": 1, "burst_limit_sec": 1.5,
+                   "input_count": 2}
+        stats = RunStats(mode="dry-run", task_results=[TaskResult("battle", "simulated", "offline",
+                                                                  metrics={"vision_agent": metrics})])
+        summary = vision_agent_metrics(stats)
+        self.assertEqual(summary["within_burst_limit"], 0)
+        self.assertEqual(summary["details"][0]["speed_status"], "simulated")
+
     def test_success_requires_evidence(self) -> None:
         with self.assertRaisesRegex(ValueError, "evidence"):
             TaskResult("battle", "succeeded", "no exception")
@@ -306,6 +346,31 @@ class ProvenanceTests(unittest.TestCase):
             self.assertIn(provenance["effective_config_sha256"], document)
             self.assertNotIn("private-config-sentinel", document)
             self.assertNotIn("manual_serial", document)
+
+    def test_vision_model_layout_and_guide_hashes_follow_config_relative_paths(self) -> None:
+        model = self.root / "model"
+        model.mkdir()
+        (model / "weights.onnx").write_bytes(b"PRIVATE_BINARY_WEIGHTS")
+        (model / "metadata.json").write_bytes(b'{"version":1}')
+        (self.root / "layout.json").write_bytes(b"PRIVATE_LAYOUT")
+        (self.root / "guide.json").write_bytes(b"PRIVATE_GUIDE")
+        config = replace(self.config, vision_agent=replace(self.config.vision_agent, enabled=True,
+                         model_dir="model", layout_profile="layout.json", guide_file="guide.json"))
+        provenance = self.capture(config)
+        artifacts = provenance["vision_agent_artifacts"]
+        self.assertEqual(artifacts["layout_sha256"], hashlib.sha256(b"PRIVATE_LAYOUT").hexdigest())
+        self.assertEqual(artifacts["guide_sha256"], hashlib.sha256(b"PRIVATE_GUIDE").hexdigest())
+        self.assertEqual(len(artifacts["model_manifest_sha256"]), 64)
+        self.assertEqual(provenance["errors"], {})
+        report = write_report(self.root / "reports", RunStats(provenance=provenance))
+        for path in (report, report.with_suffix(".json")):
+            contents = path.read_text(encoding="utf-8")
+            self.assertNotIn("PRIVATE_BINARY_WEIGHTS", contents)
+            self.assertNotIn("PRIVATE_LAYOUT", contents)
+            self.assertNotIn("PRIVATE_GUIDE", contents)
+        (model / "weights.onnx").write_bytes(b"CHANGED_WEIGHTS")
+        self.assertNotEqual(artifacts["model_manifest_sha256"],
+                            self.capture(config)["vision_agent_artifacts"]["model_manifest_sha256"])
 
 
 if __name__ == "__main__":

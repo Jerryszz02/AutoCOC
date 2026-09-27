@@ -138,10 +138,12 @@ def main(argv: list[str] | None = None) -> int:
             if config.mumu is not None:
                 native = MuMuClient(config.mumu.install_dir, config.mumu.instance_index, device.serial,
                                     config.game.package_name, target.logical_id,
-                                    timeout_sec=config.runtime.step_timeout_sec)
+                                    timeout_sec=config.runtime.step_timeout_sec,
+                                    png_compression_level=config.runtime.png_compression_level)
             capture = CaptureClient(manager.adb, device.serial, config.runtime.step_timeout_sec,
                                     screenshot_display_id=target.physical_id, input_display_id=target.logical_id,
-                                    native=native)
+                                    native=native, prefer_raw=config.runtime.png_compression_level == 0,
+                                    png_compression_level=config.runtime.png_compression_level)
             stamp = f"{datetime.now():%Y%m%d-%H%M%S-%f}-{uuid4().hex[:8]}"
             screenshot = capture.capture_screenshot_artifact(config.runtime.screenshot_dir / f"{args.command}-{stamp}.png")
         finally:
