@@ -207,11 +207,13 @@ class FlowRunner:
                     break
         except KeyboardInterrupt:
             if active_task is not None:
+                from .reporting import interrupted_battle_metrics
                 frame = session.last_snapshot if session is not None else None
                 stats.record_task(TaskResult(active_task, "failed", "interrupted by user before verification completed",
                                             elapsed_sec=time.monotonic() - started,
                                             evidence=[frame.screenshot_path] if frame else [],
-                                            metrics={"interrupted": True}))
+                                            metrics={"interrupted": True, **(interrupted_battle_metrics(session)
+                                                     if active_task == "battle" else {})}))
             stats.stop_reason = "interrupted by user"
         except Exception as exc:
             stats.record_task(TaskResult("initialization", "failed", str(exc)))

@@ -20,3 +20,10 @@ dist/
 /reports/
 /screenshots/
 *.log
+
+# Local visual model packages and independent datasets are not source code.
+/models/
+/datasets/
+*.onnx
+*.pt
+*.pth

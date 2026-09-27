@@ -119,6 +119,19 @@ class GoalTests(unittest.TestCase):
 
 
 class DailyRunnerTests(unittest.TestCase):
+    def test_cancelled_vision_battle_retains_partial_receipt(self):
+        receipt = {"plan_id": "frozen", "input_count": 5, "attempted_placements": 1,
+                   "input_sent": False, "verified": False, "actions": [{"status": "input_sent"}]}
+        self.session.prepared_battle_receipt = receipt
+        with patch("autococ.daily.read_progress", return_value=GoalProgress(False)), \
+                patch("autococ.combat.run_battle", side_effect=KeyboardInterrupt):
+            stats = self.runner().run_routine(RoutineConfig((TaskSpec("farm", "resources"),)))
+        result = stats.task_results[-1]
+        self.assertEqual(result.status, "cancelled")
+        self.assertEqual(result.metrics["deployment"], receipt)
+        self.assertFalse(result.metrics["vision_agent"]["consumption_verified"])
+        self.assertEqual(stats.battles_completed, 0)
+
     def setUp(self):
         self.temp=TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         root=Path(self.temp.name);path=root/"config.toml";path.write_text("")

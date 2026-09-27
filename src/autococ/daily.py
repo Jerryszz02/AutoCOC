@@ -244,9 +244,11 @@ def run_routine(runner, routine: RoutineConfig) -> RunStats:
             active = None
         stats.stop_reason = "daily task queue finished"
     except (StopRequested, KeyboardInterrupt):
+        from .reporting import interrupted_battle_metrics
         frame = getattr(session, "last_snapshot", None)
         record(TaskResult(active.id if active else "daily", "cancelled", "interrupted by user",
-                          evidence=[frame.screenshot_path] if frame else []))
+                          evidence=[frame.screenshot_path] if frame else [],
+                          metrics=interrupted_battle_metrics(session) if active and active.kind in BATTLE_KINDS else {}))
         stats.stop_reason = "interrupted by user"
     except CapabilityUnavailable as exc:
         # Capability issues outside the progress reader still require a verified safe home.

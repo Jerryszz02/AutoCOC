@@ -13,6 +13,20 @@ from autococ.routine_config import GoalConfig, RoutineConfig, TaskSpec
 
 
 class GUITests(unittest.TestCase):
+    def test_vision_agent_settings_reach_worker_and_persist(self):
+        self.app.agent_enabled.set(True)
+        self.app.agent_values["model_dir"].set("models/current")
+        self.app.agent_values["layout_profile"].set("profiles/calibrated.json")
+        self.app.agent_values["preparation_reserve_sec"].set("6")
+        self.app._save()
+        loaded = load_options(settings_path(self.path), load_config(self.path))
+        self.assertTrue(loaded.vision_agent.enabled)
+        self.assertEqual(loaded.vision_agent.preparation_reserve_sec, 6)
+        self.app.start()
+        options = self.controller.start.call_args.args[1]
+        self.assertEqual(options.vision_agent.model_dir, "models/current")
+        self.assertTrue(options.dry_run)
+
     @classmethod
     def setUpClass(cls):
         cls.interpreter = tk.Tk()

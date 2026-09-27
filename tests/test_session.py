@@ -11,6 +11,7 @@ from autococ.adb import ADBResult
 from autococ.config import MuMuConfig, load_config
 from autococ.device import DisplayTarget
 from autococ.errors import AdbError, CaptureError, DeviceConnectionError, FlowError, MuMuDisplayUnavailable, StopRequested
+from autococ.evidence import EvidenceBudget
 from autococ.locator import Bounds, LocatorResult
 from autococ.scene import SceneSnapshot
 from autococ.session import GameSession
@@ -64,6 +65,30 @@ class SessionTests(unittest.TestCase):
     def launch_calls(self):
         return [call for call in self.adb.run.call_args_list
                 if call.args and call.args[0] != ["shell", "dumpsys", "package", self.config.game.package_name]]
+
+    def test_bounded_wait_recycles_only_intermediate_polls_and_retains_result(self):
+        self.session.evidence_budget = EvidenceBudget(self.session.directory / "frames", 300)
+        selected = self.session.observe("selected")
+        scenes = iter(["unknown"] * 30 + ["battle_result"])
+        self.recognizer.recognize.side_effect = lambda path: SceneSnapshot(next(scenes), .95, path)
+        result = self.session.wait_for({"battle_result"}, timeout_sec=20)
+        self.assertTrue(selected.screenshot_path.exists())
+        self.assertTrue(result.screenshot_path.exists())
+        self.assertEqual(len(list((self.session.directory / "frames").glob("*.png"))), 2)
+        self.assertEqual(result.observations["evidence_retention"], "retained")
+        self.assertEqual(self.events()[-1]["kind"], "wait_evidence_retained")
+
+    def test_bounded_wait_stop_preserves_last_poll(self):
+        self.session.evidence_budget = EvidenceBudget(self.session.directory / "frames", 300)
+        self.session.stop_event = Event()
+        def recognize(path):
+            self.session.stop_event.set()
+            return SceneSnapshot("unknown", .95, path)
+        self.recognizer.recognize.side_effect = recognize
+        with self.assertRaises(StopRequested):
+            self.session.wait_for({"battle_result"})
+        self.assertTrue(self.session.last_snapshot.screenshot_path.exists())
+        self.assertEqual(self.session.last_snapshot.observations["evidence_retention"], "retained")
 
     def package_calls(self):
         return [call for call in self.adb.run.call_args_list
@@ -501,6 +526,48 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(session.client_version, "unknown")
         self.assertIsNone(session.client_version_code)
         self.assertEqual(len(self.package_calls()), 1)
+
+    def test_vision_bundle_loads_distinct_scene_and_building_packages_before_search(self) -> None:
+        config = replace(self.config, vision_agent=replace(self.config.vision_agent,
+                         enabled=True, model_dir=str(self.root / "models")))
+        scene_model, building_model = Mock(), Mock()
+        for model in (scene_model, building_model):
+            model.metadata = {"validation": {"status": "evaluated", "report_id": "offline-1"}}
+        with patch("autococ.session.resolve_game_display", return_value=DisplayTarget(2, "physical-two")), \
+                patch("autococ.session.ScreenshotRecognizer") as recognizer, \
+                patch("autococ.model_vision.SceneModel", return_value=scene_model) as load_scene, \
+                patch("autococ.model_vision.BuildingModel", return_value=building_model) as load_building:
+            session = GameSession.connect(config, self.adb, "test-device", self.root / "vision-run", launch=False)
+        self.assertEqual(load_scene.call_args.args[0], self.root / "models" / "scene")
+        self.assertEqual(load_building.call_args.args[0], self.root / "models" / "building")
+        self.assertIs(session.prepared_building_model, building_model)
+        self.assertIs(recognizer.return_value.scene_model, scene_model)
+        self.assertIsNone(session.vision_model_error)
+
+    def test_frozen_input_rejects_scaled_point_outside_physical_display(self) -> None:
+        self.session.context.screen_resolution = (640, 360)
+        self.session._active_frozen_plan = ("p", self.clock.now + 5, (1279, 719))
+        with self.assertRaisesRegex(FlowError, "physical display"):
+            self.session.frozen_battle_tap((1279, 719), timeout_sec=1,
+                                           reason="prepared", plan_id="p")
+        self.adb.run.assert_not_called()
+
+    def test_frozen_input_recomputes_transport_timeout_immediately_before_send(self) -> None:
+        self.session.context.screen_resolution = (1280, 720)
+        self.session._active_frozen_plan = ("p", self.clock.now + 5, (100, 200))
+        with patch.object(self.session.context, "_scale_point", side_effect=lambda point: (
+                self.clock.advance(4.5) or point)):
+            self.session.frozen_battle_tap((100, 200), timeout_sec=2,
+                                           reason="prepared", plan_id="p")
+        self.assertAlmostEqual(self.adb.run.call_args.kwargs["timeout_sec"], .5)
+        self.adb.run.reset_mock()
+        self.session._active_frozen_plan = ("p", self.clock.now + .25, (100, 200))
+        with patch.object(self.session.context, "_scale_point", side_effect=lambda point: (
+                self.clock.advance(.3) or point)):
+            with self.assertRaisesRegex(FlowError, "expired before send"):
+                self.session.frozen_battle_tap((100, 200), timeout_sec=1,
+                                               reason="prepared", plan_id="p")
+        self.adb.run.assert_not_called()
 
     def test_native_startup_reresolves_display_after_renderer_attachment_delay(self) -> None:
         config = replace(self.config, mumu=MuMuConfig(self.root, 1))

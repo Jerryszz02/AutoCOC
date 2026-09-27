@@ -108,6 +108,66 @@ class CaptureTests(unittest.TestCase):
             adb.run_bytes.assert_called_once_with(["exec-out", "screencap", "-d", "physical-two"],
                                                    serial="target", timeout_sec=10)
 
+    def test_raw_level_zero_preserves_pixels_and_records_frame_timing(self) -> None:
+        import cv2
+        import numpy as np
+
+        rgba = np.array([[[1, 2, 3, 4], [5, 6, 7, 8]]], dtype=np.uint8)
+        adb = Mock()
+        adb.run_bytes.return_value = struct.pack("<IIII", 2, 1, 1, 0) + rgba.tobytes()
+        with TemporaryDirectory() as temp, patch("cv2.imencode", wraps=cv2.imencode) as encoder:
+            capture = CaptureClient(adb, "target", prefer_raw=True, png_compression_level=0)
+            first = capture.capture_screenshot_artifact(Path(temp) / "screen.png")
+            decoded = cv2.imdecode(np.frombuffer(first.path.read_bytes(), dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+            np.testing.assert_array_equal(cv2.cvtColor(decoded, cv2.COLOR_BGRA2RGBA), rgba)
+            second = capture.capture_screenshot_artifact(Path(temp) / "screen.png")
+        self.assertEqual(encoder.call_args.args[2], [cv2.IMWRITE_PNG_COMPRESSION, 0])
+        self.assertNotEqual(first.frame_id, second.frame_id)
+        self.assertLessEqual(first.requested_at_monotonic, first.pixels_ready_at_monotonic)
+        self.assertLessEqual(first.pixels_ready_at_monotonic, first.payload_ready_at_monotonic)
+        self.assertLessEqual(first.payload_ready_at_monotonic, first.published_at_monotonic)
+        self.assertAlmostEqual(first.capture_elapsed_sec,
+                               first.pixels_elapsed_sec + first.encode_elapsed_sec + first.handoff_elapsed_sec)
+
+    def test_raw_png_zero_and_one_decode_to_identical_pixels(self) -> None:
+        import cv2
+        import numpy as np
+
+        rgba = np.arange(8 * 6 * 4, dtype=np.uint8).reshape(6, 8, 4)
+        raw = struct.pack("<IIII", 8, 6, 1, 0) + rgba.tobytes()
+        images = []
+        with TemporaryDirectory() as temp:
+            for level in (0, 1):
+                adb = Mock()
+                adb.run_bytes.return_value = raw
+                path = CaptureClient(adb, "target", prefer_raw=True,
+                                     png_compression_level=level).capture_screenshot(Path(temp) / f"{level}.png")
+                images.append(cv2.imread(str(path), cv2.IMREAD_UNCHANGED))
+        np.testing.assert_array_equal(images[0], images[1])
+
+    def test_unsupported_raw_does_not_silently_discard_requested_compression(self) -> None:
+        with TemporaryDirectory() as temp:
+            path = Path(temp) / "screen.png"
+            path.write_bytes(b"previous frame")
+            adb = Mock()
+            adb.run_bytes.return_value = b"unsupported raw"
+            with self.assertRaisesRegex(CaptureError, "cannot honor compression level"):
+                CaptureClient(adb, "target", prefer_raw=True, png_compression_level=0).capture_screenshot(path)
+            adb.run_bytes.assert_called_once()
+            self.assertEqual(path.read_bytes(), b"previous frame")
+
+    def test_custom_compression_rejects_device_encoded_png_path(self) -> None:
+        adb = Mock()
+        capture = CaptureClient(adb, "target", png_compression_level=0)
+        with self.assertRaisesRegex(CaptureError, "requires raw or native"):
+            capture.capture_screenshot("screen.png")
+        adb.run_bytes.assert_not_called()
+
+    def test_invalid_compression_level_is_rejected_before_capture(self) -> None:
+        for level in (-1, 10, True, 1.0, "0"):
+            with self.subTest(level=level), self.assertRaises(ValueError):
+                CaptureClient(Mock(), "target", png_compression_level=level)
+
     def test_12_byte_header_and_16_byte_header_truncated_by_four_bytes_use_png(self) -> None:
         import cv2
         import numpy as np
@@ -151,6 +211,9 @@ class CaptureTests(unittest.TestCase):
             adb.run_bytes.return_value = png
             artifact = CaptureClient(adb, "target").capture_screenshot_artifact(Path(temp) / "screen.png")
             self.assertEqual(artifact.capture_method, "png")
+            self.assertIsNone(artifact.pixels_ready_at_monotonic)
+            self.assertIsNone(artifact.encode_elapsed_sec)
+            self.assertLessEqual(artifact.payload_ready_at_monotonic, artifact.published_at_monotonic)
             self.assertEqual(artifact.path.read_bytes(), png)
             adb.run_bytes.assert_called_once_with(["exec-out", "screencap", "-p"], serial="target", timeout_sec=10)
 
@@ -166,7 +229,7 @@ class CaptureTests(unittest.TestCase):
                 adb.run_bytes.side_effect = [raw, png]
                 capture = CaptureClient(adb, "target", step_timeout_sec=5, prefer_raw=True,
                                         screenshot_display_id="physical-two")
-                with patch("autococ.capture.time.monotonic", side_effect=[100, 102, 103]):
+                with patch("autococ.capture.time.monotonic", side_effect=[100, 102, 102, 102.5, 103]):
                     result = capture.capture_screenshot_artifact(Path(temp) / "screen.png")
                 self.assertEqual(result.capture_method, "png_fallback")
                 self.assertEqual(result.capture_elapsed_sec, 3)
@@ -182,7 +245,7 @@ class CaptureTests(unittest.TestCase):
             adb = Mock()
             adb.run_bytes.return_value = (struct.pack("<IIII", 2, 2, 1, 0) + bytes(16))[:-4]
             capture = CaptureClient(adb, "target", step_timeout_sec=5, prefer_raw=True)
-            with patch("autococ.capture.time.monotonic", side_effect=[100, 105]):
+            with patch("autococ.capture.time.monotonic", side_effect=[100, 105, 105]):
                 with self.assertRaisesRegex(CaptureError, "budget exhausted"):
                     capture.capture_screenshot(path)
             adb.run_bytes.assert_called_once()

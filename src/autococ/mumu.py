@@ -14,7 +14,9 @@ from pathlib import Path
 import subprocess
 from tempfile import TemporaryDirectory
 import time
+from uuid import uuid4
 
+from .capture import _validated_png_compression_level
 from .errors import DeviceConnectionError, FlowError, MuMuDisplayUnavailable
 
 
@@ -57,12 +59,15 @@ def verify_instance(root: Path, index: int, serial: str, *, timeout_sec: float) 
 
 class MuMuClient:
     def __init__(self, root: Path, index: int, serial: str, package: str, display: int,
-                 *, timeout_sec: float = 10) -> None:
+                 *, timeout_sec: float = 10, png_compression_level: int = 1) -> None:
+        png_compression_level = _validated_png_compression_level(png_compression_level)
         root = root.resolve()
         dll = verify_instance(root, index, serial, timeout_sec=timeout_sec)
         context = multiprocessing.get_context("spawn")
         self.connection, child = context.Pipe()
-        self.process = context.Process(target=_worker, args=(child, str(dll), str(root), index, package, display),
+        self.process = context.Process(target=_worker,
+                                       args=(child, str(dll), str(root), index, package, display,
+                                             png_compression_level),
                                        daemon=True, name="AutoCOC-MuMu")
         self.closed = False
         self.timeout_sec = timeout_sec
@@ -102,7 +107,8 @@ class MuMuClient:
             raise
 
     def screenshot(self, output_path: Path, *, timeout_sec: float):
-        from .capture import ScreenshotCapture
+        from .capture import ScreenshotCapture, png_size
+        from .errors import CaptureError
 
         started = time.monotonic()
         path = Path(output_path)
@@ -112,11 +118,41 @@ class MuMuClient:
         with TemporaryDirectory(prefix=".mumu-", dir=path.parent) as temporary:
             fresh = Path(temporary) / "screen.png"
             response = self._request("capture", str(fresh.resolve()), timeout_sec=timeout_sec)
+            received_at = time.monotonic()
             if not fresh.is_file():
                 raise FlowError("MuMu worker returned without a fresh screenshot")
+            try:
+                with fresh.open("rb") as source:
+                    dimensions = png_size(source.read(24))
+                    source.seek(-12, 2)
+                    ending = source.read(12)
+            except (OSError, CaptureError) as exc:
+                raise FlowError("MuMu worker returned an invalid screenshot") from exc
+            if ending != b"\x00\x00\x00\x00IEND\xaeB`\x82":
+                raise FlowError("MuMu worker returned an incomplete screenshot")
+            if (type(response.get("width")) is not int or type(response.get("height")) is not int or
+                    dimensions != (response["width"], response["height"])):
+                raise FlowError("MuMu screenshot dimensions do not match worker response")
+            pixels_ready = response.get("pixels_ready_at_monotonic", received_at)
+            encode_elapsed = response.get("encode_elapsed_sec")
+            if (type(pixels_ready) not in (int, float) or not started <= pixels_ready <= received_at or
+                    (encode_elapsed is not None and
+                     (type(encode_elapsed) not in (int, float) or not 0 <= encode_elapsed <= received_at - pixels_ready))):
+                raise FlowError("MuMu screenshot timing is invalid")
             fresh.replace(path)
         elapsed = time.monotonic() - started
-        return ScreenshotCapture(path, response["width"], response["height"], elapsed, "mumu_native", elapsed)
+        pixel_elapsed = max(0.0, pixels_ready - started)
+        return ScreenshotCapture(
+            path, response["width"], response["height"], elapsed, "mumu_native", elapsed,
+            requested_at_monotonic=started,
+            pixels_ready_at_monotonic=pixels_ready,
+            payload_ready_at_monotonic=pixels_ready + encode_elapsed if encode_elapsed is not None else None,
+            published_at_monotonic=started + elapsed,
+            pixels_elapsed_sec=pixel_elapsed,
+            encode_elapsed_sec=encode_elapsed,
+            handoff_elapsed_sec=max(0.0, elapsed - pixel_elapsed - (encode_elapsed or 0.0)),
+            frame_id=uuid4().hex,
+        )
 
     def tap(self, x: int, y: int) -> None:
         self._request("tap", x, y)
@@ -148,7 +184,9 @@ class MuMuClient:
 
 
 class _Renderer:
-    def __init__(self, dll: str, root: str, index: int, package: str, display: int) -> None:
+    def __init__(self, dll: str, root: str, index: int, package: str, display: int,
+                 png_compression_level: int = 1) -> None:
+        self.png_compression_level = _validated_png_compression_level(png_compression_level)
         self.lib = ctypes.CDLL(dll)
         self.package, self.display = package.encode("utf-8"), display
         self.handle = 0
@@ -201,18 +239,24 @@ class _Renderer:
         import numpy as np
 
         self.check_display()
+        pixels_started = time.monotonic()
         width, height = ctypes.c_int(self.width), ctypes.c_int(self.height)
         self.checked(self.lib.nemu_capture_display(self.handle, self.display, len(self.pixels),
                                                    ctypes.byref(width), ctypes.byref(height), self.pixels))
         if (width.value, height.value) != (self.width, self.height):
             raise FlowError("MuMu resolution changed during capture")
+        pixels_ready = time.monotonic()
         rgba = np.ctypeslib.as_array(self.pixels).reshape(self.height, self.width, 4)
         bgr = cv2.flip(cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGR), 0)
-        okay, encoded = cv2.imencode(".png", bgr, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+        okay, encoded = cv2.imencode(".png", bgr, [cv2.IMWRITE_PNG_COMPRESSION, self.png_compression_level])
         if not okay:
             raise FlowError("Unable to encode MuMu screenshot")
+        encoded_at = time.monotonic()
         Path(output_path).write_bytes(encoded.tobytes())
-        return {"width": self.width, "height": self.height}
+        return {"width": self.width, "height": self.height,
+                "pixels_started_at_monotonic": pixels_started,
+                "pixels_ready_at_monotonic": pixels_ready,
+                "encode_elapsed_sec": encoded_at - pixels_ready}
 
     def point(self, x: int, y: int) -> None:
         if type(x) is not int or type(y) is not int or not (0 <= x < self.width and 0 <= y < self.height):
@@ -294,14 +338,15 @@ class _Renderer:
             self.handle = 0
 
 
-def _worker(connection, dll: str, root: str, index: int, package: str, display: int) -> None:
+def _worker(connection, dll: str, root: str, index: int, package: str, display: int,
+            png_compression_level: int = 1) -> None:
     # Vendor DLLs write instance identifiers directly to C stdout/stderr.
     with open(os.devnull, "w") as sink:
         os.dup2(sink.fileno(), 1)
         os.dup2(sink.fileno(), 2)
     renderer = None
     try:
-        renderer = _Renderer(dll, root, index, package, display)
+        renderer = _Renderer(dll, root, index, package, display, png_compression_level)
         connection.send({"ready": True})
         while True:
             operation, args = connection.recv()

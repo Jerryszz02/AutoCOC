@@ -2,11 +2,32 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from autococ.config import BattleConfig, load_config
+from autococ.config import BattleConfig, VisionAgentConfig, load_config
 from autococ.errors import ConfigError
 
 
 class ConfigTests(unittest.TestCase):
+    def test_vision_agent_is_explicit_and_validated(self):
+        self.assertFalse(VisionAgentConfig().enabled)
+        for kwargs in ({"enabled": 1}, {"preparation_reserve_sec": float("nan")},
+                       {"preparation_reserve_sec": 0}, {"jev_timeout_sec": float("inf")},
+                       {"mode": "magic"}, {"evidence_limit_mb": False}, {"jev_model": "jev-latest"}):
+            with self.subTest(kwargs=kwargs), self.assertRaises(ConfigError):
+                VisionAgentConfig(**kwargs)
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text('[runtime]\npng_compression_level = 0\n[vision_agent]\nenabled = true\nmodel_dir = "models/current"\n', encoding="utf-8")
+            config = load_config(path)
+            self.assertTrue(config.vision_agent.enabled)
+            self.assertEqual(config.runtime.png_compression_level, 0)
+            path.write_text('[vision_agent]\nunknown_option = true\n', encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                load_config(path)
+            for value in ("-1", "10", "true", "1.5"):
+                path.write_text(f'[runtime]\npng_compression_level = {value}\n', encoding="utf-8")
+                with self.assertRaises(ConfigError):
+                    load_config(path)
+
     def test_native_transport_is_opt_in_and_requires_an_explicit_instance(self) -> None:
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.toml"

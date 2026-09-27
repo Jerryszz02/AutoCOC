@@ -9,11 +9,11 @@ import numpy as np
 def _key(path):
     path = Path(path).resolve()
     stat = path.stat()
-    return str(path), stat.st_mtime_ns, stat.st_size
+    return str(path), stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size
 
 
 @lru_cache(maxsize=2)
-def _frame(path, modified, size):
+def _frame(path, modified, changed, size):
     return cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
 
 
@@ -25,7 +25,7 @@ def read_frame(path, flags=cv2.IMREAD_COLOR):
 
 
 @lru_cache(maxsize=128)
-def _template(path, modified, size, scale):
+def _template(path, modified, changed, size, scale):
     image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
     if image is not None and scale != 1:
         image = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)

@@ -15,6 +15,72 @@ from .locator import scale_box
 from .scene import SceneSnapshot
 
 
+def attach_preparation_countdown(snapshot: SceneSnapshot,
+                                 baseline_resolution: tuple[int, int] = (1280, 720)) -> None:
+    """Use a unique, high-confidence preparation label and adjacent timer only.
+
+    This reads existing OCR on this frame, never a cached timer or a new image.
+    The capture-start timestamp is attached by GameSession, not by inference.
+    """
+    if snapshot.scene != "enemy_village":
+        return
+    battle = snapshot.observations.get("battle")
+    if not isinstance(battle, dict):
+        return
+    battle.pop("countdown_seconds", None)
+    battle.pop("countdown_evidence", None)
+    width, height = baseline_resolution
+    items = []
+    for raw in snapshot.observations.get("ocr", []):
+        if not isinstance(raw, dict):
+            continue
+        box, confidence = raw.get("bbox"), raw.get("confidence")
+        if (type(confidence) not in (int, float) or not math.isfinite(confidence) or not .9 <= confidence <= 1
+                or not isinstance(box, (tuple, list)) or len(box) != 4
+                or any(type(v) not in (int, float) or not math.isfinite(v) for v in box)
+                or not (width * .25 <= box[0] < box[2] <= width * .75
+                        and 0 <= box[1] < box[3] <= height * .20)):
+            continue
+        items.append({"text": re.sub(r"\s+", "", str(raw.get("text", "")).lower()),
+                      "bbox": box, "confidence": confidence})
+    labels = ("战斗开始倒计时", "开战倒计时", "battlestartsin")
+    anchors = [(item, prefix) for item in items for prefix in labels if item["text"].startswith(prefix)]
+    if len(anchors) != 1:
+        return
+    anchor, prefix = anchors[0]
+
+    def seconds(text):
+        text = text.strip(":：")
+        match = re.fullmatch(r"(\d{1,2})(?:秒|s|sec|seconds)?", text)
+        if match:
+            value = int(match.group(1))
+            return value if 1 <= value <= 60 else None
+        match = re.fullmatch(r"0:(\d{2})", text)
+        if match and 1 <= int(match.group(1)) < 60:
+            return int(match.group(1))
+        return None
+
+    candidates = []
+    embedded = seconds(anchor["text"][len(prefix):])
+    if embedded is not None:
+        candidates.append((embedded, anchor))
+    for item in items:
+        if item is anchor:
+            continue
+        value = seconds(item["text"])
+        box, label_box = item["bbox"], anchor["bbox"]
+        if (value is not None and 0 <= box[1] - label_box[3] <= height * .10
+                and abs((box[0] + box[2] - label_box[0] - label_box[2]) / 2) <= width * .07):
+            candidates.append((value, item))
+    if len(candidates) != 1:
+        return
+    value, timer = candidates[0]
+    battle["countdown_seconds"] = value
+    battle["countdown_evidence"] = {"frame": str(snapshot.screenshot_path), "label": anchor,
+                                      "timer": timer, "confidence": min(anchor["confidence"], timer["confidence"]),
+                                      "source": "current_frame_ocr"}
+
+
 def selected_card_bbox(path, bbox, baseline_resolution=(1280, 720)):
     """Require the closed white selection outline on the current frame."""
     image = cv2.resize(read_frame(path), (1280, 720), interpolation=cv2.INTER_AREA)

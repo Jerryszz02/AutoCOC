@@ -8,6 +8,7 @@ import struct
 from tempfile import TemporaryDirectory
 import time
 from typing import TYPE_CHECKING
+from uuid import uuid4
 import xml.etree.ElementTree as ET
 
 from .adb import ADBClient
@@ -28,12 +29,28 @@ _SCREENCAP_MULTI_DISPLAY_WARNING = (
 
 @dataclass(frozen=True)
 class ScreenshotCapture:
+    """Capture artifact; optional stages are None when a transport cannot expose them."""
+
     path: Path
     width: int
     height: int
     elapsed_sec: float
     capture_method: str = "unknown"
     capture_elapsed_sec: float | None = None
+    requested_at_monotonic: float | None = None
+    pixels_ready_at_monotonic: float | None = None
+    payload_ready_at_monotonic: float | None = None
+    published_at_monotonic: float | None = None
+    pixels_elapsed_sec: float | None = None
+    encode_elapsed_sec: float | None = None
+    handoff_elapsed_sec: float | None = None
+    frame_id: str | None = None
+
+
+def _validated_png_compression_level(level: int) -> int:
+    if type(level) is not int or not 0 <= level <= 9:
+        raise ValueError("PNG compression level must be an integer between 0 and 9")
+    return level
 
 
 @dataclass(frozen=True)
@@ -53,6 +70,7 @@ class CaptureClient:
         input_display_id: int | None = None,
         prefer_raw: bool = False,
         native: MuMuClient | None = None,
+        png_compression_level: int = 1,
     ) -> None:
         self.adb = adb
         self.serial = serial
@@ -61,6 +79,7 @@ class CaptureClient:
         self.input_display_id = input_display_id
         self.prefer_raw = prefer_raw
         self.native = native
+        self.png_compression_level = _validated_png_compression_level(png_compression_level)
 
     def capture_ui_xml(self, output_path: str | Path) -> Path:
         return self.capture_ui_xml_artifact(output_path).path
@@ -96,6 +115,8 @@ class CaptureClient:
     def capture_screenshot_artifact(self, output_path: str | Path) -> ScreenshotCapture:
         if self.native is not None:
             return self.native.screenshot(Path(output_path), timeout_sec=self.step_timeout_sec)
+        if self.png_compression_level != 1 and not self.prefer_raw:
+            raise CaptureError("PNG compression level requires raw or native screenshot transport")
         started = time.monotonic()
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -103,25 +124,36 @@ class CaptureClient:
         if self.screenshot_display_id is not None:
             command.extend(["-d", self.screenshot_display_id])
         converted = None
+        pixels_ready = None
+        payload_ready = None
+        encode_elapsed = None
         method = "png"
         timeout = self.step_timeout_sec
         if self.prefer_raw:
             raw = self.adb.run_bytes(command, serial=self.serial, timeout_sec=timeout)
             if raw.startswith(_SCREENCAP_MULTI_DISPLAY_WARNING):
                 raw = raw[len(_SCREENCAP_MULTI_DISPLAY_WARNING):]
-            converted = _raw_rgba_png(raw)
+            raw_received = time.monotonic()
+            converted = _raw_rgba_png(raw, compression_level=self.png_compression_level)
+            encoded_at = time.monotonic() if converted is not None else None
+            encode_elapsed = encoded_at - raw_received if converted is not None else None
             if converted is None:
+                if self.png_compression_level != 1:
+                    raise CaptureError("Raw screenshot unavailable; PNG fallback cannot honor compression level")
                 timeout = self.step_timeout_sec - (time.monotonic() - started)
                 if timeout <= 0:
                     raise CaptureError("Screenshot timeout budget exhausted before PNG fallback")
                 method = "png_fallback"
             else:
                 method = "raw_rgba"
+                pixels_ready = raw_received
+                payload_ready = encoded_at
         if converted is not None:
             data, width, height = converted
         else:
             png_command = [*command[:2], "-p", *command[2:]]
             data = self.adb.run_bytes(png_command, serial=self.serial, timeout_sec=timeout)
+            payload_ready = time.monotonic()
             if data.startswith(_SCREENCAP_MULTI_DISPLAY_WARNING):
                 data = data[len(_SCREENCAP_MULTI_DISPLAY_WARNING):]
             if not data.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -135,6 +167,7 @@ class CaptureClient:
         except OSError as exc:
             raise CaptureError(f"Unable to save screenshot at {path}: {exc}") from exc
         elapsed = time.monotonic() - started
+        published_at = started + elapsed
         return ScreenshotCapture(
             path=path,
             width=width,
@@ -142,10 +175,18 @@ class CaptureClient:
             elapsed_sec=elapsed,
             capture_method=method,
             capture_elapsed_sec=elapsed,
+            requested_at_monotonic=started,
+            pixels_ready_at_monotonic=pixels_ready,
+            payload_ready_at_monotonic=payload_ready,
+            published_at_monotonic=published_at,
+            pixels_elapsed_sec=pixels_ready - started if pixels_ready is not None else None,
+            encode_elapsed_sec=encode_elapsed,
+            handoff_elapsed_sec=max(0.0, published_at - payload_ready),
+            frame_id=uuid4().hex,
         )
 
 
-def _raw_rgba_png(data: bytes) -> tuple[bytes, int, int] | None:
+def _raw_rgba_png(data: bytes, *, compression_level: int = 1) -> tuple[bytes, int, int] | None:
     """Accept only the complete 16-byte-header RGBA_8888 format verified locally."""
     if len(data) < 16:
         return None
@@ -162,7 +203,7 @@ def _raw_rgba_png(data: bytes) -> tuple[bytes, int, int] | None:
     pixels = np.frombuffer(data, dtype=np.uint8, offset=16).reshape(height, width, 4)
     try:
         bgra = cv2.cvtColor(pixels, cv2.COLOR_RGBA2BGRA)
-        success, encoded = cv2.imencode(".png", bgra, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+        success, encoded = cv2.imencode(".png", bgra, [cv2.IMWRITE_PNG_COMPRESSION, compression_level])
     except cv2.error as exc:
         raise CaptureError("Unable to encode raw RGBA screenshot as PNG") from exc
     if not success:

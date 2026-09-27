@@ -14,6 +14,7 @@ from .errors import LocatorError, SceneError
 from .locator import find_template, scale_box
 from .ocr import OCRProvider, OCRText, create_ocr_provider, filter_ocr_results
 from .scene import SCENE_BATTLE, SCENE_CLAN_CHAT, SCENE_DISCONNECTED, SCENE_ENEMY_VILLAGE, SCENE_MAINTENANCE, SCENE_POPUP, SCENE_REQUEST, SCENE_SEARCH, SCENE_SETTLEMENT, SCENE_STARTING, SCENE_TRAINING, SCENE_UNKNOWN, SCENE_VILLAGE, SceneSnapshot, classify_scene_text, surrender_dialog_evidence
+from .model_vision import ModelUnavailable, SceneModel, BuildingModel
 
 
 BUTTON_LABELS: dict[str, tuple[str, ...]] = {
@@ -181,10 +182,14 @@ class ScreenshotRecognizer:
         baseline_resolution: tuple[int, int] = (1280, 720),
         *,
         provider: OCRProvider | None = None,
+        scene_model: SceneModel | None = None,
+        building_model: BuildingModel | None = None,
     ) -> None:
         self.ocr_config = ocr_config or OCRConfig()
         self.baseline_resolution = baseline_resolution
         self.provider = provider or create_ocr_provider(self.ocr_config)
+        self.scene_model = scene_model
+        self.building_model = building_model
         self.client_version = "unknown"
         from .battle_vision import BattleObserver
 
@@ -199,7 +204,8 @@ class ScreenshotRecognizer:
             raise ValueError("Troop observation requires a known card")
         return self.battle_observer.observe(Path(screenshot_path), purpose=purpose, slot=slot, previous=previous)
 
-    def recognize(self, screenshot_path: str | Path, *, battle_details: bool = True) -> SceneSnapshot:
+    def recognize(self, screenshot_path: str | Path, *, battle_details: bool = True,
+                  captured_at: float | None = None) -> SceneSnapshot:
         started = time.monotonic()
         path = Path(screenshot_path)
         resolution = self._resolution(path)
@@ -208,6 +214,28 @@ class ScreenshotRecognizer:
         ocr_finished = time.monotonic()
         texts = [self._baseline_result(result, resolution) for result in results]
         scene, confidence, reasons = classify_scene_text("\n".join(result.text for result in texts))
+        model_scene_evidence: dict[str, object] | None = None
+        if self.scene_model is not None:
+            if captured_at is None:
+                model_scene_evidence = {"status": "unavailable", "reason": "capture_time_missing"}
+            else:
+                image = read_frame(path, 1)
+                if image is None:
+                    model_scene_evidence = {"status": "unavailable", "reason": "frame_decode_failed"}
+                else:
+                    try:
+                        prediction = self.scene_model.classify(image, captured_at=captured_at)
+                        model_scene_evidence = {"status": "unknown" if prediction.unknown else "recognized",
+                            "scene": prediction.scene, "confidence": prediction.confidence,
+                            "reason": prediction.reason, "model_sha256": prediction.model_sha256,
+                            "frame_captured_at": prediction.frame_captured_at}
+                        if scene == SCENE_UNKNOWN and not prediction.unknown:
+                            scene, confidence, reasons = prediction.scene, prediction.confidence, ["scene_model"]
+                        elif scene != SCENE_UNKNOWN and not prediction.unknown and scene != prediction.scene:
+                            # Two positive but conflicting classifiers cannot authorize an action.
+                            scene, confidence, reasons = SCENE_UNKNOWN, 0.0, ["scene_model_ocr_conflict"]
+                    except ModelUnavailable as exc:
+                        model_scene_evidence = {"status": "unavailable", "reason": str(exc)}
         surrender_dialog = None
         if scene in {SCENE_BATTLE, SCENE_ENEMY_VILLAGE, SCENE_POPUP, SCENE_UNKNOWN}:
             surrender_dialog = surrender_dialog_evidence([asdict(item) for item in texts])
@@ -326,6 +354,7 @@ class ScreenshotRecognizer:
             "surrender_dialog": surrender_dialog,
             "cloud_cover": cloud_cover,
             "startup_logo": startup_logo,
+            "scene_model": model_scene_evidence,
         }
         if scene == SCENE_VILLAGE:
             village_type = recognize_village_type(path)
@@ -363,6 +392,12 @@ class ScreenshotRecognizer:
                                          client_version=self.client_version)
             observations["buildings"] = buildings
             observations["battle"]["buildings"] = buildings
+            if self.building_model is not None:
+                from .building_vision import detect_model_buildings
+                model_result = detect_model_buildings(path, model=self.building_model,
+                    captured_at=captured_at, baseline_resolution=self.baseline_resolution)
+                observations["model_buildings"] = model_result
+                observations["battle"]["model_buildings"] = model_result
             self._tracked_buildings = buildings
             if scene == SCENE_ENEMY_VILLAGE:
                 prices = [item for item in texts if self._in_observed_roi(item, (1098, 515, 1250, 560))
@@ -429,7 +464,10 @@ class ScreenshotRecognizer:
         observations["recognition_seconds"] = round(time.monotonic() - started, 3)
         observations["recognition_timings_sec"] = {"decode": decoded - started,
             "ocr": ocr_finished - decoded, "details": time.monotonic() - ocr_finished}
-        return SceneSnapshot(scene, confidence, path, observations)
+        from .battle_vision import attach_preparation_countdown
+        snapshot = SceneSnapshot(scene, confidence, path, observations)
+        attach_preparation_countdown(snapshot, self.baseline_resolution)
+        return snapshot
 
     @staticmethod
     def _startup_logo(path: Path) -> dict | None:

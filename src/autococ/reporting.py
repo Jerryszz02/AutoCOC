@@ -155,6 +155,60 @@ def capture_run_provenance(config: AppConfig, profile_name: str) -> dict[str, ob
         except (OSError, ValueError) as exc:
             files[name] = None
             errors[name] = type(exc).__name__
+    vision_artifacts: dict[str, str | None] = {"model_manifest_sha256": None,
+                                               "layout_sha256": None, "guide_sha256": None}
+    if config.vision_agent.enabled:
+        base = config.source_path.resolve().parent
+
+        def add_artifact(name: str, configured: str) -> str | None:
+            if not configured:
+                errors[name] = "not configured"
+                return None
+            path = Path(configured)
+            path = path if path.is_absolute() else base / path
+            try:
+                if path.is_symlink() or not path.is_file():
+                    raise OSError("artifact is not a regular file")
+                digest = hashlib.sha256()
+                with path.open("rb") as source:
+                    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                        digest.update(chunk)
+                files[name] = digest.hexdigest()
+                return files[name]
+            except OSError as exc:
+                files[name] = None
+                errors[name] = type(exc).__name__
+                return None
+
+        vision_artifacts["layout_sha256"] = add_artifact(
+            "configured/vision_agent/layout_profile", config.vision_agent.layout_profile)
+        if config.vision_agent.guide_file:
+            vision_artifacts["guide_sha256"] = add_artifact(
+                "configured/vision_agent/guide_file", config.vision_agent.guide_file)
+        model_name = "configured/vision_agent/model_dir"
+        if not config.vision_agent.model_dir:
+            errors[model_name] = "not configured"
+        else:
+            model_dir = Path(config.vision_agent.model_dir)
+            model_dir = model_dir if model_dir.is_absolute() else base / model_dir
+            try:
+                if model_dir.is_symlink() or not model_dir.is_dir():
+                    raise OSError("model directory unavailable")
+                model_files = sorted(path for path in model_dir.rglob("*") if path.is_file())
+                if not model_files:
+                    errors[model_name] = "no files"
+                else:
+                    for path in model_files:
+                        relative = path.relative_to(model_dir).as_posix()
+                        add_artifact(f"{model_name}/{relative}", str(path))
+                    model_hashes = {name: value for name, value in files.items()
+                                    if name.startswith(model_name + "/")}
+                    if all(value is not None for value in model_hashes.values()):
+                        vision_artifacts["model_manifest_sha256"] = hashlib.sha256(
+                            json.dumps(model_hashes, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                        ).hexdigest()
+            except OSError as exc:
+                errors[model_name] = type(exc).__name__
     # Hash the sorted path/hash manifest, so adding or removing a file also
     # changes the fingerprint. An incomplete manifest has no aggregate hash.
     fingerprint = (hashlib.sha256(json.dumps(files, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
@@ -178,10 +232,12 @@ def capture_run_provenance(config: AppConfig, profile_name: str) -> dict[str, ob
         "captured_at": datetime.now().isoformat(timespec="microseconds"),
         "scope": "on-disk files at run start; not loaded module bytecode",
         "file_scope": ["src/autococ/*.py", "assets/templates/* (files only)",
-                       "assets/catalogs/**", "strategies/**", "configured strategy, planner and adapter files"],
+                       "assets/catalogs/**", "strategies/**", "configured strategy, planner and adapter files",
+                       "configured vision model, layout and guide files when enabled"],
         "source_fingerprint_sha256": fingerprint,
         "files_sha256": files,
         "effective_config_sha256": config_hash,
+        "vision_agent_artifacts": vision_artifacts,
         "package_name": config.game.package_name,
         "client_version": "unknown",
         "python_version": platform.python_version(),
@@ -249,6 +305,8 @@ def write_report(report_dir: Path, stats: RunStats, *, save_decision_trace: bool
         "",
         f"- Source fingerprint (SHA256): {stats.provenance.get('source_fingerprint_sha256') or 'unknown'}",
         f"- Effective config (SHA256): {stats.provenance.get('effective_config_sha256') or 'unknown'}",
+        f"- Vision model manifest (SHA256): {(stats.provenance.get('vision_agent_artifacts') or {}).get('model_manifest_sha256') or 'unknown'}",
+        f"- Vision layout (SHA256): {(stats.provenance.get('vision_agent_artifacts') or {}).get('layout_sha256') or 'unknown'}",
         f"- Snapshot scope: {stats.provenance.get('scope', 'unknown')}",
         f"- Snapshot time: {stats.provenance.get('captured_at', 'unknown')}",
         f"- Package: {stats.provenance.get('package_name', 'unknown')}",
@@ -270,6 +328,26 @@ def write_report(report_dir: Path, stats: RunStats, *, save_decision_trace: bool
         ])
     if not stats.task_results:
         lines.extend(["- No verified task results recorded.", ""])
+
+    vision = payload["vision_agent_metrics"]
+    if vision["attempts"]:
+        lines.extend(["## Vision Agent Deployment", "",
+                      f"- Attempts: {vision['attempts']}",
+                      f"- Complete input batches: {vision['complete_input_batches']}",
+                      f"- Consumption verified: {vision['consumption_verified']}",
+                      f"- Full batches within frozen limit: {vision['within_burst_limit']}",
+                      f"- Incomplete or over-limit attempts: {vision['not_within_burst_limit']}",
+                      "- Input sent, consumption verified, and battle completed are separate evidence states.", ""])
+        for attempt in vision["details"]:
+            lines.append("- " + f"{attempt['task']} ({attempt['task_status']}, {attempt['mode']}): "
+                         f"plan={_format_state(attempt['plan_ready'])}, "
+                         f"input={_format_state(attempt['input_sent'])}, "
+                         f"consumption={_format_state(attempt['consumption_verified'])}, "
+                         f"burst={_format_number(attempt['burst_elapsed_sec'])}/"
+                         f"{_format_number(attempt['burst_limit_sec'])} s, "
+                         f"inputs={_format_number(attempt['input_count'])}, "
+                         f"speed={attempt['speed_status']}")
+        lines.append("")
 
     revenue = payload["resource_metrics"]
     lines.extend([
@@ -348,6 +426,7 @@ def summarize_run(stats: RunStats, *, save_decision_trace: bool = True) -> dict[
         "simulated": counts["simulated"],
         "task_results": [asdict(result) for result in results],
         "resource_metrics": resource_metrics(stats, elapsed_sec=elapsed_sec),
+        "vision_agent_metrics": vision_agent_metrics(stats),
         "battles_completed": stats.battles_completed if stats.mode == "live" else 0,
         "battles_won": stats.battles_won if stats.mode == "live" else 0,
         "goals_completed": stats.goals_completed if stats.mode == "live" else 0,
@@ -358,6 +437,65 @@ def summarize_run(stats: RunStats, *, save_decision_trace: bool = True) -> dict[
     if not save_decision_trace:
         payload.pop("decision_traces")
     return payload
+
+
+def interrupted_battle_metrics(session) -> dict[str, object]:
+    """Preserve issued inputs when cooperative stop prevents further observation."""
+    receipt = getattr(session, "prepared_battle_receipt", None)
+    if not isinstance(receipt, dict):
+        return {}
+    return {"deployment": receipt, "vision_agent": {
+        "mode": "continuous", "status": "cancelled",
+        "plan_ready": bool(receipt.get("plan_id")),
+        "input_sent": receipt.get("input_sent") is True,
+        "consumption_verified": receipt.get("verified") is True,
+        "burst_pass": receipt.get("burst_pass") is True,
+        "input_count": receipt.get("input_count"),
+        "burst_elapsed_sec": receipt.get("burst_elapsed_sec"),
+        "burst_limit_sec": receipt.get("burst_limit_sec"),
+        "attempted_placements": receipt.get("attempted_placements", 0)}}
+
+
+def vision_agent_metrics(stats: RunStats) -> dict[str, object]:
+    """Keep incomplete deployment attempts and unknown evidence visible."""
+    details: list[dict[str, object]] = []
+    for result in stats.task_results:
+        raw = result.metrics.get("vision_agent")
+        if not isinstance(raw, dict):
+            continue
+        mode = raw.get("mode") if raw.get("mode") in {"continuous", "enhanced"} else "unknown"
+        stages = {name: raw.get(name) if type(raw.get(name)) is bool else None
+                  for name in ("plan_ready", "input_sent", "consumption_verified")}
+        elapsed = raw.get("burst_elapsed_sec")
+        elapsed = elapsed if type(elapsed) in (int, float) and math.isfinite(elapsed) and elapsed >= 0 else None
+        limit = raw.get("burst_limit_sec")
+        limit = limit if type(limit) in (int, float) and math.isfinite(limit) and limit > 0 else None
+        count = raw.get("input_count")
+        count = count if type(count) is int and count > 0 else None
+        if mode != "continuous":
+            speed_status = "not_applicable"
+        elif stats.mode != "live":
+            speed_status = "simulated"
+        elif any(value is False for value in stages.values()):
+            speed_status = "failed"
+        elif None in stages.values() or elapsed is None or limit is None or count is None:
+            speed_status = "unknown"
+        elif limit > min(15.0, 1.0 + .25 * count) + 1e-9 or elapsed > limit:
+            speed_status = "failed"
+        else:
+            speed_status = "passed"
+        details.append({"task": result.task, "task_status": result.status,
+                        "mode": mode, "status": raw.get("status") if isinstance(raw.get("status"), str) else None,
+                        **stages, "burst_elapsed_sec": elapsed, "burst_limit_sec": limit,
+                        "input_count": count, "speed_status": speed_status})
+    applicable = [item for item in details if item["mode"] == "continuous" and stats.mode == "live"]
+    return {"attempts": len(details),
+            "plan_ready": sum(item["plan_ready"] is True for item in details),
+            "complete_input_batches": sum(item["input_sent"] is True for item in details),
+            "consumption_verified": sum(item["consumption_verified"] is True for item in details),
+            "within_burst_limit": sum(item["speed_status"] == "passed" for item in applicable),
+            "not_within_burst_limit": sum(item["speed_status"] != "passed" for item in applicable),
+            "details": details}
 
 
 def resource_metrics(stats: RunStats, *, elapsed_sec: float | None = None) -> dict[str, object]:
@@ -444,6 +582,10 @@ def _hourly(value: int | float | None, elapsed_sec: float) -> float | None:
 
 def _format_number(value: int | float | None) -> str:
     return "unknown" if value is None else f"{value:,.2f}"
+
+
+def _format_state(value: bool | None) -> str:
+    return "unknown" if value is None else "yes" if value else "no"
 
 
 def _json_value(value: object) -> str:

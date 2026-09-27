@@ -17,6 +17,19 @@ from autococ.session import GameSession
 
 
 class FlowTests(unittest.TestCase):
+    def test_interrupted_continuous_battle_retains_partial_inputs_in_report(self):
+        runner = self.runner(("battle",))
+        receipt = {"plan_id": "frozen", "input_count": 5, "attempted_placements": 2,
+                   "input_sent": False, "verified": False, "actions": [{"status": "uncertain"}]}
+        self.session.prepared_battle_receipt = receipt
+        with patch("autococ.combat.run_battle", side_effect=KeyboardInterrupt):
+            stats = runner.run_profile("test")
+        result = stats.task_results[-1]
+        self.assertEqual(result.metrics["deployment"], receipt)
+        self.assertFalse(result.metrics["vision_agent"]["input_sent"])
+        self.assertEqual(stats.battles_completed, 0)
+        self.assertEqual(self.report(stats)["task_results"][-1]["metrics"]["deployment"]["attempted_placements"], 2)
+
     def setUp(self) -> None:
         temp = TemporaryDirectory()
         self.addCleanup(temp.cleanup)
