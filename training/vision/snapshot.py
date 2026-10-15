@@ -153,5 +153,3 @@ def verify_snapshot(root: Path, task: str) -> dict:
     return {"root": str(root), "snapshot_sha256": sha256(sums), "paths": paths,
             "metadata": metadata,
             "split_sha256": entries["split.json"]}
-
-
