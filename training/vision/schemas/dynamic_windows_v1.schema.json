@@ -16,7 +16,7 @@
     "prototype_only": {"type": "boolean"},
     "action_kind": {"enum": ["building_destroyed", "skill_available"]},
     "truth_event": {"type": "boolean"},
-    "event_at_monotonic": {"type": "number"},
+    "event_at_monotonic": {"type": ["number", "null"]},
     "truth_boxes": {"type": "array", "items": {"type": "object"}},
     "frames": {
       "type": "array", "minItems": 1,
@@ -46,6 +46,27 @@
           "state_target_id": {"type": "string", "minLength": 1},
           "state_source_frame_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
           "state_roi_bbox": {"type": "array", "prefixItems": [{"type": "integer"}, {"type": "integer"}, {"type": "integer"}, {"type": "integer"}], "minItems": 4, "maxItems": 4},
+          "hero_deployment_truth": {
+            "type": "object",
+            "description": "For r_card, independently reviewed friendly hero-card identity and deployment bound to this original frame. Positive skill events additionally require two consecutive available/deployed frames; verify_dynamic_windows enforces cross-frame rules.",
+            "required": ["hero_id", "card_identity_verified", "deployed", "review_status", "review_method", "reviewer", "review_evidence", "source_frame_sha256", "roi_bbox", "frame_id", "session_id", "camera_epoch", "captured_at_monotonic", "client_version"],
+            "properties": {
+              "hero_id": {"type": "string", "minLength": 1},
+              "card_identity_verified": {"const": true},
+              "deployed": {"type": "boolean"},
+              "review_status": {"const": "reviewed"},
+              "review_method": {"enum": ["human", "agent_visual"]},
+              "reviewer": {"type": "string", "minLength": 1},
+              "review_evidence": {"type": "string", "minLength": 1},
+              "source_frame_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "roi_bbox": {"type": "array", "prefixItems": [{"type": "integer"}, {"type": "integer"}, {"type": "integer"}, {"type": "integer"}], "minItems": 4, "maxItems": 4},
+              "frame_id": {"type": "string", "minLength": 1},
+              "session_id": {"type": "string", "minLength": 1},
+              "camera_epoch": {"type": "string", "minLength": 1},
+              "captured_at_monotonic": {"type": "number"},
+              "client_version": {"type": "string", "minLength": 1}
+            }
+          },
           "boxes_complete": {"const": true},
           "boxes_review_status": {"const": "reviewed"},
           "boxes_review_method": {"enum": ["human", "agent_visual"]},
@@ -58,5 +79,12 @@
         }
       }
     }
-  }
+  },
+  "allOf": [{
+    "if": {"properties": {"kind": {"const": "r_card"}}, "required": ["kind"]},
+    "then": {"properties": {"frames": {"items": {
+      "required": ["target_id", "state_label", "hero_deployment_truth"],
+      "properties": {"target_id": {"type": "string", "pattern": "^hero_skill:[a-z][a-z0-9_]*$"}}
+    }}}}
+  }]
 }

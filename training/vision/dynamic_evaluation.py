@@ -9,7 +9,7 @@ import statistics
 import cv2
 import numpy as np
 
-from autococ.dynamic_tracking import DynamicTracker
+from autococ.dynamic_tracking import DynamicTracker, read_hero_deployment_evidence
 from autococ.dynamic_vision import DynamicFrame, DynamicModel, DynamicUnavailable
 
 from .data import DatasetError, image_path
@@ -35,16 +35,19 @@ def evaluate_dynamic(model: DynamicModel, root: Path, windows: list[dict], *,
     counts = Counter({"tp": 0, "fp": 0, "fn": 0, "early": 0,
                       "inference_failures": 0, "unknown_frames": 0})
     delays, attempts = [], []
+    skill_evaluable_positives = 0
     for window in selected:
         tracker = DynamicTracker(**{key: model.event_rules[key] for key in
             ("min_iou", "max_gap_seconds", "max_missed_frames",
              "event_min_confidence", "max_frame_age_seconds")})
         predicted_events = []
+        deployment_verified = []
         truth_by_frame = {}
         if model.kind == "u_position":
             for truth in window["truth_boxes"]:
                 truth_by_frame.setdefault(truth["frame_id"], []).append(truth)
         for frame_row in window["frames"]:
+            verified_for_frame = False
             source_image = (frame_row["image"] if frame_row["parent_image_sha256"] == frame_row["sha256"]
                             else frame_row["parent_image"])
             path = image_path(root, source_image)
@@ -56,10 +59,21 @@ def evaluate_dynamic(model: DynamicModel, root: Path, windows: list[dict], *,
                                      frame_row["frame_id"], frame_row["captured_at_monotonic"],
                                      frame_row["client_version"], image.shape[1], image.shape[0],
                                      frame_row.get("camera_stable") is True,
-                                     frame_row.get("zoom_verified") is True)
+                                     frame_row.get("zoom_verified") is True,
+                                     frame_row["parent_image_sha256"])
                 observations = model.infer(image, frame_row["roi_bbox"], frame,
                                            target_id=frame_row.get("target_id"), offline_replay=True)
-                step = tracker.update(frame, observations, offline_replay=True)
+                deployments = ()
+                if model.kind == "r_card":
+                    hero_id = frame_row["target_id"].removeprefix("hero_skill:")
+                    evidence = read_hero_deployment_evidence(path, frame, tuple(frame_row["roi_bbox"]), hero_id)
+                    deployments = (evidence,) if evidence is not None else ()
+                    if evidence is None:
+                        counts["hero_deployment_unverified_frames"] += 1
+                step = tracker.update(frame, observations, offline_replay=True,
+                                      hero_deployments=deployments)
+                if model.kind == "r_card":
+                    verified_for_frame = evidence is not None
                 predicted_events.extend(step.events)
                 if not observations:
                     counts["unknown_frames"] += 1
@@ -71,6 +85,8 @@ def evaluate_dynamic(model: DynamicModel, root: Path, windows: list[dict], *,
                 attempts.append({"window_id": window["window_id"], "frame_id": frame_row["frame_id"],
                                  "status": "inference_failure", "reason": str(exc)})
                 observations = []
+            if model.kind == "r_card":
+                deployment_verified.append(verified_for_frame)
             if model.kind == "u_position":
                 truth = truth_by_frame.get(frame_row["frame_id"], [])
                 used = set()
@@ -87,6 +103,9 @@ def evaluate_dynamic(model: DynamicModel, root: Path, windows: list[dict], *,
                         counts["fp"] += 1
                 counts["fn"] += len(truth) - len(used)
         if model.kind in EVENT_BY_KIND:
+            if model.kind == "r_card" and window["truth_event"] and any(
+                    first and second for first, second in zip(deployment_verified, deployment_verified[1:])):
+                skill_evaluable_positives += 1
             confirmed = [event for event in predicted_events if event.kind == window["action_kind"]]
             first = confirmed[0] if confirmed else None
             positive = window["truth_event"]
@@ -103,13 +122,15 @@ def evaluate_dynamic(model: DynamicModel, root: Path, windows: list[dict], *,
                              "predicted_event": first is not None, "early": early,
                              "first_confirmed_frame_id": first.confirmed_frame_id if first else None})
     denominator = counts["tp"] + counts["fn"]
+    established = model.kind != "r_card" or skill_evaluable_positives > 0
     return {"schema_version": 1, "kind": model.kind, "split": split,
-            "status": "offline_only", "prototype_only": prototype_only,
+            "status": "offline_only" if established else "not_established", "prototype_only": prototype_only,
             "model_sha256": model.model_sha256, "model_contract_sha256": model.contract_sha256,
             "event_rules": model.event_rules,
             "inventory": inventory, "evaluated_windows": len(selected),
             "evaluated_groups": inventory["groups_by_split"][split],
-            "metrics": {**dict(counts), "event_recall": counts["tp"] / denominator if denominator else None,
+            "metrics": {**dict(counts), "skill_evaluable_positive_windows": skill_evaluable_positives,
+                        "event_recall": counts["tp"] / denominator if established and denominator else None,
                         "confirmation_delay_median_seconds": statistics.median(delays) if delays else None,
                         "confirmation_delay_max_seconds": max(delays) if delays else None},
             "attempts": attempts,

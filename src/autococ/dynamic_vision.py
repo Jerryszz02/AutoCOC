@@ -24,6 +24,16 @@ CARD_STATES = ("available", "selected", "exhausted", "unknown")
 KINDS = frozenset({"r_building", "r_card", "u_position"})
 
 
+def hero_skill_identity(target_id: object) -> str | None:
+    """A card-state target is one known friendly hero's skill card."""
+    if not isinstance(target_id, str) or not target_id.startswith("hero_skill:"):
+        return None
+    hero_id = target_id.removeprefix("hero_skill:")
+    from .unit_catalog import UNIT_BY_ID
+    unit = UNIT_BY_ID.get(hero_id)
+    return hero_id if unit is not None and unit.kind == "hero" else None
+
+
 class DynamicUnavailable(RuntimeError):
     """A frame or package lacks evidence needed for dynamic inference."""
 
@@ -39,6 +49,7 @@ class DynamicFrame:
     height: int
     camera_stable: bool
     zoom_verified: bool
+    source_sha256: str | None = None  # exact original frame bytes, required for skill events
 
 
 @dataclass(frozen=True)
@@ -55,6 +66,7 @@ class DynamicObservation:
     target_id: str | None
     model_sha256: str
     contract_sha256: str
+    source_sha256: str | None = None
 
 
 def dynamic_contract_sha256(manifest: dict) -> str:
@@ -212,6 +224,8 @@ class DynamicModel:
         x0, y0, x1, y1 = _box(roi_bbox, frame.width, frame.height)
         if self.kind != "u_position" and (not isinstance(target_id, str) or not target_id):
             raise DynamicUnavailable("R state requires a stable target_id from reviewed/static evidence")
+        if self.kind == "r_card" and hero_skill_identity(target_id) is None:
+            raise DynamicUnavailable("R card requires hero_skill:<known hero id> target")
         crop = cv2.resize(image[y0:y1, x0:x1],
                           (self.preprocess["width"], self.preprocess["height"]),
                           interpolation=cv2.INTER_LINEAR)
@@ -228,7 +242,8 @@ class DynamicModel:
             return DynamicObservation(self.kind, label, box, score, frame.session_id,
                                       frame.camera_epoch, frame.frame_id, capture,
                                       (x0, y0, x1, y1), target_id,
-                                      self.model_sha256, self.contract_sha256)
+                                      self.model_sha256, self.contract_sha256,
+                                      frame.source_sha256)
 
         if self.kind != "u_position":
             if raw.shape != (1, len(self.classes)) or not np.isfinite(raw).all():

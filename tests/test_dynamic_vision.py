@@ -113,6 +113,22 @@ def test_u_invalid_confidence_cannot_be_silently_filtered():
                         frame(), now_monotonic=100.1)
 
 
+def test_r_card_inference_requires_known_hero_skill_target_but_keeps_four_states():
+    with TemporaryDirectory() as temp:
+        model, session = package(Path(temp) / "card", kind="r_card")
+        image = np.zeros((100, 100, 3), dtype=np.uint8)
+        current = frame(source_sha256="c" * 64)
+        for invalid in ("electro_dragon", "hero_skill:electro_dragon", "hero_skill:invented"):
+            with pytest.raises(DynamicUnavailable, match="hero_skill"):
+                model.infer(image, (10, 20, 90, 100), current, target_id=invalid,
+                            now_monotonic=100.1)
+        assert not session.calls
+        result = model.infer(image, (10, 20, 90, 100), current,
+                             target_id="hero_skill:archer_queen", now_monotonic=100.1)[0]
+        assert model.classes == list(CARD_STATES)
+        assert result.label == "available" and result.source_sha256 == "c" * 64
+
+
 def test_event_rules_are_frozen_in_model_contract_and_required():
     with TemporaryDirectory() as temp:
         root = Path(temp) / "r"

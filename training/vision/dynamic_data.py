@@ -11,7 +11,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from autococ.dynamic_vision import BUILDING_STATES, CARD_STATES
+from autococ.dynamic_vision import BUILDING_STATES, CARD_STATES, hero_skill_identity
 
 from .data import DatasetError, image_path, sha256
 
@@ -27,6 +27,7 @@ def verify_dynamic_windows(root: Path, windows: list[dict], *, kind: str,
     ids, seen_frames = set(), {}
     seen_r_supervision = {}
     conflicting_r_supervision = set()
+    seen_hero_deployment = {}
     linked: dict[tuple[str, str], set[int]] = defaultdict(set)
     counts = {"positive": 0, "negative": 0, "frames": 0, "groups": 0}
     now_utc = datetime.now(timezone.utc)
@@ -68,7 +69,9 @@ def verify_dynamic_windows(root: Path, windows: list[dict], *, kind: str,
         previous = None
         first_capture = None
         window_source = None
+        window_card_identity = None
         frame_bounds = {}
+        positive_skill_frames = []
         for frame in frames:
             if not isinstance(frame, dict):
                 raise DatasetError(f"{window_id}: frame row must be object")
@@ -143,6 +146,14 @@ def verify_dynamic_windows(root: Path, windows: list[dict], *, kind: str,
             if kind != "u_position":
                 if not isinstance(frame.get("target_id"), str) or not frame["target_id"]:
                     raise DatasetError(f"{window_id}: R target identity missing")
+                hero_id = hero_skill_identity(frame["target_id"]) if kind == "r_card" else None
+                if kind == "r_card" and hero_id is None:
+                    raise DatasetError(f"{window_id}: R card requires hero_skill:<known hero id> target")
+                if kind == "r_card":
+                    card_identity = (frame["target_id"], version)
+                    if window_card_identity is not None and card_identity != window_card_identity:
+                        raise DatasetError(f"{window_id}: R card window changes hero identity or client version")
+                    window_card_identity = card_identity
                 methods = {"human", "agent_visual"} if prototype_only else {"human"}
                 if (frame.get("state_label") not in STATE_BY_KIND[kind] or
                         frame.get("state_review_status") != "reviewed" or
@@ -159,6 +170,29 @@ def verify_dynamic_windows(root: Path, windows: list[dict], *, kind: str,
                     conflicting_r_supervision.add(supervision_key)
                 else:
                     seen_r_supervision[supervision_key] = frame["state_label"]
+                if kind == "r_card":
+                    deployment = frame.get("hero_deployment_truth")
+                    if (not isinstance(deployment, dict) or deployment.get("hero_id") != hero_id or
+                            deployment.get("card_identity_verified") is not True or
+                            type(deployment.get("deployed")) is not bool or
+                            deployment.get("review_status") != "reviewed" or
+                            deployment.get("review_method") not in methods or
+                            not isinstance(deployment.get("reviewer"), str) or not deployment["reviewer"] or
+                            not isinstance(deployment.get("review_evidence"), str) or not deployment["review_evidence"] or
+                            deployment.get("source_frame_sha256") != parent_hash or
+                            deployment.get("roi_bbox") != box or
+                            deployment.get("frame_id") != key[2] or
+                            deployment.get("session_id") != key[0] or
+                            deployment.get("camera_epoch") != key[1] or
+                            deployment.get("captured_at_monotonic") != started or
+                            deployment.get("client_version") != version):
+                        raise DatasetError(f"{window_id}: R card lacks independently reviewed source-bound friendly deployment truth")
+                    prior_deployment = seen_hero_deployment.get(supervision_key)
+                    if prior_deployment is not None and prior_deployment is not deployment["deployed"]:
+                        raise DatasetError("Conflicting R card deployment truth for one source frame/ROI/hero")
+                    seen_hero_deployment[supervision_key] = deployment["deployed"]
+                    positive_skill_frames.append(frame["state_label"] == "available" and
+                                                 deployment["deployed"] and frame["camera_stable"])
             else:
                 methods = {"human", "agent_visual"} if prototype_only else {"human"}
                 if (frame.get("boxes_complete") is not True or
@@ -172,6 +206,9 @@ def verify_dynamic_windows(root: Path, windows: list[dict], *, kind: str,
             counts["frames"] += 1
         if kind in EVENT_BY_KIND and row["truth_event"] and not first_capture <= row["event_at_monotonic"] <= previous:
             raise DatasetError(f"{window_id}: event time is outside reviewed source frames")
+        if kind == "r_card" and truth and not any(first and second for first, second in
+                                                   zip(positive_skill_frames, positive_skill_frames[1:])):
+            raise DatasetError(f"{window_id}: positive skill event needs two reviewed available/deployed hero frames")
         if kind == "u_position":
             for truth_box in row["truth_boxes"]:
                 if not isinstance(truth_box, dict) or truth_box.get("frame_id") not in frame_bounds:

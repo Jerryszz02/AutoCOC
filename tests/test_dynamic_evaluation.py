@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from autococ.dynamic_vision import DynamicObservation, DynamicUnavailable
+from autococ.dynamic_tracking import HeroDeploymentEvidence
 from training.vision.data import DatasetError, sha256
 from training.vision.dynamic_data import verify_dynamic_windows
 from training.vision.dynamic_evaluation import evaluate_dynamic
@@ -37,7 +38,11 @@ class FakeModel:
         return [DynamicObservation(self.kind, label, tuple(roi_bbox), .99,
                 frame.session_id, frame.camera_epoch, frame.frame_id,
                 frame.captured_at_monotonic, tuple(roi_bbox), target_id,
-                self.model_sha256, self.contract_sha256)]
+                self.model_sha256, self.contract_sha256, frame.source_sha256)]
+
+
+class FakeCardModel(FakeModel):
+    kind = "r_card"
 
 
 def window(root, name, truth, *, group=None, split="test"):
@@ -80,6 +85,26 @@ def u_window(root, name="position", *, boxes=None):
     return row
 
 
+def card_window(root, name="skill", *, truth=True, deployed=True):
+    row = window(root, name, truth)
+    row.update(kind="r_card", action_kind="skill_available")
+    for index, frame in enumerate(row["frames"]):
+        frame["target_id"] = frame["state_target_id"] = "hero_skill:archer_queen"
+        frame["state_label"] = "unknown" if index == 0 else "available"
+        frame["hero_deployment_truth"] = {
+            "hero_id": "archer_queen", "card_identity_verified": True,
+            "deployed": bool(deployed and index > 0),
+            "review_status": "reviewed", "review_method": "agent_visual",
+            "reviewer": "synthetic-fixture", "review_evidence": "synthetic card context only",
+            "source_frame_sha256": frame["parent_image_sha256"],
+            "roi_bbox": frame["roi_bbox"][:], "frame_id": frame["frame_id"],
+            "session_id": frame["session_id"], "camera_epoch": frame["camera_epoch"],
+            "captured_at_monotonic": frame["captured_at_monotonic"],
+            "client_version": frame["client_version"],
+        }
+    return row
+
+
 def test_u_reviewed_empty_boxes_and_source_bound_positive_freeze():
     with TemporaryDirectory() as temp:
         root = Path(temp)
@@ -95,6 +120,80 @@ def test_u_reviewed_empty_boxes_and_source_bound_positive_freeze():
         negative = u_window(source, "negative")
         assert verify_dynamic_windows(source, [negative], kind="u_position",
                                       prototype_only=True)["frames"] == 3
+
+
+def test_card_requires_known_hero_and_independent_deployment_truth():
+    with TemporaryDirectory() as temp:
+        root = Path(temp)
+        source = root / "source"
+        source.mkdir()
+        good = card_window(source)
+        assert verify_dynamic_windows(source, [good], kind="r_card", prototype_only=True)["positive"] == 1
+        frozen = root / "card-frozen"
+        freeze_dynamic_snapshot(source, [good], frozen, kind="r_card", prototype_only=True)
+        assert verify_dynamic_snapshot(frozen, kind="r_card")["metadata"]["classes"] == [
+            "available", "selected", "exhausted", "unknown"]
+        for target in ("electro_dragon", "hero_skill:unknown", "hero_skill:electro_dragon"):
+            bad = copy.deepcopy(good)
+            bad["frames"][1]["target_id"] = bad["frames"][1]["state_target_id"] = target
+            with pytest.raises(DatasetError, match="hero_skill"):
+                verify_dynamic_windows(source, [bad], kind="r_card", prototype_only=True)
+        for field, value in (("source_frame_sha256", "0" * 64),
+                             ("card_identity_verified", False),
+                             ("roi_bbox", [0, 0, 20, 20]),
+                             ("frame_id", "other"), ("camera_epoch", "other"),
+                             ("client_version", "other"), ("review_method", "unreviewed")):
+            bad = copy.deepcopy(good)
+            bad["frames"][1]["hero_deployment_truth"][field] = value
+            with pytest.raises(DatasetError, match="friendly deployment truth"):
+                verify_dynamic_windows(source, [bad], kind="r_card", prototype_only=True)
+        bad = copy.deepcopy(good)
+        bad["frames"][1]["hero_deployment_truth"]["deployed"] = False
+        with pytest.raises(DatasetError, match="two reviewed available/deployed"):
+            verify_dynamic_windows(source, [bad], kind="r_card", prototype_only=True)
+        negative = card_window(source, "undeployed", truth=False, deployed=False)
+        assert verify_dynamic_windows(source, [negative], kind="r_card", prototype_only=True)["negative"] == 1
+        formal = copy.deepcopy(good)
+        formal["prototype_only"] = False
+        formal["review_method"] = "human"
+        for frame in formal["frames"]:
+            frame["state_review_method"] = "human"
+        with pytest.raises(DatasetError, match="friendly deployment truth"):
+            verify_dynamic_windows(source, [formal], kind="r_card", prototype_only=False)
+
+
+def test_card_evaluator_reads_original_hero_evidence_not_truth_labels(monkeypatch):
+    with TemporaryDirectory() as temp:
+        root = Path(temp)
+        reviewed = card_window(root)
+        labels = {("skill", "f1"): "unknown", ("skill", "f2"): "available",
+                  ("skill", "f3"): "available"}
+        report = evaluate_dynamic(FakeCardModel(labels), root, [reviewed], prototype_only=True)
+        assert report["status"] == "not_established"
+        assert report["metrics"]["tp"] == 0
+        assert report["metrics"]["event_recall"] is None
+        assert report["metrics"]["hero_deployment_unverified_frames"] == 3
+
+        # Synthetic plumbing test only: the injected reader independently gets
+        # the source path/frame, rather than consuming hero_deployment_truth.
+        calls = []
+        def synthetic_reader(path, frame, roi_bbox, hero_id):
+            calls.append((path, frame.frame_id, frame.source_sha256, hero_id, roi_bbox))
+            if frame.frame_id == "f1":
+                return None
+            assert sha256(path) == frame.source_sha256
+            return HeroDeploymentEvidence(hero_id, True, .99, frame.session_id,
+                                          frame.camera_epoch, frame.frame_id,
+                                          frame.captured_at_monotonic, frame.client_version,
+                                          frame.source_sha256, roi_bbox,
+                                          "friendly_battle_card_portrait_and_enclosed_hp")
+        monkeypatch.setattr("training.vision.dynamic_evaluation.read_hero_deployment_evidence", synthetic_reader)
+        report = evaluate_dynamic(FakeCardModel(labels), root, [reviewed], prototype_only=True)
+        assert report["status"] == "offline_only"
+        assert report["metrics"]["tp"] == 1
+        assert report["metrics"]["event_recall"] == 1.0
+        assert len(calls) == 3
+        assert all(hero_id == "archer_queen" for _, _, _, hero_id, _ in calls)
 
 
 def test_u_rejects_incomplete_unbound_or_outside_roi_boxes():

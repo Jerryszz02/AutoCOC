@@ -3,11 +3,71 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import math
+from pathlib import Path
+import re
 import time
 
+import cv2
+import numpy as np
+
+from .errors import SceneError
 from .dynamic_vision import (BUILDING_STATES, CARD_STATES, DynamicFrame,
-                             DynamicObservation, DynamicUnavailable)
+                             DynamicObservation, DynamicUnavailable, hero_skill_identity)
+
+
+@dataclass(frozen=True)
+class HeroDeploymentEvidence:
+    hero_id: str
+    deployed: bool
+    confidence: float
+    session_id: str
+    camera_epoch: str
+    frame_id: str
+    captured_at_monotonic: float
+    client_version: str
+    source_sha256: str
+    roi_bbox: tuple[int, int, int, int]
+    method: str  # current-frame friendly battle-card portrait plus enclosed HP
+
+
+def read_hero_deployment_evidence(source_path: str | Path, frame: DynamicFrame,
+                                  roi_bbox: tuple[int, int, int, int],
+                                  hero_id: str) -> HeroDeploymentEvidence | None:
+    """Independently inspect the original friendly battle card in this frame."""
+    if (hero_skill_identity(f"hero_skill:{hero_id}") != hero_id or
+            not isinstance(frame.source_sha256, str) or
+            re.fullmatch(r"[0-9a-f]{64}", frame.source_sha256) is None):
+        return None
+    path = Path(source_path)
+    try:
+        with path.open("rb") as source:
+            if hashlib.file_digest(source, "sha256").hexdigest() != frame.source_sha256:
+                return None
+        image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if image is None or image.shape[:2] != (frame.height, frame.width):
+            return None
+        from .hero_state import recognize_hero_state
+        result = recognize_hero_state(path, roi_bbox,
+                                      baseline_resolution=(frame.width, frame.height),
+                                      unit_id=hero_id, client_version=frame.client_version)
+    except (OSError, ValueError, SceneError, cv2.error):
+        return None
+    identity = result.get("evidence", {}).get("portrait_identity")
+    confidence = identity.get("confidence") if isinstance(identity, dict) else None
+    if (result.get("deployed") is not True or
+            result.get("frame") != str(path) or result.get("slot_bbox") != list(roi_bbox) or
+            not isinstance(identity, dict) or identity.get("unit_id") != hero_id or
+            identity.get("version_verified") is not True or
+            type(confidence) not in (int, float) or not math.isfinite(confidence) or
+            confidence < .95 or result.get("evidence", {}).get("health_bar") is None):
+        return None
+    return HeroDeploymentEvidence(hero_id, True, float(confidence), frame.session_id,
+                                  frame.camera_epoch, frame.frame_id,
+                                  frame.captured_at_monotonic, frame.client_version,
+                                  frame.source_sha256, tuple(roi_bbox),
+                                  "friendly_battle_card_portrait_and_enclosed_hp")
 
 
 @dataclass(frozen=True)
@@ -58,34 +118,40 @@ class DynamicTracker:
         self.max_missed_frames = max_missed_frames
         self.event_min_confidence = float(event_min_confidence)
         self.max_frame_age_seconds = float(max_frame_age_seconds)
-        self._scope: tuple[str, str] | None = None
+        self._scope: tuple[str, str, str] | None = None
         self._seen_frame_ids: set[str] = set()
         self._last_capture: float | None = None
         self._serial = 0
         self._tracks: dict[str, dict] = {}
 
     def update(self, frame: DynamicFrame, observations: list[DynamicObservation], *,
-               now_monotonic: float | None = None, offline_replay: bool = False) -> DynamicStep:
+               now_monotonic: float | None = None, offline_replay: bool = False,
+               hero_deployments: tuple[HeroDeploymentEvidence, ...] | list[HeroDeploymentEvidence] = ()) -> DynamicStep:
         def reject(reason: str) -> None:
             # An invalid or ambiguous intervening frame breaks two-frame
             # continuity. A later frame must establish a new track/streak.
             self._tracks.clear()
             raise DynamicUnavailable(reason)
 
-        if (not frame.session_id or not frame.camera_epoch or not frame.frame_id or
+        if (not isinstance(frame.session_id, str) or not frame.session_id or
+                not isinstance(frame.camera_epoch, str) or not frame.camera_epoch or
+                not isinstance(frame.frame_id, str) or not frame.frame_id or
+                not isinstance(frame.client_version, str) or not frame.client_version or
                 type(frame.width) is not int or type(frame.height) is not int or
                 frame.width <= 0 or frame.height <= 0):
             reject("Dynamic tracking requires session/camera epoch/frame ID")
         if not isinstance(observations, (list, tuple)):
             reject("Dynamic observations must be a sequence")
+        if not isinstance(hero_deployments, (list, tuple)):
+            reject("Hero deployment evidence must be a sequence")
         capture = frame.captured_at_monotonic
-        if type(capture) not in (int, float) or not math.isfinite(capture):
+        if type(capture) not in (int, float) or not math.isfinite(capture) or capture < 0:
             reject("Dynamic tracking requires capture-start timestamp")
         now = time.monotonic() if now_monotonic is None else now_monotonic
         if (type(now) not in (int, float) or not math.isfinite(now) or
                 not offline_replay and (capture > now or now - capture > self.max_frame_age_seconds)):
             reject("Dynamic source frame is stale or has invalid capture age")
-        scope = (frame.session_id, frame.camera_epoch)
+        scope = (frame.session_id, frame.camera_epoch, frame.client_version)
         if scope != self._scope:
             self._scope, self._seen_frame_ids, self._last_capture = scope, set(), None
             self._tracks.clear()
@@ -97,16 +163,44 @@ class DynamicTracker:
             self._tracks.clear()
             self._last_capture = capture
             return DynamicStep((), ())
+        for evidence in hero_deployments:
+            if (not isinstance(evidence, HeroDeploymentEvidence) or
+                    hero_skill_identity(f"hero_skill:{evidence.hero_id}") != evidence.hero_id or
+                    evidence.deployed is not True or
+                    type(evidence.confidence) not in (int, float) or
+                    not math.isfinite(evidence.confidence) or evidence.confidence < .95 or
+                    evidence.session_id != frame.session_id or
+                    evidence.camera_epoch != frame.camera_epoch or
+                    evidence.frame_id != frame.frame_id or
+                    evidence.captured_at_monotonic != capture or
+                    evidence.client_version != frame.client_version or
+                    not isinstance(frame.source_sha256, str) or
+                    evidence.source_sha256 != frame.source_sha256 or
+                    re.fullmatch(r"[0-9a-f]{64}", evidence.source_sha256) is None or
+                    evidence.method != "friendly_battle_card_portrait_and_enclosed_hp" or
+                    not isinstance(evidence.roi_bbox, tuple) or len(evidence.roi_bbox) != 4 or
+                    any(type(value) is not int for value in evidence.roi_bbox) or
+                    not (0 <= evidence.roi_bbox[0] < evidence.roi_bbox[2] <= frame.width and
+                         0 <= evidence.roi_bbox[1] < evidence.roi_bbox[3] <= frame.height)):
+                reject("Hero deployment evidence is not bound to the current original frame")
         for obs in observations:
             if (obs.session_id != frame.session_id or obs.camera_epoch != frame.camera_epoch or
                     obs.frame_id != frame.frame_id or obs.captured_at_monotonic != capture or
                     obs.kind not in {"r_building", "r_card", "u_position"} or
+                    not isinstance(obs.model_sha256, str) or
+                    re.fullmatch(r"[0-9a-f]{64}", obs.model_sha256) is None or
+                    not isinstance(obs.contract_sha256, str) or
+                    re.fullmatch(r"[0-9a-f]{64}", obs.contract_sha256) is None or
                     not isinstance(obs.label, str) or
                     type(obs.confidence) not in (int, float) or not math.isfinite(obs.confidence) or
                     not 0 <= obs.confidence <= 1 or
                     obs.kind != "u_position" and not obs.target_id or
                     obs.kind == "r_building" and obs.label not in BUILDING_STATES or
                     obs.kind == "r_card" and obs.label not in CARD_STATES or
+                    obs.kind == "r_card" and hero_skill_identity(obs.target_id) is None or
+                    obs.kind == "r_card" and (not isinstance(frame.source_sha256, str) or
+                        re.fullmatch(r"[0-9a-f]{64}", frame.source_sha256) is None or
+                        obs.source_sha256 != frame.source_sha256) or
                     obs.kind == "u_position" and not (obs.label == "troop_group" or obs.label.startswith("hero:")) or
                     not isinstance(obs.roi_bbox, tuple) or len(obs.roi_bbox) != 4 or
                     not isinstance(obs.bbox, tuple) or len(obs.bbox) != 4 or
@@ -122,7 +216,8 @@ class DynamicTracker:
         # than selecting a convenient nearby actor or building.
         matches: dict[int, str] = {}
         for index, obs in enumerate(observations):
-            key = (obs.kind, obs.target_id if obs.kind != "u_position" else obs.label)
+            key = (obs.kind, obs.target_id if obs.kind != "u_position" else obs.label,
+                   obs.model_sha256, obs.contract_sha256)
             candidates = [track_id for track_id, track in self._tracks.items()
                           if track["key"] == key and track["missed"] <= self.max_missed_frames and
                           capture - track["capture"] <= self.max_gap_seconds and
@@ -142,7 +237,8 @@ class DynamicTracker:
                     del self._tracks[track_id]
         tracked, events = [], []
         for index, obs in enumerate(observations):
-            key = (obs.kind, obs.target_id if obs.kind != "u_position" else obs.label)
+            key = (obs.kind, obs.target_id if obs.kind != "u_position" else obs.label,
+                   obs.model_sha256, obs.contract_sha256)
             track_id = matches.get(index)
             if track_id is None:
                 self._serial += 1
@@ -154,7 +250,15 @@ class DynamicTracker:
             track = self._tracks[track_id]
             if obs.kind == "r_building" and obs.label in {"intact", "damaged"}:
                 track["seen_visible"] = True
-            if track["state"] == obs.label and track["missed"] == 0:
+            hero_id = hero_skill_identity(obs.target_id) if obs.kind == "r_card" else None
+            skill_context = (obs.kind != "r_card" or obs.label != "available" or
+                             len([evidence for evidence in hero_deployments
+                                  if evidence.hero_id == hero_id and evidence.roi_bbox == obs.roi_bbox]) == 1)
+            if not skill_context:
+                track["streak"] = 0
+                track["first_frame"] = None
+                track["first_capture"] = None
+            elif track["state"] == obs.label and track["missed"] == 0 and track["streak"] > 0:
                 track["streak"] += 1
             else:
                 track["streak"] = 1

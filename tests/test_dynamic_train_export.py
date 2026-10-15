@@ -147,10 +147,21 @@ class DynamicTrainingTests(unittest.TestCase):
         for row in rows:
             row["kind"] = "r_card"
             row["action_kind"] = "skill_available"
-            for frame in row["frames"]:
-                frame["state_label"] = ("selected" if frame["state_label"] == "rubble"
-                                        else "available")
-                frame["target_id"] = frame["state_target_id"] = "card-1"
+            for index, frame in enumerate(row["frames"]):
+                frame["state_label"] = ("unknown" if index == 0 else
+                                        "available" if row["truth_event"] else "exhausted")
+                frame["target_id"] = frame["state_target_id"] = "hero_skill:archer_queen"
+                frame["hero_deployment_truth"] = {
+                    "hero_id": "archer_queen", "card_identity_verified": True,
+                    "deployed": bool(row["truth_event"] and index > 0),
+                    "review_status": "reviewed", "review_method": "agent_visual",
+                    "reviewer": "synthetic-fixture", "review_evidence": "synthetic card context only",
+                    "source_frame_sha256": frame["parent_image_sha256"],
+                    "roi_bbox": frame["roi_bbox"][:], "frame_id": frame["frame_id"],
+                    "session_id": frame["session_id"], "camera_epoch": frame["camera_epoch"],
+                    "captured_at_monotonic": frame["captured_at_monotonic"],
+                    "client_version": frame["client_version"],
+                }
         card_root = self.root / "card-snapshot"
         frozen = freeze_dynamic_snapshot(self.snapshot_path, rows, card_root,
                                          kind="r_card", prototype_only=True)
