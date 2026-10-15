@@ -70,6 +70,7 @@ def verify_dynamic_windows(root: Path, windows: list[dict], *, kind: str,
         first_capture = None
         window_source = None
         window_card_identity = None
+        positive_building_identity = None
         frame_bounds = {}
         positive_skill_frames = []
         for frame in frames:
@@ -146,6 +147,10 @@ def verify_dynamic_windows(root: Path, windows: list[dict], *, kind: str,
             if kind != "u_position":
                 if not isinstance(frame.get("target_id"), str) or not frame["target_id"]:
                     raise DatasetError(f"{window_id}: R target identity missing")
+                if kind == "r_building" and truth:
+                    if positive_building_identity is not None and frame["target_id"] != positive_building_identity:
+                        raise DatasetError(f"{window_id}: positive R building window changes target identity")
+                    positive_building_identity = frame["target_id"]
                 hero_id = hero_skill_identity(frame["target_id"]) if kind == "r_card" else None
                 if kind == "r_card" and hero_id is None:
                     raise DatasetError(f"{window_id}: R card requires hero_skill:<known hero id> target")

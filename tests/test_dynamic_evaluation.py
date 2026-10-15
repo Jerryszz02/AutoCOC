@@ -405,6 +405,33 @@ def test_event_truth_cannot_substitute_for_reviewed_per_frame_r_state():
                 verify_dynamic_windows(root, [bad], kind="r_building", prototype_only=True)
 
 
+def test_positive_building_window_cannot_switch_reviewed_target():
+    with TemporaryDirectory() as temp:
+        root = Path(temp)
+        source = root / "source"
+        source.mkdir()
+        positive = window(source, "switch-positive", True)
+        for frame in positive["frames"][1:]:
+            frame["target_id"] = frame["state_target_id"] = "hall-2"
+        with pytest.raises(DatasetError, match="positive R building window changes target identity"):
+            verify_dynamic_windows(source, [positive], kind="r_building", prototype_only=True)
+        frozen_positive = root / "positive-frozen"
+        with pytest.raises(DatasetError, match="positive R building window changes target identity"):
+            freeze_dynamic_snapshot(source, [positive], frozen_positive,
+                                    kind="r_building", prototype_only=True)
+        assert not frozen_positive.exists()
+
+        negative = window(source, "switch-negative", False)
+        for frame in negative["frames"][1:]:
+            frame["target_id"] = frame["state_target_id"] = "hall-2"
+        assert verify_dynamic_windows(source, [negative], kind="r_building",
+                                      prototype_only=True)["negative"] == 1
+        frozen_negative = root / "negative-frozen"
+        freeze_dynamic_snapshot(source, [negative], frozen_negative,
+                                kind="r_building", prototype_only=True)
+        assert verify_dynamic_snapshot(frozen_negative, kind="r_building")["inventory"]["negative"] == 1
+
+
 def test_frozen_dynamic_snapshot_copies_pixels_and_rechecks_semantic_split():
     with TemporaryDirectory() as temp:
         root = Path(temp)

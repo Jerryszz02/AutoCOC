@@ -51,9 +51,19 @@ YOLO11n 在第 31 epoch 早停，YOLO26n 在第 33 epoch 早停，均为 640 输
 
 修复头部 BatchNorm 冻结与微调早停计数后，以相同的 43 train / 9 val / 11 test 冻结划分、seed 42、运行阈值 0.8 / margin 0.15 重新训练。新配方运行了 12 轮（5 轮头部、7 轮微调），全局最佳为从零计数的 epoch 4；验证集 argmax macro-F1 和已出现类别的最低 recall 均为 1.0，但验证集只出现 3 类，且各来自 1 个来源组。按生产运行阈值离线判定时只接受 2/9（1 张 battle、1 张 settlement），其余 7 张为 unknown，3 张 enemy_village 全部拒识，coverage 22.22%。CPU FP32 ONNX 对同一验证图的 parity 为 9/9，最大绝对差 5.7220459e-6。训练源码提交为 `8038ee391f600b26182edfbeca3a59656f785aac`；新运行与包分别为 `E:/projects/AutoCOC-training/runs/current-scene-prototype-20261015-v1-recipe2-20epoch` 和 `E:/projects/AutoCOC-training/packages/current-scene-prototype-20261015-v1-recipe2-20epoch`。两次诊断均只使用冻结 val，11 张 test 未用于选型，也没有新增实机通过证据；新旧包都保持 `prototype_only/unvalidated`，不发布。
 
+新增训练日志仅记录逐轮验证交叉熵及原运行时阈值下的按类接受/拒识，不改变最佳权重排序。`3c575ee` 上实际重跑同一 63 图快照、seed 42 和原配方，训练 53.11 秒；最佳 epoch 4、最后 epoch 11 各 244 个模型张量与旧配方 2 逐项完全一致。新包 `current-scene-prototype-20261016-validation-diagnostics` 的 CPU FP32 parity 9/9、验证接受 2/9，仍未发布。早期 epoch 3 接受 9/9，但 argmax macro-F1 只有 0.515，不能按总接受率换用它。独立记录为 `scene-validation-diagnostics-experiment.json` 和 `scene-validation-diagnostics-checkpoint-verification.json`；未使用 test 选型。
+
 R 的建筑状态和技能卡状态使用独立的四类空间与独立模型包，不能把 `truth_event` 当逐帧状态标签。`training.vision.dynamic_snapshot.freeze_dynamic_snapshot` 先把审核过的动态窗口冻结为带 `windows.jsonl`、`snapshot.json`、`split.json` 和 `SHA256SUMS` 的不可覆盖目录；训练只消费 `verify_dynamic_snapshot` 全面复核后的副本。每帧必须有 `state_label`、审核人与证据、目标身份、源图哈希和原图 ROI；同一事件/会话/阵型连通组不可跨 train/val/test。R 训练用 224×224 原图 ROI、ImageNet 预训练 MobileNetV3-Small、按类与事件连通组采样，最多 35 epoch、5 epoch 头部训练和 7 epoch 验证停滞早停，签名绑定快照、拆分、权重、种子与配置，可用同一运行目录 `last.pt` 恢复。CPU FP32 ONNX 导出通过真实 `DynamicModel` 加载与 ROI 推理，并比较最多 100 张验证帧的同输入 logits；报告仅证明导出兼容。
 
 `r_card` 只训练英雄技能卡，逐帧 `target_id` 必须为 `hero_skill:<已登记英雄ID>`，不能使用普通兵、攻城或未明确身份的卡。四类 `available/selected/exhausted/unknown` 仍是单帧状态；复合 `skill_available` 另要求连续两帧在各自**同一原图**上确认该英雄已部署。每个 R-card 标注帧须有单独复核的 `hero_deployment_truth`：`hero_id`、`card_identity_verified=true`（已确认原图 ROI 是该英雄的己方技能卡）、布尔 `deployed`、审核人/方法/证据、原图 SHA、ROI、frame/session/camera/capture/client 绑定；负例可明确标 `deployed=false`，正事件至少两帧 `available` 且 `deployed=true`。离线评估不会把此真值当模型读数，而是从哈希核对过的原图调用生产英雄卡头像与封闭 HP 识别；读不到、身份或版本不符、低置信、过期或未部署均打断事件连续性。连续证据不能跨客户端版本、模型权重或推理合同拼接。没有可独立确认的正例时技能事件指标为 `not_established`。合成测试只验证工具链；目前真实技能正例为零。
+
+已复核的 R 窗口可通过 `scripts/import_reviewed_r.py` 从 `vision_review_queue.py` 候选队列导入。输入是现有 `dynamic_windows_v1` JSONL；每帧另用 `queue_session`、`queue_frame_id` 绑定队列里的原图，保留明确的状态、事件、相机、ROI、审核和 split。路径、SHA、版本和采集时间只取自经哈希核验的队列，不接受审核文件覆盖；工具不代填标签或分组。
+
+```powershell
+python -m scripts.import_reviewed_r --queue C:\reviews\queue.json --reviews C:\reviews\r-windows.jsonl --source-root C:\data\live --kind r_card --output C:\data\r-card-frozen --prototype-only
+```
+
+不传 `--prototype-only` 时要求人工复核。技能卡必须已有同源、同 ROI、同版本的英雄身份与部署复核，才允许从队列 `hero-card:<id>` 映射为 `hero_skill:<id>`；不能仅改前缀。导入的建筑窗口须保持同一目标；共享验证器也拒绝正建筑事件跨目标，同时允许直接构造的跨目标负例用于跟踪反例。输出仅在来源、窗口、分组及快照全部验证成功后发布到新目录，拒绝覆盖。当前真实已复核 R 窗口仍为零，不能对 pending 队列直接运行后宣称训练就绪。
 
 ```powershell
 python scripts/train_dynamic_state.py --snapshot C:\data\r-building-frozen --config C:\data\r-building-config.json --output C:\runs\r-building --device 0 --pretrained C:\weights\mobilenet_v3_small-047dcff4.pth --max-epochs 35 --deadline-hours 4
