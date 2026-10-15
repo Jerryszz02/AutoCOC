@@ -1,0 +1,94 @@
+{
+  "client": "18.647.2",
+  "coordinate_resolution": [
+    1280,
+    720
+  ],
+  "fixture": "troop_picker_archer_gray_18_647_2.png",
+  "fixture_sha256": "2364fb0ae3cb0313c1764db0c5672927bea9a820b3de79762f83f7ba297d6c01",
+  "source_frame": "reports/completion-20261015/probes/20261015-233539-archer-fill/frames/00021-army-current-picker-edit-1.png",
+  "source_sha256": "9bfdc4f0ccfb7fdd411df391210692c27f55da05338dde36d2f2da2fcee29986",
+  "retained_rois_1280": [
+    [
+      200,
+      32,
+      710,
+      110
+    ],
+    [
+      545,
+      140,
+      1080,
+      305
+    ],
+    [
+      0,
+      430,
+      1280,
+      713
+    ]
+  ],
+  "ocr": [
+    {
+      "text": "我的军队",
+      "confidence": 0.99995,
+      "bbox": [
+        223,
+        64,
+        292,
+        88
+      ]
+    },
+    {
+      "text": "已保存的配置",
+      "confidence": 0.99845,
+      "bbox": [
+        592,
+        63,
+        686,
+        86
+      ]
+    },
+    {
+      "text": "343/343",
+      "confidence": 0.99996,
+      "bbox": [
+        578,
+        156,
+        668,
+        181
+      ]
+    },
+    {
+      "text": "x10",
+      "confidence": 0.95748,
+      "bbox": [
+        557,
+        194,
+        598,
+        220
+      ]
+    },
+    {
+      "text": "x2",
+      "confidence": 0.9982,
+      "bbox": [
+        872,
+        196,
+        897,
+        218
+      ]
+    },
+    {
+      "text": "x3",
+      "confidence": 0.91044,
+      "bbox": [
+        968,
+        194,
+        1001,
+        220
+      ]
+    }
+  ],
+  "anonymization": "Only navigation, selected troop cards, and picker tray are retained; account and village background pixels are zeroed."
+}

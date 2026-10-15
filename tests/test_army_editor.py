@@ -242,6 +242,63 @@ class ArmyEditorRecognitionTests(unittest.TestCase):
         self.assertFalse(unknown["complete"])
         self.assertIsNone(unknown["troops"][-1]["count"])
 
+    def test_current_archer_gray_picker_cannot_offer_enabled_increment(self):
+        fixture_root = Path(__file__).parent / "fixtures"
+        metadata = json.loads((fixture_root / "troop_picker_archer_gray_18_647_2.json")
+                              .read_text(encoding="utf-8"))
+        path = fixture_root / metadata["fixture"]
+        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),
+                         metadata["fixture_sha256"])
+        source_path = Path(r"E:\projects\AutoCOC") / metadata["source_frame"]
+        if source_path.is_file():
+            self.assertEqual(hashlib.sha256(source_path.read_bytes()).hexdigest(),
+                             metadata["source_sha256"])
+            source = cv2.imdecode(np.fromfile(source_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            source = cv2.resize(source, (1280, 720), interpolation=cv2.INTER_AREA)
+            fixture = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            for left, top, right, bottom in metadata["retained_rois_1280"]:
+                self.assertTrue(np.array_equal(fixture[top:bottom, left:right],
+                                               source[top:bottom, left:right]))
+        texts = [OCRText(**item) for item in metadata["ocr"]]
+        provider = RapidOCRProvider()
+        editor = recognize_army_editor(path, provider, texts, client_version="18.647.2")
+        self.assertEqual(editor["surface"], "current_picker")
+        self.assertEqual(editor["capacities"]["troop"], {"used": 343, "total": 343})
+        self.assertTrue(editor["complete_kinds"]["troop"], editor["unknowns"])
+        self.assertEqual([(card["unit_id"], card["count"]) for card in editor["cards"]],
+                         [("electro_dragon", 10), ("dragon", 1), ("baby_dragon", 1),
+                          ("balloon", 2), ("archer", 3)])
+        increments = [control for control in editor["controls"]
+                      if control["action"] == "increment"]
+        self.assertTrue(increments)
+        self.assertFalse(any(control["enabled"] for control in increments))
+        self.assertTrue(all(control["capacity_blocked"] for control in increments))
+        archer = next(control for control in increments if control["unit_id"] == "archer")
+        self.assertEqual(archer["evidence"]["state"], "capacity_gray")
+        self.assertTrue(archer["evidence"]["identity"]["version_verified"])
+        self.assertEqual(archer["point"], [355, 625])
+
+        wrong_version = recognize_army_editor(path, provider, texts,
+                                              client_version="18.647.3")
+        self.assertFalse(wrong_version["complete_kinds"]["troop"])
+        self.assertFalse(any(control["action"] == "increment"
+                             for control in wrong_version["controls"]))
+        contradictory = [OCRText("342/343", item.confidence, item.bbox)
+                         if item.text == "343/343" else item for item in texts]
+        mismatch = recognize_army_editor(path, provider, contradictory,
+                                         client_version="18.647.2")
+        self.assertFalse(mismatch["complete_kinds"]["troop"])
+        self.assertFalse(any(control["action"] == "increment"
+                             for control in mismatch["controls"]))
+        image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        image[595:637, 313:360] = 0
+        cv2.imencode(".png", image)[1].tofile(self.path)
+        missing = recognize_army_editor(self.path, provider, texts,
+                                        client_version="18.647.2")
+        self.assertFalse(any(control["action"] == "increment"
+                             and control["unit_id"] == "archer"
+                             for control in missing["controls"]))
+
     def test_without_page_anchors_remains_unknown(self):
         editor = self.read([OCRText("编辑", .99, (1150, 230, 1190, 255))])
         self.assertEqual(editor["surface"], "unknown")

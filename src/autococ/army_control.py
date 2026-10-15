@@ -199,6 +199,49 @@ def _hero_loadout(army: dict, hero_ids: set[str]) -> dict | None:
     return loadout
 
 
+def _army_capacity_counts(army: dict) -> dict[str, tuple[int, int]] | None:
+    """Compare displayed capacities without volatile OCR confidence or boxes."""
+    counts = {}
+    for kind in ("troops", "spells", "heroes", "siege"):
+        entry = army.get(kind)
+        if (not isinstance(entry, dict) or type(entry.get("used")) is not int
+                or type(entry.get("capacity")) is not int):
+            return None
+        counts[kind] = (entry["used"], entry["capacity"])
+    return counts
+
+
+def _reobserve_missing_loadout(session, snapshot, observed: dict[str, dict[str, int]],
+                               evidence: list[Path]):
+    """Recover a transient portrait frame without borrowing identity or icons."""
+    original_army = snapshot.observations["army"]
+    initial_capacities = _army_capacity_counts(original_army)
+    if initial_capacities is None:
+        return snapshot, observed, None, "army_capacity_unverified_during_loadout_recheck"
+    last_path = snapshot.screenshot_path
+    for attempt in range(1, 3):
+        session.check_deadline()
+        candidate = session.observe(f"army-loadout-recheck-{attempt}")
+        evidence.append(candidate.screenshot_path)
+        if candidate.screenshot_path == last_path:
+            return snapshot, observed, None, "army_frame_not_fresh_during_loadout_recheck"
+        last_path = candidate.screenshot_path
+        editor = candidate.observations.get("army_editor")
+        if (candidate.scene != "training" or not isinstance(editor, dict)
+                or editor.get("surface") != "current" or editor.get("ready") is not True):
+            return snapshot, observed, None, "army_page_unverified_during_loadout_recheck"
+        counts, issue = _read_current(candidate, full=True)
+        if issue is not None:
+            return snapshot, observed, None, issue
+        army = candidate.observations["army"]
+        if counts != observed or _army_capacity_counts(army) != initial_capacities:
+            return snapshot, observed, None, "army_changed_during_loadout_recheck"
+        loadout = _hero_loadout(army, set(counts["hero"]))
+        if loadout is not None:
+            return candidate, counts, loadout, None
+    return snapshot, observed, None, "hero_equipment_or_pet_observation_missing"
+
+
 def _same_loadout(first: dict | None, second: dict | None) -> bool:
     if first is None or second is None or set(first) != set(second):
         return False
@@ -593,7 +636,17 @@ def ensure_army(session, recipe: ArmyRecipe) -> TaskResult:
     army = snapshot.observations["army"]
     original_loadout = _hero_loadout(army, set(observed["hero"]))
     if original_loadout is None:
-        return _result("not_supported", "hero_equipment_or_pet_observation_missing", evidence, actions=0)
+        snapshot, observed, original_loadout, issue = _reobserve_missing_loadout(
+            session, snapshot, observed, evidence)
+        if issue is not None:
+            return _result("not_supported", issue, evidence, actions=0)
+        editor = snapshot.observations["army_editor"]
+        desired, issue = _desired(observed, recipe)
+        if issue is not None:
+            return _result("not_supported", issue, evidence, actions=0)
+        known_issue = _preflight_change(snapshot, editor, observed, desired, known_only=True)
+        if known_issue is not None and _known_no_opportunity(known_issue):
+            return _result("skipped", known_issue, evidence, actions=0, recipe_mutations=0)
     changed_kinds = {kind for kind in _KINDS if not _matches(observed, desired, kinds={kind})}
     if (changed_kinds <= {"troop", "spell"} and all(
             _control(editor, "open_picker", kind=kind) is not None for kind in changed_kinds)):

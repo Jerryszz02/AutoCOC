@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 import unittest
 from unittest.mock import Mock, call
@@ -412,12 +413,96 @@ class ArmyControlTests(unittest.TestCase):
 
     def test_missing_hero_equipment_or_pet_snapshot_prevents_saved_use(self):
         session = Mock()
-        shot = current()
-        shot.observations["army"]["hero_loadout_complete"] = False
-        session.observe.return_value = shot
+        frames = [current(f"missing-loadout-{index}.png") for index in range(3)]
+        for shot in frames:
+            shot.observations["army"]["hero_loadout_complete"] = False
+        session.observe.side_effect = frames
         result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
         self.assertEqual(result.reason, "hero_equipment_or_pet_observation_missing")
         session.tap.assert_not_called()
+
+    def test_transient_hero_loadout_recovers_from_a_new_complete_frame(self):
+        first, settled = current("animated.png"), current("settled.png")
+        first.observations["army"]["hero_loadout_complete"] = False
+        first.observations["army"]["hero_loadout"] = {}
+        first.observations["army_editor"]["controls"] = []
+        session = Mock()
+        session.observe.side_effect = [first, settled, verified_saved()]
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual(result.reason, "saved_plan_or_editor_samples_unavailable")
+        self.assertEqual(session.observe.call_args_list[:2], [
+            call("army-preparation"), call("army-loadout-recheck-1")])
+        self.assertEqual(session.tap.call_count, 1)
+        self.assertEqual(result.evidence[:2], [Path("animated.png"), Path("settled.png")])
+
+    def test_transient_hero_loadout_remains_unverified_after_two_fresh_frames(self):
+        frames = [current(f"still-{index}.png") for index in range(3)]
+        for shot in frames:
+            shot.observations["army"]["hero_loadout_complete"] = False
+            shot.observations["army"]["hero_loadout"] = {}
+        session = Mock()
+        session.observe.side_effect = frames
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual(result.reason, "hero_equipment_or_pet_observation_missing")
+        self.assertEqual(session.observe.call_count, 3)
+        session.tap.assert_not_called()
+
+    def test_transient_hero_loadout_can_recover_on_last_bounded_frame(self):
+        frames = [current(f"frame-{index}.png") for index in range(3)]
+        for shot in frames[:2]:
+            shot.observations["army"]["hero_loadout_complete"] = False
+            shot.observations["army"]["hero_loadout"] = {}
+        session = Mock()
+        session.observe.side_effect = [*frames, verified_saved()]
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual(result.reason, "saved_plan_or_editor_samples_unavailable")
+        self.assertEqual(session.tap.call_count, 1)
+        self.assertEqual(result.evidence[:3], [shot.screenshot_path for shot in frames])
+
+    def test_loadout_recheck_requires_a_distinct_captured_frame(self):
+        first, repeated = current("same.png"), current("same.png")
+        first.observations["army"]["hero_loadout_complete"] = False
+        first.observations["army"]["hero_loadout"] = {}
+        session = Mock()
+        session.observe.side_effect = [first, repeated]
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+        self.assertEqual(result.reason, "army_frame_not_fresh_during_loadout_recheck")
+        session.tap.assert_not_called()
+
+    def test_loadout_recheck_rejects_changed_army_or_hero_before_input(self):
+        for changed in ("spell", "hero", "capacity"):
+            with self.subTest(changed=changed):
+                first, second = current("animated.png"), current("changed.png")
+                first.observations["army"]["hero_loadout_complete"] = False
+                first.observations["army"]["hero_loadout"] = {}
+                if changed == "spell":
+                    second.observations["army"]["manifest"]["spells"][0]["count"] = 3
+                elif changed == "hero":
+                    second.observations["army"]["identity_cards"][0]["unit_id"] = "archer_queen"
+                else:
+                    second.observations["army"]["troops"]["used"] = 321
+                session = Mock()
+                session.observe.side_effect = [first, second]
+                result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+                self.assertEqual(result.status, "not_supported")
+                self.assertEqual(session.observe.call_count, 2)
+                session.tap.assert_not_called()
+
+    def test_loadout_recheck_stops_on_account_conflict_or_other_surface(self):
+        for scene in ("account_in_use", "unknown", "village", "training"):
+            with self.subTest(scene=scene):
+                first = current("animated.png")
+                first.observations["army"]["hero_loadout_complete"] = False
+                first.observations["army"]["hero_loadout"] = {}
+                second = replace(current("not-current.png"), scene=scene)
+                if scene == "training":
+                    second.observations["army_editor"]["surface"] = "saved"
+                session = Mock()
+                session.observe.side_effect = [first, second]
+                result = ensure_army(session, ArmyRecipe((ArmyRequirement("lightning_spell", 4),)))
+                self.assertEqual(result.status, "not_supported")
+                self.assertEqual(session.observe.call_count, 2)
+                session.tap.assert_not_called()
 
     def test_saved_plan_must_preserve_unmentioned_troops_heroes_and_siege(self):
         session = Mock()

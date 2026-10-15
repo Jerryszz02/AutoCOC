@@ -8,6 +8,15 @@ Ultralytics 的设置在每次运行目录隔离；首次导入前即写入 `syn
 
 输入必须是 `scripts/vision_data.py export` 产生的完整复核快照，带 `SHA256SUMS`、`train.txt`、`val.txt`、`test.txt`、`split.json` 和标签文件。训练和导出会核对全部文件哈希。32 图 2 epoch 冒烟用 `--prototype --max-epochs 2`。原型完成冒烟后，可用 `--prototype --development --max-epochs 20` 在同一冻结划分上使用全部训练及验证图探索；场景最多 35 epoch，建筑最多 100 epoch 且 batch 不超过 8，仍不可把测试集用于调参。建筑训练把原图和标签复制到运行目录，避免 Ultralytics 缓存写入冻结快照。原型数据和模型始终标 `prototype_only`，不能充当正式验收。
 
+场景人工复核使用 `scripts/review_vision_scenes.py`。源目录须已有通过校验的 `manifest.jsonl`、`annotations.jsonl` 和原图；日志必须放在源目录外。启动后在本机浏览器打开终端给出的地址，逐张查看原图，由复核者填写自己的名字并明确确认建议、改标签或跳过。方向键只翻图，不会提交；跳过也可撤回该图之前的确认。工具不会替用户确认，也不会覆盖原有 Agent 标注。
+
+```powershell
+python scripts/review_vision_scenes.py serve --root C:\data\scene-source --journal C:\reviews\scene-verdicts.jsonl
+python scripts/review_vision_scenes.py export --root C:\data\scene-source --journal C:\reviews\scene-verdicts.jsonl --output C:\data\scene-human-reviewed
+```
+
+服务仅监听 `127.0.0.1`，页面地址仅供本机复核。日志追加保存每次明确操作，绑定原图、来源清单和标注哈希；来源变动会拒绝提交或导出。导出只包含最新操作为确认或改标签的图，保留原始来源与全部复核历史；目标须是新目录，全部写入和校验成功后才发布。零确认时拒绝导出。导出结果还须经过既有分组、覆盖检查、`split` 和 `export` 才成为训练快照；它不自动满足正式数量门槛，也不会把原型模型改为正式模型。
+
 建筑可按明确的类别范围制作快照。逐张标注中的 `buildings.complete=false` 和 `buildings.complete_classes=["town_hall","air_defense"]` 表示审核者已在**整张图**穷尽这两类，包括该类确实为零实例的图；它不表示只框出了目前看见的几个目标。若遮挡、裁切或证据不足以确认某类已穷尽，不要把该类写进 `complete_classes`。该字段只接受非空、无重复的注册类别，且必须保留审核人、方法与证据。旧的 `complete=true` 仍表示全部建筑类已穷尽。
 
 对类别子集，`split` 与 `export` 必须以相同顺序显式传 `--classes town_hall air_defense`。拆分仅选择每张图都对这两类完整复核的样本；快照保留原标注供核查，但训练标签只含启用类，且 split、snapshot、class mapping 三处固定类别顺序与稳定 ID。任何类别或 taxonomy ID 变化均拒绝导出或训练前验证。没有显式 `--classes` 的旧拆分仍只接受 `complete=true`，不会自动放宽到部分标注；正式训练仍要求人工复核和已知客户端版本，`--prototype-only` 不会升格为正式数据。

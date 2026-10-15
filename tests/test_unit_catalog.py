@@ -20,20 +20,22 @@ class UnitCatalogTests(unittest.TestCase):
         root = Path(__file__).parents[1]
         metadata = json.loads((root / "tests/fixtures/troop_picker_18_647_2.json")
                               .read_text(encoding="utf-8"))
-        entries = {entry["unit_id"]: entry for entry in
+        entries = [entry for entry in
                    template_manifest(client_version="18.647.2")["templates"]
-                   if entry.get("surface") == "current_picker"}
+                   if entry.get("surface") == "current_picker"]
         boxes = {"archer": (293, 568, 417, 692),
                  "balloon": (684, 431, 808, 555),
                  "dragon": (814, 568, 938, 692),
                  "baby_dragon": (945, 568, 1069, 692),
                  "electro_dragon": (1075, 568, 1199, 692)}
-        self.assertEqual(set(entries), set(boxes))
+        self.assertEqual({(entry["unit_id"], entry["state"]) for entry in entries},
+                         {("archer", "active"), ("archer", "capacity_gray"),
+                          *((name, "capacity_gray") for name in boxes if name != "archer")})
         self.assertEqual({name: get_unit(name).housing_space for name in boxes},
                          {"archer": 1, "balloon": 5, "dragon": 20,
                           "baby_dragon": 10, "electro_dragon": 30})
         provider = RapidOCRProvider()
-        for entry in entries.values():
+        for entry in entries:
             self.assertEqual(entry["observed_housing_space"],
                              get_unit(entry["unit_id"]).housing_space)
             template_path = root / "assets/catalogs" / entry["path"]
@@ -64,7 +66,8 @@ class UnitCatalogTests(unittest.TestCase):
                                                        (left*2, top*2, right*2, bottom*2))
                     self.assertTrue(any(item.text == str(entry["observed_housing_space"])
                                         and item.confidence >= .95 for item in observed))
-        detail = entries["archer"]
+        detail = next(entry for entry in entries if entry["unit_id"] == "archer"
+                      and entry["state"] == "active")
         detail_path = Path(r"E:\projects\AutoCOC") / detail["information_panel"]
         if detail_path.is_file():
             self.assertEqual(hashlib.sha256(detail_path.read_bytes()).hexdigest(),

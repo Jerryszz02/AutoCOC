@@ -564,6 +564,19 @@
       "information_panel_sha256": "e039142c119a81c3511136b88d399957bb5d3fe83e41a3d229702540fc966c3d"
     },
     {
+      "unit_id": "archer",
+      "surface": "current_picker",
+      "path": "units/archer_picker_capacity_gray_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-233539-archer-fill/frames/00021-army-current-picker-edit-1.png",
+      "source_bbox_1280": [313, 595, 360, 637],
+      "state": "capacity_gray",
+      "client_version": "18.647.2",
+      "observed_housing_space": 1,
+      "housing_label_bbox_1280": [337, 653, 363, 688],
+      "source_sha256": "9bfdc4f0ccfb7fdd411df391210692c27f55da05338dde36d2f2da2fcee29986",
+      "template_sha256": "84ecf9c0be25b257394bbee9ffbc4af26f50eae1f6f35199dc87714e8f9f581f"
+    },
+    {
       "unit_id": "balloon",
       "surface": "current_picker",
       "path": "units/balloon_picker_capacity_gray_18_647_2.png",
