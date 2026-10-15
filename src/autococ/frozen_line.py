@@ -23,6 +23,8 @@ from .strategies import BattleContext, EdragLineStrategy
 
 
 _CLIENT_VERSION = "18.647.2"
+_BASE_LINE_TROOP_IDS = frozenset({"electro_dragon", "dragon", "baby_dragon", "balloon"})
+_ARCHER_FILLER_UNIT_ID = "archer"
 _COUNT = re.compile(r"[xX×]\s*(\d+)")
 
 
@@ -275,7 +277,7 @@ def freeze_model_free_line(session: Any, selected: SceneSnapshot, *,
                            battle_id: str, latest_start: float, burst_limit_sec: float,
                            hero_ids: Sequence[str] = (), hero_manifest: dict | None = None,
                            clock: Callable[[], float] = time.monotonic) -> FrozenLinePlan:
-    """Freeze a one-shot four-troop line; all discovery stays before this call."""
+    """Freeze the existing line roster, optionally with a bounded archer filler row."""
     if getattr(getattr(session.config, "vision_agent", None), "enabled", False):
         raise FlowError("Model-free line cannot replace vision-mode model release")
     if getattr(session, "client_version", None) != _CLIENT_VERSION or not isinstance(battle_id, str) or not battle_id:
@@ -315,19 +317,27 @@ def freeze_model_free_line(session: Any, selected: SceneSnapshot, *,
     troops = manifest.get("troops") if isinstance(manifest, dict) else None
     if (not isinstance(manifest, dict) or manifest.get("complete") is not True or
             manifest.get("identity_complete") is not True or manifest.get("unknowns") or
-            not isinstance(troops, list) or len(troops) != 4 or
+            not isinstance(troops, list) or len(troops) not in {4, 5} or
             any(not isinstance(row, dict) or not isinstance(row.get("unit_id"), str) or
                 row.get("source") != "army" or type(row.get("count")) is not int or row["count"] <= 0
                 for row in troops)):
-        raise FlowError("Frozen line requires an independently complete four-troop army manifest")
+        raise FlowError("Frozen line requires four troop rows or one bounded archer filler row")
     expected = {(row["unit_id"], row["source"]): row["count"] for row in troops}
-    if len(expected) != 4:
+    if len(expected) != len(troops):
         raise FlowError("Frozen line army manifest repeats a troop identity")
+    if len(troops) == 5:
+        expected_five_ids = {
+            (unit_id, "army") for unit_id in _BASE_LINE_TROOP_IDS | {_ARCHER_FILLER_UNIT_ID}
+        }
+        archer_count = expected.get((_ARCHER_FILLER_UNIT_ID, "army"))
+        if (set(expected) != expected_five_ids or type(archer_count) is not int or
+                not 1 <= archer_count <= 3):
+            raise FlowError("Frozen line five-card support requires the four existing troop identities plus one to three archers")
     current_cards = _cards(selected, client_version=_CLIENT_VERSION, expected=expected)
     previous_cards = _cards(toolbar_before, client_version=_CLIENT_VERSION, expected=expected)
     current_troops = sorted((card for card in current_cards if card["kind"] == "troop"),
                             key=lambda card: card["point"][0])
-    if len(current_troops) != 4 or {(card["unit_id"], card["source"]) for card in current_troops} != set(expected):
+    if len(current_troops) != len(expected) or {(card["unit_id"], card["source"]) for card in current_troops} != set(expected):
         raise FlowError("Frozen line toolbar does not contain exactly the manifest troops")
     # Stable card positions are established by two real, distinct source frames.
     previous = {(card["kind"], card["unit_id"], card["source"]): card for card in previous_cards}
@@ -336,8 +346,8 @@ def freeze_model_free_line(session: Any, selected: SceneSnapshot, *,
         if (prior is None or prior["count"] != card["count"] or
                 any(abs(prior["point"][axis] - card["point"][axis]) > 4 for axis in (0, 1))):
             raise FlowError("Frozen line toolbar geometry/count changed across source frames")
-    if len([card for card in previous_cards if card["kind"] == "troop"]) != 4:
-        raise FlowError("Frozen line previous toolbar lacks four manifest troops")
+    if len([card for card in previous_cards if card["kind"] == "troop"]) != len(expected):
+        raise FlowError("Frozen line previous toolbar lacks all manifest troops")
     from .battle_vision import selected_card_bbox
     if selected_card_bbox(selected.screenshot_path, current_troops[0]["bbox"], frame.resolution) is None:
         raise FlowError("Frozen line first troop is not selected in the current frame")
@@ -402,11 +412,19 @@ def freeze_model_free_line(session: Any, selected: SceneSnapshot, *,
     placement = EdragLineStrategy().build_plan(BattleContext(tuple(current_troops),
                                                               tuple(selected_heroes), tuple(terrain)))
     actions = []
-    for index, step in enumerate(placement.troops):
+    troop_steps = placement.troops
+    if len(current_troops) == 5:
+        # Keep the bounded filler last even when it is the preselected leftmost card.
+        troop_steps = tuple(sorted(
+            troop_steps, key=lambda step: step.card["unit_id"] == _ARCHER_FILLER_UNIT_ID))
+    selected_troop = (current_troops[0]["unit_id"], current_troops[0]["source"])
+    for index, step in enumerate(troop_steps):
         card = step.card
-        if index:
+        card_identity = (card["unit_id"], card["source"])
+        if card_identity != selected_troop:
             actions.append(PreparedInput(f"select-troop-{index}", "select", card["point"],
                                          card["unit_id"], card["source"]))
+        selected_troop = card_identity
         for offset, point in enumerate(step.points):
             actions.append(PreparedInput(f"troop-{index}-{offset}", "deploy", _point(point, *frame.resolution),
                                          card["unit_id"], card["source"], .12))

@@ -1,12 +1,15 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import hashlib
+import json
 import unittest
 
 import cv2
 import numpy as np
 
 from autococ.army_editor import recognize_army_editor, recognize_hero_loadout, visual_fingerprint_matches
-from autococ.ocr import OCRText
+from autococ.army_manifest import recognize_army_manifest
+from autococ.ocr import OCRText, RapidOCRProvider
 
 
 class ArmyEditorRecognitionTests(unittest.TestCase):
@@ -101,6 +104,143 @@ class ArmyEditorRecognitionTests(unittest.TestCase):
         self.assertEqual(editor["surface"], "picker")
         self.assertTrue(editor["ready"])
         self.assertEqual(editor["controls"], [])
+
+    def test_current_troop_picker_exposes_only_sampled_active_archer(self):
+        fixture_root = Path(__file__).parent / "fixtures"
+        metadata = json.loads((fixture_root / "troop_picker_18_647_2.json").read_text(encoding="utf-8"))
+        provider = RapidOCRProvider()
+        for frame in metadata["frames"]:
+            with self.subTest(frame=frame["fixture"]):
+                path = fixture_root / frame["fixture"]
+                self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),
+                                 frame["fixture_sha256"])
+                texts = [OCRText(**item) for item in frame["ocr"]]
+                editor = recognize_army_editor(path, provider, texts,
+                                               client_version="18.647.2")
+                self.assertEqual(editor["surface"], "current_picker")
+                self.assertTrue(editor["ready"])
+                self.assertTrue(editor["complete_kinds"]["troop"], editor["unknowns"])
+                self.assertEqual([(card["unit_id"], card["count"]) for card in editor["cards"]],
+                                 [("electro_dragon", 10), ("dragon", 1),
+                                  ("baby_dragon", 1), ("balloon", 2)])
+                self.assertEqual(editor["unit_housing_space"],
+                                 {"electro_dragon": 30, "dragon": 20,
+                                  "baby_dragon": 10, "balloon": 5, "archer": 1})
+                additions = [control for control in editor["controls"]
+                             if control["action"] == "increment"]
+                self.assertEqual([(control["unit_id"], control["point"],
+                                   control["enabled"]) for control in additions],
+                                 [("archer", [355, 625], True)])
+                self.assertEqual(editor["unit_availability"]["archer"],
+                                 {"available": True, "reason": "active_picker_card"})
+                self.assertTrue(additions[0]["evidence"]["identity"]["version_verified"])
+
+                wrong_version = recognize_army_editor(path, provider, texts,
+                                                       client_version="18.647.3")
+                self.assertFalse(wrong_version["complete_kinds"]["troop"])
+                self.assertFalse(any(control["action"] == "increment"
+                                     for control in wrong_version["controls"]))
+
+        # A count-only frame never establishes a complete current group.
+        frame = metadata["frames"][0]
+        path = fixture_root / frame["fixture"]
+        texts = [OCRText(**item) for item in frame["ocr"]]
+        incomplete = recognize_army_editor(path, None, texts, client_version="18.647.2")
+        self.assertFalse(incomplete["complete_kinds"]["troop"])
+
+        # A neighbouring gray portrait cannot substitute for the archer card.
+        image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        image[590:650, 300:375] = 0
+        cv2.imencode(".png", image)[1].tofile(self.path)
+        masked = recognize_army_editor(self.path, provider, texts, client_version="18.647.2")
+        self.assertFalse(any(control["action"] == "increment"
+                             for control in masked["controls"]))
+
+    def test_current_archer_picker_replay_requires_five_named_counted_cards(self):
+        fixture_root = Path(__file__).parent / "fixtures"
+        metadata = json.loads((fixture_root / "army_archer_18_647_2.json")
+                              .read_text(encoding="utf-8"))
+        frame = metadata["frames"][0]
+        path = fixture_root / frame["fixture"]
+        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),
+                         frame["fixture_sha256"])
+        texts = [OCRText(**item) for item in frame["ocr"]]
+        provider = RapidOCRProvider()
+        editor = recognize_army_editor(path, provider, texts, client_version="18.647.2")
+        expected = [("electro_dragon", 10), ("dragon", 1), ("baby_dragon", 1),
+                    ("balloon", 2), ("archer", 1)]
+        self.assertEqual(editor["surface"], "current_picker")
+        self.assertEqual(editor["capacities"]["troop"], {"used": 341, "total": 343})
+        self.assertTrue(editor["complete_kinds"]["troop"], editor["unknowns"])
+        self.assertEqual([(card["unit_id"], card["count"]) for card in editor["cards"]],
+                         expected)
+        self.assertEqual([(control["unit_id"], control["enabled"])
+                          for control in editor["controls"] if control["action"] == "increment"],
+                         [("archer", True)])
+
+        unsupported = recognize_army_editor(path, provider, texts, client_version="18.647.3")
+        self.assertFalse(unsupported["complete_kinds"]["troop"])
+        self.assertFalse(any(control["action"] == "increment"
+                             for control in unsupported["controls"]))
+        image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        missing_portrait = image.copy()
+        missing_portrait[226:268, 991:1036] = 0
+        cv2.imencode(".png", missing_portrait)[1].tofile(self.path)
+        unknown = recognize_army_editor(self.path, provider, texts, client_version="18.647.2")
+        self.assertFalse(unknown["complete_kinds"]["troop"])
+        self.assertIsNone(unknown["cards"][-1]["unit_id"])
+        missing_count = image.copy()
+        missing_count[194:226, 968:1005] = 0
+        cv2.imencode(".png", missing_count)[1].tofile(self.path)
+        without_archer_count = [item for item in texts if not (
+            item.text == "x1" and item.bbox and item.bbox[0] >= 968 and item.bbox[1] < 230)]
+        unknown = recognize_army_editor(self.path, provider, without_archer_count,
+                                        client_version="18.647.2")
+        self.assertFalse(unknown["complete_kinds"]["troop"])
+        self.assertIsNone(unknown["cards"][-1]["count"])
+
+    def test_current_archer_army_replay_needs_quantity_and_portrait(self):
+        fixture_root = Path(__file__).parent / "fixtures"
+        metadata = json.loads((fixture_root / "army_archer_18_647_2.json")
+                              .read_text(encoding="utf-8"))
+        frame = metadata["frames"][1]
+        path = fixture_root / frame["fixture"]
+        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),
+                         frame["fixture_sha256"])
+        texts = [OCRText(**item) for item in frame["ocr"]]
+        provider = RapidOCRProvider()
+        capacities = {"troops": {"used": 341, "capacity": 343}}
+
+        def read(target, items, version="18.647.2"):
+            return recognize_army_manifest(target, provider, items, groups=("troops",),
+                                           capacities=capacities, client_version=version)
+
+        army = read(path, texts)
+        self.assertTrue(army["complete"], army["unknowns"])
+        self.assertTrue(army["identity_complete"])
+        self.assertEqual([(card["unit_id"], card["count"]) for card in army["troops"]],
+                         [("electro_dragon", 10), ("dragon", 1), ("baby_dragon", 1),
+                          ("balloon", 2), ("archer", 1)])
+        self.assertEqual(army["troops"][-1]["evidence"]["identity"]["version_verified"],
+                         True)
+        self.assertFalse(read(path, texts, "18.647.3")["identity_complete"])
+
+        image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        missing_portrait = image.copy()
+        missing_portrait[452:536, 1982:2072] = 0
+        cv2.imencode(".png", missing_portrait)[1].tofile(self.path)
+        unknown = read(self.path, texts)
+        self.assertFalse(unknown["identity_complete"])
+        self.assertIsNone(unknown["troops"][-1]["unit_id"])
+
+        missing_count = image.copy()
+        missing_count[388:452, 1936:2010] = 0
+        cv2.imencode(".png", missing_count)[1].tofile(self.path)
+        without_archer_count = [item for item in texts if not (
+            item.text == "x1" and item.bbox and item.bbox[0] >= 968 and item.bbox[1] < 230)]
+        unknown = read(self.path, without_archer_count)
+        self.assertFalse(unknown["complete"])
+        self.assertIsNone(unknown["troops"][-1]["count"])
 
     def test_without_page_anchors_remains_unknown(self):
         editor = self.read([OCRText("编辑", .99, (1150, 230, 1190, 255))])

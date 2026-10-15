@@ -7,7 +7,7 @@ import unittest
 import cv2
 import numpy as np
 
-from autococ.unit_catalog import ArmyRecipe, ArmyRequirement, coverage, recognize_card_identity, recognize_large_hero_identity, template_manifest
+from autococ.unit_catalog import ArmyRecipe, ArmyRequirement, coverage, get_unit, recognize_card_identity, recognize_large_hero_identity, template_manifest
 from autococ.army_manifest import recognize_army_heroes
 from autococ.locator import scale_box
 from autococ.ocr import OCRText, RapidOCRProvider
@@ -16,6 +16,131 @@ from autococ.vision import ScreenshotRecognizer
 
 
 class UnitCatalogTests(unittest.TestCase):
+    def test_current_picker_samples_and_housing_are_source_bound(self):
+        root = Path(__file__).parents[1]
+        metadata = json.loads((root / "tests/fixtures/troop_picker_18_647_2.json")
+                              .read_text(encoding="utf-8"))
+        entries = {entry["unit_id"]: entry for entry in
+                   template_manifest(client_version="18.647.2")["templates"]
+                   if entry.get("surface") == "current_picker"}
+        boxes = {"archer": (293, 568, 417, 692),
+                 "balloon": (684, 431, 808, 555),
+                 "dragon": (814, 568, 938, 692),
+                 "baby_dragon": (945, 568, 1069, 692),
+                 "electro_dragon": (1075, 568, 1199, 692)}
+        self.assertEqual(set(entries), set(boxes))
+        self.assertEqual({name: get_unit(name).housing_space for name in boxes},
+                         {"archer": 1, "balloon": 5, "dragon": 20,
+                          "baby_dragon": 10, "electro_dragon": 30})
+        provider = RapidOCRProvider()
+        for entry in entries.values():
+            self.assertEqual(entry["observed_housing_space"],
+                             get_unit(entry["unit_id"]).housing_space)
+            template_path = root / "assets/catalogs" / entry["path"]
+            self.assertEqual(hashlib.sha256(template_path.read_bytes()).hexdigest(),
+                             entry["template_sha256"])
+            source_path = Path(r"E:\projects\AutoCOC") / entry["source_frame"]
+            if source_path.is_file():
+                self.assertEqual(hashlib.sha256(source_path.read_bytes()).hexdigest(),
+                                 entry["source_sha256"])
+                native = cv2.imdecode(np.fromfile(source_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+                source = cv2.resize(native, (1280, 720), interpolation=cv2.INTER_AREA)
+                left, top, right, bottom = entry["source_bbox_1280"]
+                template = cv2.imdecode(np.fromfile(template_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+                self.assertTrue(np.array_equal(template, source[top:bottom, left:right]))
+                left, top, right, bottom = entry["housing_label_bbox_1280"]
+                label = native[top*2:bottom*2, left*2:right*2]
+                if entry["unit_id"] == "balloon":
+                    # This stylized 5 reads as S in raw OCR. Two independent
+                    # contrast views of the actual label recover its digit.
+                    gray = cv2.cvtColor(label, cv2.COLOR_BGR2GRAY)
+                    reads = [provider.recognize_line_image(cv2.threshold(
+                        gray, threshold, 255, cv2.THRESH_BINARY)[1])
+                        for threshold in (85, 180)]
+                    self.assertTrue(all(any(item.text == "5" and item.confidence >= .5
+                                            for item in view) for view in reads))
+                else:
+                    observed = provider.recognize_line(source_path,
+                                                       (left*2, top*2, right*2, bottom*2))
+                    self.assertTrue(any(item.text == str(entry["observed_housing_space"])
+                                        and item.confidence >= .95 for item in observed))
+        detail = entries["archer"]
+        detail_path = Path(r"E:\projects\AutoCOC") / detail["information_panel"]
+        if detail_path.is_file():
+            self.assertEqual(hashlib.sha256(detail_path.read_bytes()).hexdigest(),
+                             detail["information_panel_sha256"])
+        for frame in metadata["frames"]:
+            image = cv2.imdecode(np.fromfile(root / "tests/fixtures" / frame["fixture"],
+                                             dtype=np.uint8), cv2.IMREAD_COLOR)
+            source_path = Path(r"E:\projects\AutoCOC") / frame["source_frame"]
+            if source_path.is_file():
+                self.assertEqual(hashlib.sha256(source_path.read_bytes()).hexdigest(),
+                                 frame["source_sha256"])
+                source = cv2.imdecode(np.fromfile(source_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+                source = cv2.resize(source, (1280, 720), interpolation=cv2.INTER_AREA)
+                for left, top, right, bottom in frame["retained_rois_1280"]:
+                    self.assertTrue(np.array_equal(image[top:bottom, left:right],
+                                                   source[top:bottom, left:right]))
+            for unit_id, box in boxes.items():
+                with self.subTest(frame=frame["fixture"], unit_id=unit_id):
+                    result = recognize_card_identity(image, box, "troop",
+                                                     surface="current_picker",
+                                                     client_version="18.647.2")
+                    self.assertEqual(result["unit_id"], unit_id)
+                    self.assertGreaterEqual(result["confidence"], .94)
+                    self.assertIsNone(recognize_card_identity(
+                        image, box, "troop", surface="current_picker",
+                        client_version="18.600.7")["unit_id"])
+
+    def test_current_archer_army_template_and_two_independent_frames(self):
+        root = Path(__file__).parents[1]
+        template = next(entry for entry in template_manifest(client_version="18.647.2")["templates"]
+                        if entry["unit_id"] == "archer" and entry["surface"] == "army")
+        sample_path = root / "assets/catalogs" / template["path"]
+        self.assertEqual(hashlib.sha256(sample_path.read_bytes()).hexdigest(),
+                         template["template_sha256"])
+        source_path = Path(r"E:\projects\AutoCOC") / template["source_frame"]
+        if source_path.is_file():
+            self.assertEqual(hashlib.sha256(source_path.read_bytes()).hexdigest(),
+                             template["source_sha256"])
+            source = cv2.imdecode(np.fromfile(source_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            source = cv2.resize(source, (1280, 720), interpolation=cv2.INTER_AREA)
+            left, top, right, bottom = template["source_bbox_1280"]
+            sample = cv2.imdecode(np.fromfile(sample_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            self.assertTrue(np.array_equal(sample, source[top:bottom, left:right]))
+        metadata = json.loads((root / "tests/fixtures/army_archer_18_647_2.json")
+                              .read_text(encoding="utf-8"))
+        for frame in metadata["frames"]:
+            with self.subTest(frame=frame["fixture"]):
+                path = root / "tests/fixtures" / frame["fixture"]
+                self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),
+                                 frame["fixture_sha256"])
+                image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+                source_path = Path(r"E:\projects\AutoCOC") / frame["source_frame"]
+                if source_path.is_file():
+                    self.assertEqual(hashlib.sha256(source_path.read_bytes()).hexdigest(),
+                                     frame["source_sha256"])
+                    source = cv2.imdecode(np.fromfile(source_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+                    scale = image.shape[1] // 1280
+                    if scale == 1:
+                        source = cv2.resize(source, (1280, 720), interpolation=cv2.INTER_AREA)
+                    for left, top, right, bottom in frame["retained_rois_1280"]:
+                        self.assertTrue(np.array_equal(
+                            image[top*scale:bottom*scale, left*scale:right*scale],
+                            source[top*scale:bottom*scale, left*scale:right*scale]))
+                canonical = cv2.resize(image, (1280, 720), interpolation=cv2.INTER_AREA)
+                observed = recognize_card_identity(canonical, (974, 194, 1072, 292),
+                                                   "troop", surface="army",
+                                                   client_version="18.647.2")
+                self.assertEqual(observed["unit_id"], "archer")
+                self.assertGreaterEqual(observed["confidence"], .94)
+                self.assertIsNone(recognize_card_identity(
+                    canonical, (974, 194, 1072, 292), "troop", surface="army",
+                    client_version="18.647.3")["unit_id"])
+                self.assertIsNone(recognize_card_identity(
+                    canonical, (974, 194, 1072, 292), "troop", surface="battle",
+                    client_version="18.647.2")["unit_id"])
+
     def test_recipe_rejects_unknown_and_duplicate_units(self):
         with self.assertRaises(ValueError):
             ArmyRequirement("imaginary_dragon", 1)

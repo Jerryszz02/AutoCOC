@@ -224,7 +224,8 @@ def _bottom_picker_controls(image: np.ndarray, kind: str,
     """Only independently sampled portraits can produce a bottom-card control."""
     controls: list[dict[str, object]] = []
     availability: dict[str, dict[str, object]] = {}
-    if client_version != template_manifest().get("client"):
+    if client_version is None or client_version != template_manifest(
+            client_version=client_version).get("client"):
         return controls, availability
     matches: dict[str, list[dict[str, object]]] = {}
     for top in (431, 568):
@@ -372,6 +373,10 @@ def _current_picker(path: Path, image: np.ndarray, provider: OCRProvider | None,
         result["capacities"].get(kind))
     result["controls"].extend(bottom_controls)
     result["unit_availability"].update(availability)
+    for control in bottom_controls:
+        unit = get_unit(control["unit_id"])
+        if type(unit.housing_space) is int and unit.housing_space > 0:
+            result["unit_housing_space"][unit.unit_id] = unit.housing_space
     return result
 
 

@@ -86,7 +86,14 @@ def test_presearch_roster_uses_fresh_frame_and_nested_recipe():
     session = Mock(client_version="18.647.2")
     session.observe.return_value = fresh
     evidence = []
-    with patch("autococ.combat._read_army", side_effect=[{"recipe": {}}, {"recipe": {"hero_evidence": manifest}}]):
+    troop = {"kind": "troop", "source": "army", "unit_id": "archer", "count": 3,
+             "evidence": {"identity": {"unit_id": "archer", "version_verified": True,
+                 "template_client_version": "18.647.2", "confidence": .99}}}
+    # Spell identities do not satisfy or defeat the new troop-only gate. The
+    # frozen plan retains its separate complete-manifest contract downstream.
+    recipe = {"hero_evidence": manifest, "manifest": {"troops": [troop],
+              "spells": [{"unit_id": None}], "identity_complete": False}}
+    with patch("autococ.combat._read_army", side_effect=[{"recipe": {}}, {"recipe": recipe}]):
         frame, army = _read_continuous_line_army(session, first, evidence)
     assert frame is fresh
     assert army["recipe"]["hero_evidence"] is manifest

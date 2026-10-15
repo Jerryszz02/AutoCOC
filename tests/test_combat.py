@@ -1044,6 +1044,57 @@ class CombatTests(unittest.TestCase):
                 self.assertEqual(session.deploy_calls, 0)
                 self.assertFalse(any(path == Path("combat-2.png") for path, _ in session.taps))
 
+    def test_continuous_missing_troop_identity_never_pays_for_search(self):
+        for defect in ("missing_id", "wrong_version", "unverified_version", "unknown_version",
+                       "wrong_identity", "weak_identity", "invalid_evidence", "wrong_source"):
+            with self.subTest(defect=defect):
+                frames = complete_frames()[:3]
+                army = frames[2].observations["army"]
+                troop = {"kind": "troop", "source": "army", "unit_id": "archer", "count": 3,
+                         "evidence": {"identity": {"unit_id": "archer", "confidence": .99,
+                             "version_verified": True, "template_client_version": "18.647.2"}}}
+                identity = troop["evidence"]["identity"]
+                if defect == "missing_id":
+                    troop["unit_id"] = None
+                elif defect == "wrong_version":
+                    identity["template_client_version"] = "18.600.7"
+                elif defect == "unverified_version":
+                    identity["version_verified"] = False
+                elif defect == "unknown_version":
+                    identity["template_client_version"] = "unknown"
+                elif defect == "wrong_identity":
+                    identity["unit_id"] = "barbarian"
+                elif defect == "weak_identity":
+                    identity["confidence"] = .89
+                elif defect == "invalid_evidence":
+                    troop["evidence"] = "unverified"
+                else:
+                    troop["source"] = "clan"
+                army["manifest"]["troops"] = [troop]
+                army["hero_evidence"] = {"complete": True, "frame": str(frames[2].screenshot_path),
+                    "cards": [{"kind": "hero", "source": "army", "unit_id": "archer_queen",
+                        "evidence": {"identity": {"unit_id": "archer_queen", "confidence": .99,
+                            "version_verified": True, "template_client_version": "18.647.2"}}}]}
+                for index in (7, 8):
+                    repeated = frame(index, "training", army=deepcopy(army))
+                    repeated.observations["army"]["manifest"]["frame"] = str(repeated.screenshot_path)
+                    repeated.observations["army"]["hero_evidence"]["frame"] = str(repeated.screenshot_path)
+                    frames.append(repeated)
+                session = FakeSession(frames)
+                session.client_version = "unknown" if defect == "unknown_version" else "18.647.2"
+                session.config.battle = replace(session.config.battle, strategy="edrag_line",
+                                                line_execution_mode="continuous")
+                home = frame(9, "village", resources=deepcopy(BEFORE))
+                frames.append(home)
+                result = battle(session)
+                self.assertEqual(result.status, "failed")
+                self.assertIn("no paid search", result.reason)
+                self.assertEqual(result.metrics["search_cost_gold"], 0)
+                self.assertEqual(session.deploy_calls, 0)
+                self.assertFalse(any(path in {Path("combat-2.png"), Path("combat-7.png"),
+                                             Path("combat-8.png")} for path, _ in session.taps))
+                self.assertEqual(session.observe_labels.count("battle-army-roster-reread"), 2)
+
     def test_partial_deployment_failure_keeps_evidence_without_claiming_settlement(self) -> None:
         session = FakeSession(complete_frames())
         partial = {"completed": False, "verified": True, "deployed_units": 1,

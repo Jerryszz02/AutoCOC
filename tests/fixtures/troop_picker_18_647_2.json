@@ -1,0 +1,234 @@
+{
+  "client": "18.647.2",
+  "coordinate_resolution": [
+    1280,
+    720
+  ],
+  "frames": [
+    {
+      "fixture": "troop_picker_230638_18_647_2.png",
+      "fixture_sha256": "93b4ba72e0ad2fbd5c5742a6edf6feef981344e3dd89db7e244c5827cdbb4861",
+      "source_frame": "reports/completion-20261015/probes/20261015-230638-tap/frames/00002-after.png",
+      "source_sha256": "8dfddbce496f2c38df972d639d7b61dedcc6aa55dda5d483724b7361409c5ceb",
+      "retained_rois_1280": [
+        [
+          0,
+          32,
+          1280,
+          330
+        ],
+        [
+          0,
+          430,
+          1280,
+          713
+        ]
+      ],
+      "ocr": [
+        {
+          "text": "我的军队",
+          "confidence": 0.99995,
+          "bbox": [
+            223,
+            64,
+            292,
+            88
+          ]
+        },
+        {
+          "text": "已保存的配置",
+          "confidence": 0.99965,
+          "bbox": [
+            594,
+            64,
+            685,
+            85
+          ]
+        },
+        {
+          "text": "340/343",
+          "confidence": 0.99993,
+          "bbox": [
+            578,
+            156,
+            663,
+            179
+          ]
+        },
+        {
+          "text": "x10",
+          "confidence": 0.92639,
+          "bbox": [
+            556,
+            194,
+            598,
+            220
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.97756,
+          "bbox": [
+            763,
+            194,
+            793,
+            220
+          ]
+        },
+        {
+          "text": "x2",
+          "confidence": 0.99646,
+          "bbox": [
+            874,
+            197,
+            896,
+            217
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.75208,
+          "bbox": [
+            1015,
+            374,
+            1044,
+            400
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.87061,
+          "bbox": [
+            1081,
+            372,
+            1112,
+            400
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.92135,
+          "bbox": [
+            1150,
+            376,
+            1177,
+            398
+          ]
+        }
+      ]
+    },
+    {
+      "fixture": "troop_picker_230749_18_647_2.png",
+      "fixture_sha256": "fefa7315eb4e734bbe5b219ae4a424343f2799d22fb3735b88b92841fb58c798",
+      "source_frame": "reports/completion-20261015/probes/20261015-230749-tap/frames/00002-after.png",
+      "source_sha256": "c7dd03fb290b6b47e97ece6effbfef480f55f061121f83134f56a6bee18a211c",
+      "retained_rois_1280": [
+        [
+          0,
+          32,
+          1280,
+          330
+        ],
+        [
+          0,
+          430,
+          1280,
+          713
+        ]
+      ],
+      "ocr": [
+        {
+          "text": "我的军队",
+          "confidence": 0.99995,
+          "bbox": [
+            223,
+            64,
+            292,
+            88
+          ]
+        },
+        {
+          "text": "已保存的配置",
+          "confidence": 0.99965,
+          "bbox": [
+            594,
+            64,
+            685,
+            85
+          ]
+        },
+        {
+          "text": "340/343",
+          "confidence": 0.99993,
+          "bbox": [
+            578,
+            156,
+            663,
+            179
+          ]
+        },
+        {
+          "text": "x10",
+          "confidence": 0.92639,
+          "bbox": [
+            556,
+            194,
+            598,
+            220
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.95186,
+          "bbox": [
+            762,
+            194,
+            793,
+            220
+          ]
+        },
+        {
+          "text": "x2",
+          "confidence": 0.99646,
+          "bbox": [
+            874,
+            197,
+            896,
+            217
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.75208,
+          "bbox": [
+            1015,
+            374,
+            1044,
+            400
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.87061,
+          "bbox": [
+            1081,
+            372,
+            1112,
+            400
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.95908,
+          "bbox": [
+            1150,
+            376,
+            1177,
+            398
+          ]
+        }
+      ]
+    }
+  ],
+  "anonymization": "Only the army navigation/selected-card row and picker tray are retained; all village/background pixels are zeroed."
+}

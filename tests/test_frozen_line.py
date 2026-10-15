@@ -26,14 +26,14 @@ def slot(unit_id, count, x, *, kind="troop"):
             "evidence": evidence}
 
 
-def frame(name, captured_at, *, root: Path, post=False, heroes=False):
+def frame(name, captured_at, *, root: Path, post=False, heroes=False, troops=TROOPS):
     cards = [slot(unit_id, 0 if post else count, 140 + index * 97)
-             for index, (unit_id, count) in enumerate(TROOPS)]
+             for index, (unit_id, count) in enumerate(troops)]
     if heroes:
         cards.append(slot("grand_warden", None, 650, kind="hero"))
     manifest = {"complete": True, "identity_complete": True, "unknowns": [],
                 "troops": [{"unit_id": unit_id, "source": "army", "count": count}
-                           for unit_id, count in TROOPS]}
+                           for unit_id, count in troops]}
     path = root / f"{name}.png"
     path.write_bytes(f"immutable pixels: {name}".encode())
     return SceneSnapshot("battle", .99, path,
@@ -133,6 +133,70 @@ def test_four_troops_burst_has_zero_midstream_observations_and_fresh_counts(monk
     assert session.frozen_line_receipt["attempted_placements"] == 14
     assert all(item["verified"] for item in session.frozen_line_receipt["troops"])
     assert not hasattr(plan, "model_sha256") and not hasattr(plan, "core")
+
+
+@pytest.mark.parametrize("archer_count", [1, 2, 3])
+def test_bounded_archer_filler_is_last_and_all_counts_are_consumed(monkeypatch, tmp_path, archer_count):
+    selected_boxes = []
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox",
+                        lambda _path, bbox, *_args: selected_boxes.append(tuple(bbox)) or [100, 580, 180, 710])
+    troops = (("archer", archer_count), *TROOPS)
+    before, selected, post = (frame("archer-before", 99, root=tmp_path, troops=troops),
+                              frame("archer-selected", 100, root=tmp_path, troops=troops),
+                              frame("archer-post", 103, root=tmp_path, post=True, troops=troops))
+    session = Session(selected, post)
+    plan = freeze(session, selected, before)
+
+    deployed = [action.unit_id for action in plan.actions if action.kind == "deploy"]
+    expected_order = [unit_id for unit_id, count in TROOPS for _ in range(count)] + ["archer"] * archer_count
+    assert deployed == expected_order
+    assert selected_boxes == [tuple(selected.observations["battle"]["slots"][0]["bbox"])]
+    assert [action.unit_id for action in plan.actions if action.kind == "select"] == [
+        "electro_dragon", "dragon", "baby_dragon", "balloon", "archer"]
+    assert len(plan.troop_budgets) == 5
+    assert len(plan.troop_cards) == 5
+    assert len(plan.actions) == 14 + archer_count + 5
+    assert plan.burst_limit_sec == min(15., 1. + .25 * len(plan.actions))
+    assert execute_frozen_line(session, plan, clock=lambda: 102., sleep=lambda _seconds: None) is post
+    assert session.observes == ["frozen-line-post"]
+    assert session.frozen_line_receipt["deployed_units"] == 14 + archer_count
+    assert [row["unit_id"] for row in session.frozen_line_receipt["troops"]] == [
+        "archer", *(unit_id for unit_id, _count in TROOPS)]
+    assert all(row["verified"] for row in session.frozen_line_receipt["troops"])
+
+
+@pytest.mark.parametrize("troops", [
+    (*TROOPS, ("archer", 0)),
+    (*TROOPS, ("archer", 4)),
+    (*TROOPS, ("barbarian", 1)),
+    (*TROOPS, ("archer", 1), ("wizard", 1)),
+])
+def test_frozen_line_rejects_unbounded_or_unsupported_filler_rosters(monkeypatch, tmp_path, troops):
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_args: [100, 580, 180, 710])
+    before, selected = (frame("invalid-roster-before", 99, root=tmp_path, troops=troops),
+                        frame("invalid-roster-selected", 100, root=tmp_path, troops=troops))
+    session = Session(selected, frame("invalid-roster-post", 103, root=tmp_path, post=True, troops=troops))
+    with pytest.raises(FlowError):
+        freeze(session, selected, before)
+
+
+def test_frozen_line_rejects_archer_count_or_identity_without_current_version_same_frame_evidence(monkeypatch, tmp_path):
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_args: [100, 580, 180, 710])
+    troops = (("archer", 3), *TROOPS)
+    before, selected = (frame("invalid-archer-before", 99, root=tmp_path, troops=troops),
+                        frame("invalid-archer-selected", 100, root=tmp_path, troops=troops))
+    archer = next(card for card in selected.observations["battle"]["slots"] if card["unit_id"] == "archer")
+    archer["evidence"]["identity"]["template_client_version"] = "18.600.7"
+    session = Session(selected, frame("invalid-archer-post", 103, root=tmp_path, post=True, troops=troops))
+    with pytest.raises(FlowError, match="current-version identity"):
+        freeze(session, selected, before)
+
+    selected = frame("invalid-archer-count-selected", 100, root=tmp_path, troops=troops)
+    archer = next(card for card in selected.observations["battle"]["slots"] if card["unit_id"] == "archer")
+    archer["evidence"]["count"]["text"] = "x2"
+    session = Session(selected, frame("invalid-archer-count-post", 103, root=tmp_path, post=True, troops=troops))
+    with pytest.raises(FlowError, match="same-card OCR evidence"):
+        freeze(session, selected, before)
 
 
 def test_uncertain_transport_is_one_shot_and_never_uses_observe_or_fallback(monkeypatch, tmp_path):

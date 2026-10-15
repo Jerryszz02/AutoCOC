@@ -62,6 +62,17 @@
       "client_version": "18.647.2"
     },
     {
+      "unit_id": "archer",
+      "surface": "army",
+      "path": "units/archer_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-231921-tap/frames/00002-after.png",
+      "source_bbox_1280": [991, 226, 1036, 268],
+      "state": "active",
+      "client_version": "18.647.2",
+      "source_sha256": "be3bb04f148ede71e7bda4c6b4ca0058c1f7f60a2decdfff3e7e19aba41d9580",
+      "template_sha256": "bc332e92c4fb98091bda4e5b9d0d730d974be6e839a7b91e53cd7cb17400a358"
+    },
+    {
       "unit_id": "lightning_spell",
       "surface": "army",
       "path": "units/lightning_spell_army_18_647_2.png",
@@ -188,12 +199,7 @@
       "role": "color_profile",
       "path": "units/grand_warden_army_color_18_647_2.png",
       "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
-      "source_bbox_1280": [
-        28,
-        220,
-        142,
-        540
-      ],
+      "source_bbox_1280": [28, 220, 142, 540],
       "identity_evidence_frame": "reports/completion-20261015/probes/20261015-180859-tap/frames/00002-after.png",
       "state": "active",
       "client_version": "18.647.2"
@@ -204,7 +210,12 @@
       "role": "color_profile",
       "path": "units/grand_warden_army_color_roster_18_647_2.png",
       "source_frame": "reports/completion-20261015/live/20261015-223012-576315-88e25bff/frames/00006-battle-army-confirmation.png",
-      "source_bbox_1280": [28, 220, 142, 540],
+      "source_bbox_1280": [
+        28,
+        220,
+        142,
+        540
+      ],
       "source_sha256": "cb95dc2245d4fd9be2d42d4f0380bc35ccfe294395a9fc1eabca04a9c3db7ea9",
       "template_sha256": "082a36d0c4032526f2fd4d9272502792dd7b5e951c09d3d2e8ebfbac4dd269c0",
       "state": "active",
@@ -531,6 +542,98 @@
       "client_version": "18.647.2",
       "source_sha256": "da3e4e498182ebf3fdef6b381d526c81f683261bb51e59e6fcbad9324230b76c",
       "template_sha256": "e32b9c740d882e7e366181a60af4fbca4e958d5728d29d1d2cdee4759b60455c"
+    },
+    {
+      "unit_id": "archer",
+      "surface": "current_picker",
+      "path": "units/archer_picker_active_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-230638-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        313,
+        595,
+        360,
+        637
+      ],
+      "state": "active",
+      "client_version": "18.647.2",
+      "observed_housing_space": 1,
+      "housing_label_bbox_1280": [337, 653, 363, 688],
+      "source_sha256": "8dfddbce496f2c38df972d639d7b61dedcc6aa55dda5d483724b7361409c5ceb",
+      "template_sha256": "2e5ea901058ff447e19ce073915956eb4b8d202a3d19c2d7a55b865da2670abd",
+      "information_panel": "reports/completion-20261015/probes/20261015-230720-tap/frames/00002-after.png",
+      "information_panel_sha256": "e039142c119a81c3511136b88d399957bb5d3fe83e41a3d229702540fc966c3d"
+    },
+    {
+      "unit_id": "balloon",
+      "surface": "current_picker",
+      "path": "units/balloon_picker_capacity_gray_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-230638-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        704,
+        458,
+        746,
+        500
+      ],
+      "state": "capacity_gray",
+      "client_version": "18.647.2",
+      "observed_housing_space": 5,
+      "housing_label_bbox_1280": [716, 514, 750, 550],
+      "source_sha256": "8dfddbce496f2c38df972d639d7b61dedcc6aa55dda5d483724b7361409c5ceb",
+      "template_sha256": "9bd91aa339f2b70d5b6bcd2fdb5657bfcc515ab81de19b36b271903fb9d26484"
+    },
+    {
+      "unit_id": "dragon",
+      "surface": "current_picker",
+      "path": "units/dragon_picker_capacity_gray_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-230638-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        838,
+        595,
+        880,
+        637
+      ],
+      "state": "capacity_gray",
+      "client_version": "18.647.2",
+      "observed_housing_space": 20,
+      "housing_label_bbox_1280": [843, 653, 889, 688],
+      "source_sha256": "8dfddbce496f2c38df972d639d7b61dedcc6aa55dda5d483724b7361409c5ceb",
+      "template_sha256": "409852788364dea446efac9905cca21cfd3e138bc53bfe4193b7a990c89fc996"
+    },
+    {
+      "unit_id": "baby_dragon",
+      "surface": "current_picker",
+      "path": "units/baby_dragon_picker_capacity_gray_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-230638-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        967,
+        595,
+        1009,
+        637
+      ],
+      "state": "capacity_gray",
+      "client_version": "18.647.2",
+      "observed_housing_space": 10,
+      "housing_label_bbox_1280": [974, 653, 1019, 688],
+      "source_sha256": "8dfddbce496f2c38df972d639d7b61dedcc6aa55dda5d483724b7361409c5ceb",
+      "template_sha256": "cdc8f65b8edd5824eae8f339b43178cf09245b7c9893f8b561a3d9ea5db481ae"
+    },
+    {
+      "unit_id": "electro_dragon",
+      "surface": "current_picker",
+      "path": "units/electro_dragon_picker_capacity_gray_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-230638-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        1110,
+        605,
+        1135,
+        630
+      ],
+      "state": "capacity_gray",
+      "client_version": "18.647.2",
+      "observed_housing_space": 30,
+      "housing_label_bbox_1280": [1103, 653, 1148, 688],
+      "source_sha256": "8dfddbce496f2c38df972d639d7b61dedcc6aa55dda5d483724b7361409c5ceb",
+      "template_sha256": "acb985d6855c12015208a86e5d306927574fe4f902fa9fd38ada3bdf9446dd3e"
     }
   ]
 }

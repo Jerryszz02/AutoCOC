@@ -730,33 +730,51 @@ def _read_army(snapshot: SceneSnapshot) -> dict[str, object]:
     return {"recipe": army, **full, "clan_received_unknown": True, "heroes_available": None}
 
 
+def _verified_army_identities(rows, kind, client_version):
+    if (not isinstance(client_version, str) or client_version in {"", "unknown"}
+            or not isinstance(rows, list) or not rows):
+        return False
+    seen = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            return False
+        unit_id = row.get("unit_id")
+        evidence = row.get("evidence")
+        identity = evidence.get("identity") if isinstance(evidence, dict) else None
+        if (not isinstance(unit_id, str) or not unit_id or unit_id in seen
+                or row.get("kind") != kind or row.get("source") != "army"
+                or not isinstance(identity, dict)
+                or identity.get("unit_id") != unit_id
+                or identity.get("version_verified") is not True
+                or identity.get("template_client_version") != client_version
+                or type(identity.get("confidence")) not in (int, float)
+                or not math.isfinite(identity["confidence"])
+                or not .9 <= identity["confidence"] <= 1):
+            return False
+        seen.add(unit_id)
+    return True
+
+
 def _read_continuous_line_army(session, current, evidence):
-    """Resolve hero identities before the paid search, using fresh pixels only."""
+    """Resolve troop and hero identities before paying, using fresh pixels only."""
     for attempt in range(3):
         army = _read_army(current)
+        manifest = army["recipe"].get("manifest")
+        troops = manifest.get("troops") if isinstance(manifest, dict) else None
         heroes = army["recipe"].get("hero_evidence")
         rows = heroes.get("cards") if isinstance(heroes, dict) else None
         if (isinstance(heroes, dict) and heroes.get("complete") is True and not heroes.get("unknowns")
                 and heroes.get("frame") == str(current.screenshot_path)
-                and isinstance(rows, list) and rows and all(isinstance(row, dict) for row in rows)):
-            identities = [(row.get("evidence") or {}).get("identity") or {} for row in rows]
-            ids = [row.get("unit_id") for row in rows]
-            if (all(isinstance(name, str) and name for name in ids) and len(set(ids)) == len(ids)
-                    and all(row.get("kind") == "hero" and row.get("source") == "army"
-                            and identity.get("unit_id") == row["unit_id"]
-                            and identity.get("version_verified") is True
-                            and identity.get("template_client_version") == session.client_version
-                            and type(identity.get("confidence")) in (int, float)
-                            and math.isfinite(identity["confidence"]) and .9 <= identity["confidence"] <= 1
-                            for row, identity in zip(rows, identities))):
-                return current, army
+                and _verified_army_identities(troops, "troop", session.client_version)
+                and _verified_army_identities(rows, "hero", session.client_version)):
+            return current, army
         if attempt < 2:
             session.check_deadline()
-            current = session.observe("battle-hero-roster-reread")
+            current = session.observe("battle-army-roster-reread")
             evidence.append(current.screenshot_path)
     home = return_to_village(session, initial_snapshot=current)
     evidence.append(home.screenshot_path)
-    raise FlowError("Continuous line hero roster is incomplete; no paid search started")
+    raise FlowError("Continuous line troop or hero roster is incomplete; no paid search started")
 
 
 def _search_price(snapshot: SceneSnapshot) -> int:
