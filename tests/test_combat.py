@@ -120,6 +120,21 @@ class CombatTests(unittest.TestCase):
         self.scout_ready = patcher.start()
         self.addCleanup(patcher.stop)
 
+    def test_unreleased_vision_model_is_rejected_before_enemy_search(self):
+        session = FakeSession(complete_frames())
+        session.config.vision_agent = VisionAgentConfig(enabled=True, model_dir="models")
+        session.config.source_path = Path("config.toml").resolve()
+        session.client_version = "18.1"
+        model = SimpleNamespace(model_sha256="unreleased", detect=Mock(),
+                                metadata={"validation": {"status": "evaluated", "report_id": "old"}})
+        with patch("autococ.model_vision.BuildingModel", return_value=model):
+            result = run_battle(session)
+        self.assertEqual(result.metrics["search_count"], 0)
+        self.assertEqual(session.observe_labels, [])
+        self.assertEqual(session.taps, [])
+        model.detect.assert_not_called()
+        self.assertIn("release", result.reason.lower())
+
     def test_complete_battle_requires_deployment_settlement_and_matching_inventory(self) -> None:
         session = FakeSession(complete_frames())
         result = battle(session)
@@ -200,6 +215,7 @@ class CombatTests(unittest.TestCase):
                                               "validation": {"status": "evaluated", "report_id": "offline-1"}})
             core = SimpleNamespace(center=(600., 260.), confidence=.99)
             with patch("autococ.model_vision.BuildingModel", return_value=model), \
+                    patch("autococ.model_release.require_released_model", return_value={}), \
                     patch("autococ.prepared_battle.measure_cloud_cover", return_value={"obscured": False}), \
                     patch("autococ.images.read_frame", return_value=np.zeros((720, 1280, 3), dtype=np.uint8)), \
                     patch("autococ.model_vision.infer_core_geometry", return_value=core):
@@ -220,6 +236,7 @@ class CombatTests(unittest.TestCase):
             "validation": {"status": "evaluated", "report_id": "offline-1"},
             "applicability": {"source_width_range": [1280, 1280], "source_height_range": [720, 720]}})
         with patch("autococ.model_vision.BuildingModel", return_value=model), \
+                patch("autococ.model_release.require_released_model", return_value={}), \
                 patch("autococ.prepared_battle.validate_prepared_capability"), \
                 patch("autococ.prepared_battle.run_prepared_battle", side_effect=failure):
             return run_battle(session)
@@ -244,7 +261,7 @@ class CombatTests(unittest.TestCase):
                 self.assertNotIn("rounds_completed", result.metrics)
 
     def test_vision_preparation_failure_cannot_exit_unverified_or_started_battle(self):
-        for scene, confidence in (("unknown", .99), ("battle", .99), ("enemy_village", .7)):
+        for scene, confidence in (("unknown", .99), ("enemy_village", .7)):
             with self.subTest(scene=scene, confidence=confidence):
                 current = replace(frame(7, scene), confidence=confidence)
                 session = FakeSession(complete_frames()[:4] + [current])
@@ -253,6 +270,41 @@ class CombatTests(unittest.TestCase):
                 self.assertIn("preparation_recovery_error", result.metrics)
                 self.assertFalse(result.metrics.get("returned_home", False))
                 self.assertFalse(any("end_battle" in reason for _, reason in session.taps))
+
+    def test_vision_preparation_failure_in_battle_waits_for_settlement_and_returns_failed(self):
+        settled = frame(8, "settlement", settlement=deepcopy(SETTLEMENT))
+        settled.observations["settlement"].update(stars=0, percentage=0)
+        settled.observations["settlement"]["evidence"]["stars"] = {
+            "source": "explicit_defeat_result", "result": {"confidence": .99}}
+        home = frame(9, "village", resources=deepcopy(AFTER))
+        session = FakeSession(complete_frames()[:4] + [frame(7, "battle"), settled, home])
+        result = self._vision_failure(session, FlowError("preparation expired"))
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "preparation expired")
+        self.assertIsNone(session.prepared_battle_receipt)
+        self.assertTrue(result.metrics["returned_home"])
+        self.assertEqual(result.metrics["rounds_completed"], 1)
+        self.assertFalse(result.metrics["victory"])
+        self.assertIn(settled.screenshot_path, result.evidence)
+        self.assertIn(home.screenshot_path, result.evidence)
+        self.assertEqual(session.observe_labels.count("preparation-failure-settlement"), 1)
+        self.assertEqual([reason for _, reason in session.taps if "return_home" in reason],
+                         ["Recognized return_home: return_home"])
+        self.assertFalse(any("end_battle" in reason for _, reason in session.taps))
+        self.assertIsNone(result.metrics["deployment"])
+
+    def test_vision_preparation_failure_does_not_click_unknown_or_weak_settlement(self):
+        cases = ([frame(7, "battle"), frame(8, "unknown")],
+                 [frame(7, "battle"), replace(frame(8, "settlement"), confidence=.7)])
+        for suffix in cases:
+            with self.subTest(scene=suffix[-1].scene):
+                session = FakeSession(complete_frames()[:4] + suffix)
+                result = self._vision_failure(session, FlowError("preparation expired"))
+                self.assertEqual(result.status, "failed")
+                self.assertIn("preparation_recovery_error", result.metrics)
+                self.assertFalse(result.metrics.get("returned_home", False))
+                self.assertFalse(any("return_home" in reason or "end_battle" in reason
+                                     for _, reason in session.taps))
 
     def test_vision_stop_or_existing_input_receipt_does_not_trigger_preview_recovery(self):
         session = FakeSession(complete_frames()[:4])
@@ -582,6 +634,43 @@ class CombatTests(unittest.TestCase):
         self.assertEqual(result.metrics["deployment"]["deployed_units"], 0)
         self.assertTrue(result.metrics["returned_home"])
         self.assertEqual(session.last_snapshot.scene, "village")
+
+    def test_expired_preview_without_placements_waits_for_result_but_stays_failed(self):
+        frames = complete_frames()
+        frames[5].observations["settlement"].update(stars=0, percentage=0)
+        frames[5].observations["settlement"]["evidence"]["stars"] = {
+            "source": "explicit_defeat_result", "result": {"confidence": .99}}
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        def fail_deployment(session, scout):
+            session.observe("expired-preview")
+            raise DeploymentError("Deployment boundaries unverified", partial_receipt={
+                "completed": False, "verified": False, "deployed_units": 0,
+                "issued_placements": 0, "evidence": ["combat-4.png"]})
+        session.deploy = fail_deployment
+        result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertIn("boundaries unverified", result.reason)
+        self.assertTrue(result.metrics["returned_home"])
+        self.assertFalse(result.metrics["victory"])
+        self.assertEqual(result.metrics["deployment"]["issued_placements"], 0)
+        self.assertEqual(session.taps[-1][1], "Recognized return_home: return_home")
+
+    def test_unrecognized_expired_preview_does_not_authorize_recovery_input(self):
+        frames = complete_frames()
+        frames[4] = frame(4, "unknown")
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        def fail_deployment(session, scout):
+            session.observe("unknown-after-preparation")
+            raise DeploymentError("Deployment boundaries unverified", partial_receipt={
+                "completed": False, "verified": False, "deployed_units": 0,
+                "issued_placements": 0, "evidence": ["combat-4.png"]})
+        session.deploy = fail_deployment
+        result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertNotIn("returned_home", result.metrics)
+        self.assertFalse(any("return_home" in reason for _, reason in session.taps))
 
     def test_two_edge_does_not_claim_provisional_zero_rewards_as_verified(self):
         frames = complete_frames()

@@ -69,7 +69,12 @@ def attach_preparation_countdown(snapshot: SceneSnapshot,
             continue
         value = seconds(item["text"])
         box, label_box = item["bbox"], anchor["bbox"]
-        if (value is not None and 0 <= box[1] - label_box[3] <= height * .10
+        # OCR boxes for the live timer can overlap the smaller heading by a
+        # few pixels even though the glyphs are on separate lines. Bound the
+        # overlap by their own text heights as well as 14 baseline pixels.
+        allowed_overlap = min(14, (label_box[3] - label_box[1]) * .30,
+                              (box[3] - box[1]) * .25)
+        if (value is not None and -allowed_overlap <= box[1] - label_box[3] <= height * .10
                 and abs((box[0] + box[2] - label_box[0] - label_box[2]) / 2) <= width * .07):
             candidates.append((value, item))
     if len(candidates) != 1:
@@ -231,7 +236,8 @@ class BattleObserver:
         return {"count": int(match[1]), "confidence": reads[0].confidence,
                 "frame": str(path), "slot_bbox": list(slot["bbox"]), "roi": list(baseline_roi),
                 "readings": [{**asdict(reads[0]), "bbox": list(baseline_roi), "source": method}],
-                "portrait_score": score, "portrait_scale": scale}
+                "portrait_score": score, "portrait_scale": scale,
+                "portrait_source": "current_frame_saved_battle_portrait"}
 
     @staticmethod
     def modal_visible(image):

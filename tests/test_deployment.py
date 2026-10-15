@@ -1,20 +1,24 @@
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from autococ.deployment import _prepare_two_edge_view, _remaining, deploy_army, spread_along_edges
+from autococ.deployment import (_prepare_two_edge_view, _remaining, _verified_line_card_reading,
+                                deploy_army, spread_along_edges)
 from autococ.errors import CaptureError, DeploymentError, FlowError, StopRequested
 from autococ.scene import SceneSnapshot
 from autococ.session import GameSession
 from autococ.vision import ScreenshotRecognizer
+from autococ.ocr import RapidOCRProvider
 
 
 def card(kind: str = "troop", count: int | None = 10, left: int = 180) -> dict:
     return {"kind": kind, "count": count, "bbox": [left, 590, left + 70, 700],
-            "point": [left + 35, 645]}
+            "point": [left + 35, 645],
+            "unit_id": "grand_warden" if kind == "hero" else None}
 
 
 class Clock:
@@ -29,6 +33,7 @@ class FakeSession:
 
     def __init__(self, clock: Clock, cards: list[dict] | None = None) -> None:
         self.clock = clock
+        self.client_version = "18.600.7"
         self.cards = deepcopy(cards or [card()])
         self.counts = {item["point"][0]: item["count"] for item in self.cards}
         self.config = SimpleNamespace(
@@ -327,6 +332,83 @@ class DeploymentTests(unittest.TestCase):
             receipt = deploy_army(session, session.scout).observations["deployment"]
         self.assertTrue(receipt["completed"])
         self.assertEqual(receipt["deployed_units"], 11)
+
+    def test_current_selected_bar_binds_small_count_to_same_frame_portrait(self):
+        import cv2
+        import numpy as np
+
+        bar = cv2.imread(str(Path(__file__).parent / "fixtures/battle_bar_selected_18_647_2_20261015.png"))
+        image = np.zeros((1440, 2560, 3), dtype=np.uint8)
+        image[1170:1440, 170:2380] = bar
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "selected.png"
+            cv2.imwrite(str(path), image)
+            recognizer = ScreenshotRecognizer(provider=RapidOCRProvider())
+            recognizer.client_version = "18.647.2"
+            session = SimpleNamespace(recognizer=recognizer, client_version="18.647.2")
+            snapshot = SceneSnapshot("battle", .92, path)
+            dragon = {"unit_id": "dragon", "bbox": [190, 595, 278, 711], "count": 1}
+            raw = recognizer.recognize_slot_count(path, tuple(dragon["bbox"]))
+            self.assertEqual(raw["reason"], "explicit_header_count")
+            self.assertNotIn("portrait_score", raw)
+            verified = _verified_line_card_reading(session, snapshot, dragon)
+            self.assertEqual(verified["count"], 1)
+            self.assertGreaterEqual(verified["portrait_score"], .94)
+            self.assertEqual(verified["portrait_source"], "current_frame_versioned_battle_template")
+            for change in ({"unit_id": "baby_dragon"}, {"count": 2}):
+                with self.subTest(change=change):
+                    rejected = _verified_line_card_reading(session, snapshot, {**dragon, **change})
+                    self.assertNotIn("portrait_score", rejected)
+            session.client_version = "unknown"
+            self.assertNotIn("portrait_score", _verified_line_card_reading(session, snapshot, dragon))
+
+    def test_current_noisy_threshold_line_requires_unique_original_count_and_portrait(self):
+        import cv2
+        import numpy as np
+
+        bar = cv2.imread(str(Path(__file__).parent / "fixtures/battle_bar_selected_noisy_count_18_647_2_20261015.png"))
+        image = np.zeros((1440, 2560, 3), dtype=np.uint8)
+        image[1170:1440, 170:2380] = bar
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "selected.png"
+            cv2.imwrite(str(path), image)
+            recognizer = ScreenshotRecognizer(provider=RapidOCRProvider())
+            recognizer.client_version = "18.647.2"
+            session = SimpleNamespace(recognizer=recognizer, client_version="18.647.2")
+            snapshot = SceneSnapshot("battle", .92, path)
+            dragon = {"unit_id": "dragon", "bbox": [190, 595, 278, 711], "count": 1}
+            original = {"text": "x1", "confidence": .989, "bbox": [240, 591, 278, 624],
+                        "source": "header_region_ocr"}
+            noise = {"text": "一风", "confidence": .949, "bbox": [190, 579, 278, 635],
+                     "source": "header_threshold_line"}
+            raw = {"reason": "header_count_unverified", "count": None, "confidence": .989,
+                   "frame": str(path), "slot_bbox": dragon["bbox"], "readings": [original, noise]}
+            with patch.object(recognizer, "recognize_slot_count", return_value=raw):
+                verified = _verified_line_card_reading(session, snapshot, dragon)
+                self.assertEqual(verified["count"], 1)
+                self.assertEqual(verified["reason"], "portrait_bound_full_header_count")
+                self.assertGreaterEqual(verified["portrait_score"], .94)
+                for extra in ({"text": "x2", "confidence": .98, "source": "header_threshold_line"},
+                              {"text": "other", "confidence": .98, "source": "header_region_ocr"}):
+                    with self.subTest(extra=extra):
+                        recognizer.recognize_slot_count.return_value = {
+                            **raw, "readings": [original, noise, extra]}
+                        self.assertNotIn("portrait_score", _verified_line_card_reading(session, snapshot, dragon))
+                recognizer.recognize_slot_count.return_value = raw
+                session.client_version = "unknown"
+                self.assertNotIn("portrait_score", _verified_line_card_reading(session, snapshot, dragon))
+
+    def test_boundary_error_reports_unverified_card_before_terrain(self):
+        session = FakeSession(self.clock, [card(count=1)])
+        session.native = Mock()
+        session.recognizer = Mock()
+        session.recognizer.recognize_slot_count.return_value = {"count": 1, "portrait_score": None}
+        self.camera_motion.return_value = {"stationary": True}
+        with patch("autococ.battle_vision.selected_card_bbox", return_value=[177, 587, 253, 703]), \
+             patch("autococ.terrain.find_line_deployment_edges") as terrain:
+            with self.assertRaisesRegex(FlowError, "troop card portrait or count unverified"):
+                _prepare_two_edge_view(session, session.scout, {"evidence": []})
+        terrain.assert_not_called()
 
     def test_boundary_selection_keeps_only_reidentified_card_glyph_roi(self):
         original = {**card(count=10), "unit_id": "electro_dragon",
@@ -1111,6 +1193,15 @@ class DeploymentTests(unittest.TestCase):
         self.assertFalse(result["completed"])
         self.assertFalse(any("ability" in reason.lower() for _, _, reason, _ in session.taps))
 
+    def test_unknown_client_does_not_select_hero_from_old_slot(self) -> None:
+        session = FakeSession(self.clock, [card(count=1), card("hero", None, 280)])
+        session.client_version = "unknown"
+        result = deploy_army(session, session.scout).observations["deployment"]
+        self.assertEqual(result["support_attempts"][0]["status"], "identity_unverified")
+        self.assertFalse(result["support_deployment_verified"])
+        self.assertFalse(any("hero" in reason.lower() for _, _, reason, _ in session.taps))
+        self.hero_state.assert_not_called()
+
     def test_verified_hero_ability_clicked_once_and_waits_through_flash(self) -> None:
         session = FakeSession(self.clock, [card(count=1), card("hero", None, 280)])
         self.hero_state.side_effect = [
@@ -1128,6 +1219,9 @@ class DeploymentTests(unittest.TestCase):
         self.assertTrue(result["completed"])
         self.assertEqual(sum("Activate hero ability" in reason for _, _, reason, _ in session.taps), 1)
         self.assertNotEqual(attempt["ability_before_frame"], attempt["ability_after_frame"])
+        self.assertTrue(all(call.kwargs["unit_id"] == "grand_warden"
+                            and call.kwargs["client_version"] == "18.600.7"
+                            for call in self.hero_state.call_args_list))
 
     def test_uncertain_hero_activation_never_retries_click(self) -> None:
         session = FakeSession(self.clock, [card(count=1), card("hero", None, 280)])
@@ -1158,6 +1252,7 @@ class DeploymentTests(unittest.TestCase):
                 self.assertEqual(receipt["support_attempts"][0]["verified"], verified is True)
                 self.assertEqual(receipt["completed"], verified is True)
                 self.assertEqual(sum(point == [315, 645] for _, point, _, _ in session.taps), 1)
+                self.assertEqual(self.siege_state.call_args.kwargs["client_version"], "18.600.7")
 
     def test_settlement_at_final_observation_preserves_verified_empty_army(self) -> None:
         session = FakeSession(self.clock, [card(count=1)])

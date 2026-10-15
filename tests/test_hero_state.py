@@ -1,6 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -13,6 +14,27 @@ class HeroStateTests(unittest.TestCase):
     slot = [599, 595, 688, 711]
 
     low_health_slot = [499, 588, 594, 713]
+
+    def test_current_client_never_uses_legacy_ability_templates(self) -> None:
+        bar = cv2.imread(str(self.root / "tests/fixtures/battle_bar_heldout_18_647_2_20261015.png"))
+        image = np.zeros((720, 1280, 3), dtype=np.uint8)
+        image[590:720, 85:1190] = bar
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "current-bar.png"
+            cv2.imwrite(str(path), image)
+            pet = {"template": str(self.root / "assets/templates/battle_hero_pet_0.png"),
+                   "confidence": .99, "bbox": [604, 600, 638, 636]}
+            with patch("autococ.hero_state._match", return_value=pet) as match, \
+                    patch("autococ.hero_state._health_bar", return_value={"method": "verified_hp"}):
+                state = recognize_hero_state(path, [599, 595, 687, 711],
+                                             unit_id="grand_warden", client_version="18.647.2")
+        self.assertTrue(state["deployed"])
+        self.assertIsNone(state["ability_ready"])
+        self.assertIsNone(state["ability_used"])
+        self.assertEqual(state["evidence"]["ability_phase_reason"],
+                         "current_client_ability_templates_unavailable")
+        self.assertTrue(all(call.args[1].name.startswith("battle_hero_pet_")
+                            for call in match.call_args_list))
 
     def low_health_fixture(self, phase: str) -> Path:
         return self.root / f"tests/fixtures/hero-warden-low-hp-{phase}-20260926.png"
@@ -165,8 +187,10 @@ class HeroStateTests(unittest.TestCase):
     def test_selected_border_with_shaded_segment_requires_a_closed_outline(self) -> None:
         folder = self.root / "tests/fixtures"
         slot = [502, 592, 591, 711]
-        before = recognize_hero_state(folder / "hero-border-before.png", slot)
-        selected = recognize_hero_state(folder / "hero-border-selected.png", slot)
+        before = recognize_hero_state(folder / "hero-border-before.png", slot,
+                                      unit_id="grand_warden", client_version="18.600.7")
+        selected = recognize_hero_state(folder / "hero-border-selected.png", slot,
+                                        unit_id="grand_warden", client_version="18.600.7")
         self.assertFalse(before["selected"])
         self.assertTrue(selected["selected"])
         self.assertEqual(selected["state"], "selected")

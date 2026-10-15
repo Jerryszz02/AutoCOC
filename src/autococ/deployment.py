@@ -404,6 +404,16 @@ def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, 
                    if item["kind"] == slot["kind"] and abs(item["point"][0] - slot["point"][0]) < 25]
         if len(matches) != 1:
             continue
+        if slot["kind"] == "hero" and (
+            session.client_version not in {"18.600.7", "18.647.2"}
+            or not isinstance(slot.get("unit_id"), str)
+            or not slot["unit_id"]
+            or matches[0].get("unit_id") != slot["unit_id"]
+        ):
+            support_attempts.append({"kind": "hero", "point": matches[0]["point"],
+                                     "status": "identity_unverified", "verified": False,
+                                     "selection_frame": str(current.screenshot_path)})
+            continue
         attempt = {"kind": slot["kind"], "point": matches[0]["point"], "status": "attempted", "verified": False,
                    "selection_frame": str(current.screenshot_path), "placement_frame": None}
         support_attempts.append(attempt)
@@ -421,7 +431,8 @@ def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, 
             def read_hero(label: str) -> dict:
                 snapshot = observe(label)
                 state = recognize_hero_state(snapshot.screenshot_path, slot["bbox"],
-                                             baseline_resolution=session.config.game.baseline_resolution)
+                                             baseline_resolution=session.config.game.baseline_resolution,
+                                             unit_id=matches[0]["unit_id"], client_version=session.client_version)
                 states.append(state)
                 session.event("hero_state", **state)
                 return state
@@ -452,7 +463,8 @@ def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, 
             for _ in range(2):
                 snapshot = observe("deploy-siege-verify")
                 state = recognize_siege_state(snapshot.screenshot_path, slot["bbox"],
-                                               baseline_resolution=session.config.game.baseline_resolution)
+                                               baseline_resolution=session.config.game.baseline_resolution,
+                                               client_version=session.client_version)
                 states.append(state)
                 session.event("siege_state", **state)
                 if state["deployed"] is True:
@@ -531,6 +543,7 @@ def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt
     session.recognizer.battle_observer.remember(current)
     identity_frame = str(current.screenshot_path)
     session.tap(current, troops[0]["point"], reason="Reveal current deployment boundaries")
+    failure_reason = "Selected troop card could not be verified while revealing deployment boundaries"
     for _ in range(3):
         current = session.observe("line-boundary")
         receipt["evidence"].append(str(current.screenshot_path))
@@ -544,8 +557,12 @@ def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt
         # current count independently before replacing any missing border detection.
         refreshed = []
         for index, troop in enumerate(troops):
-            reading = session.recognizer.recognize_slot_count(current.screenshot_path, tuple(troop["bbox"]))
-            if reading.get("portrait_score", 0) < .92 or reading.get("count") != troop["count"]:
+            reading = _verified_line_card_reading(session, current, troop)
+            portrait_score = reading.get("portrait_score")
+            if (not isinstance(portrait_score, (int, float)) or not math.isfinite(portrait_score)
+                    or portrait_score < .92 or reading.get("count") != troop["count"]):
+                failure_reason = (f"Current troop card portrait or count unverified before boundary scan: "
+                                  f"{troop.get('unit_id') or 'unknown'}")
                 break
             box = selected_box if index == 0 else troop["bbox"]
             new_evidence = {**troop.get("evidence", {}), "count": reading,
@@ -577,7 +594,73 @@ def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt
                                             baseline_resolution=session.config.game.baseline_resolution)
         if terrain:
             return current, terrain
-    raise FlowError("Two current deployment boundaries could not be verified")
+        failure_reason = "Two current deployment boundaries could not be verified"
+    raise FlowError(failure_reason)
+
+
+def _verified_line_card_reading(session: GameSession, snapshot: SceneSnapshot, troop: dict) -> dict:
+    """Bind an OCR fallback to this frame's versioned troop portrait.
+
+    The fast count reader normally proves both portrait and quantity. A small
+    `x1` may fall just below its line-OCR threshold while full region OCR still
+    reads it. That fallback is accepted only after independent same-frame
+    battle-template identity, never from the bare count or slot position.
+    """
+    reading = session.recognizer.recognize_slot_count(snapshot.screenshot_path, tuple(troop["bbox"]))
+    count, confidence = reading.get("count"), reading.get("confidence")
+    recovered_header = False
+    if reading.get("reason") == "header_count_unverified" and count is None:
+        # The thresholded line OCR can hallucinate text over a card outline.
+        # Recover only one unthresholded, high-confidence explicit count; any
+        # other full-image read or conflicting thresholded number still rejects.
+        readings = reading.get("readings")
+        originals = [item for item in readings if item.get("source") == "header_region_ocr"] if isinstance(readings, list) else []
+        if len(originals) != 1:
+            return reading
+        original = originals[0]
+        match = re.fullmatch(r"[xX×]\s*([0-9]+)", str(original.get("text", "")).strip())
+        original_confidence = original.get("confidence")
+        if (match is None or not isinstance(original_confidence, (int, float))
+                or not math.isfinite(original_confidence) or original_confidence < .95):
+            return reading
+        count = int(match[1])
+        for item in readings:
+            if item is original:
+                continue
+            if item.get("source") != "header_threshold_line":
+                return reading
+            other = re.fullmatch(r"[xX×]\s*([0-9]+)", str(item.get("text", "")).strip())
+            if other is not None and int(other[1]) != count:
+                return reading
+        confidence = original_confidence
+        recovered_header = True
+    if reading.get("reason") == "header_count_unverified" and not recovered_header:
+        return reading
+    if (reading.get("reason") not in {"explicit_header_count", "header_count_unverified"} or
+            count != troop.get("count") or
+            reading.get("frame") != str(snapshot.screenshot_path) or
+            reading.get("slot_bbox") != list(troop["bbox"]) or
+            not isinstance(troop.get("unit_id"), str)):
+        return reading
+    if not isinstance(confidence, (int, float)) or not math.isfinite(confidence) or confidence < .9:
+        return reading
+    from .images import read_frame
+    from .unit_catalog import recognize_card_identity
+    import cv2
+
+    source = read_frame(snapshot.screenshot_path, cv2.IMREAD_COLOR)
+    if source is None:
+        return reading
+    image = cv2.resize(source, (1280, 720), interpolation=cv2.INTER_AREA)
+    identity = recognize_card_identity(image, tuple(troop["bbox"]), "troop", surface="battle",
+                                       client_version=session.client_version)
+    if (identity["version_verified"] and identity["unit_id"] == troop["unit_id"]
+            and isinstance(identity["confidence"], (int, float)) and identity["confidence"] >= .94):
+        return {**reading, "count": count, "confidence": confidence,
+                "reason": "portrait_bound_full_header_count" if recovered_header else reading["reason"],
+                "portrait_score": identity["confidence"],
+                "portrait_source": "current_frame_versioned_battle_template", "portrait_identity": identity}
+    return reading
 
 
 def spread_along_edges(terrain: list[dict], count: int) -> list[list[int]]:
@@ -663,6 +746,15 @@ def _deploy_line_cards(session: GameSession, current: SceneSnapshot, receipt: di
         from .hero_state import recognize_hero_state
 
         slot = step.card
+        visible_heroes = [item for item in current.observations.get("battle", {}).get("slots", [])
+                          if item.get("kind") == "hero"
+                          and abs(item["point"][0] - slot["point"][0]) < 25]
+        if (session.client_version not in {"18.600.7", "18.647.2"}
+                or not isinstance(slot.get("unit_id"), str)
+                or not slot["unit_id"]
+                or len(visible_heroes) != 1
+                or visible_heroes[0].get("unit_id") != slot["unit_id"]):
+            raise FlowError("Hero identity is unverified; selection will not be attempted")
         check()
         attempt = {"kind": "hero", "point": slot["point"], "status": "attempted", "verified": False,
                    "ability_clicks": 0, "selection_frame": str(current.screenshot_path),
@@ -672,7 +764,8 @@ def _deploy_line_cards(session: GameSession, current: SceneSnapshot, receipt: di
         for _ in range(3):
             current = observe("line-hero-selected", purpose="hero")
             selected = recognize_hero_state(current.screenshot_path, slot["bbox"],
-                                           baseline_resolution=session.config.game.baseline_resolution)
+                                           baseline_resolution=session.config.game.baseline_resolution,
+                                           unit_id=slot.get("unit_id"), client_version=session.client_version)
             check()
             attempt["states"].append(selected)
             if selected["selected"] is True or selected["deployed"] is True:
@@ -684,7 +777,8 @@ def _deploy_line_cards(session: GameSession, current: SceneSnapshot, receipt: di
         for _ in range(3):
             current = observe("line-hero-deployed", purpose="hero")
             state = recognize_hero_state(current.screenshot_path, slot["bbox"],
-                                        baseline_resolution=session.config.game.baseline_resolution)
+                                        baseline_resolution=session.config.game.baseline_resolution,
+                                        unit_id=slot.get("unit_id"), client_version=session.client_version)
             check()
             attempt["states"].append(state)
             session.event("hero_state", **state)

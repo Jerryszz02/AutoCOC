@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import hashlib
 import math
 from pathlib import Path
 import re
@@ -68,10 +69,9 @@ def parse_countdown(text: str) -> int | None:
     return None
 
 
-def recognize_village_type(screenshot_path: str | Path) -> dict[str, object]:
+def recognize_village_type(screenshot_path: str | Path, *, client_version: str | None = None) -> dict[str, object]:
     """Require a positive Home/Builder Base attack-icon match on this frame."""
     import cv2
-    import numpy as np
 
     path = Path(screenshot_path)
     source = read_frame(path, cv2.IMREAD_COLOR)
@@ -83,23 +83,36 @@ def recognize_village_type(screenshot_path: str | Path) -> dict[str, object]:
     root = Path(__file__).resolve().parents[2] / "assets" / "catalogs"
     scores = {}
     matched_templates = {}
-    for village_type, filename in (("home", "village_home_attack.png"),
-                                   ("home", "village_home_attack_stars.png"),
-                                   ("builder_base", "village_builder_attack.png")):
+    for village_type, filename, method in (
+        ("home", "village_home_attack.png", cv2.TM_CCOEFF_NORMED),
+        ("home", "village_home_attack_stars.png", cv2.TM_CCOEFF_NORMED),
+        ("home", "village_home_battle_18_647_2.png", cv2.TM_SQDIFF_NORMED),
+        ("home", "village_home_battle_checklist_18_647_2.png", cv2.TM_SQDIFF_NORMED),
+        ("builder_base", "village_builder_attack.png", cv2.TM_CCOEFF_NORMED),
+    ):
+        if filename.endswith("_18_647_2.png") and client_version != "18.647.2":
+            continue
         template = read_template(root / filename)
         if template is None or template.shape[0] > region.shape[0] or template.shape[1] > region.shape[1]:
             continue
-        score = float(cv2.matchTemplate(region, template, cv2.TM_CCOEFF_NORMED).max())
+        minimum, maximum, minimum_point, maximum_point = cv2.minMaxLoc(cv2.matchTemplate(region, template, method))
+        score = 1.0 - minimum if method == cv2.TM_SQDIFF_NORMED else maximum
+        point = minimum_point if method == cv2.TM_SQDIFF_NORMED else maximum_point
+        if method == cv2.TM_SQDIFF_NORMED and score < .92:
+            continue
         if math.isfinite(score) and score > scores.get(village_type, -1):
             scores[village_type] = round(score, 5)
-            matched_templates[village_type] = filename
+            matched_templates[village_type] = (filename, point, template.shape[:2])
     result["scores"] = scores
     if scores:
         selected = max(scores, key=scores.get)
         runner_up = max((score for name, score in scores.items() if name != selected), default=-1)
         if scores[selected] >= .92 and scores[selected] - runner_up >= .1:
             result["type"] = selected
-            result["template"] = str(root / matched_templates[selected])
+            filename, (left, top), (height, width) = matched_templates[selected]
+            result["template"] = str(root / filename)
+            result["bbox"] = [left + 25, top + 570, left + 25 + width, top + 570 + height]
+            result["point"] = [left + 25 + width // 2, top + 570 + height // 2]
     return result
 
 
@@ -214,6 +227,37 @@ class ScreenshotRecognizer:
         ocr_finished = time.monotonic()
         texts = [self._baseline_result(result, resolution) for result in results]
         scene, confidence, reasons = classify_scene_text("\n".join(result.text for result in texts))
+        event_panel = None
+        if self.client_version == "18.647.2":
+            anchors = {}
+            for name, label, roi in (("title", "活动", (590, 25, 690, 90)),
+                                     ("close", "X", (1010, 15, 1100, 100)),
+                                     ("section", "今日活动", (195, 85, 310, 145))):
+                matches = [item for item in texts if normalize_label(item.text) == normalize_label(label)
+                           and item.confidence >= .95 and self._in_observed_roi(item, roi)]
+                if len(matches) == 1:
+                    anchors[name] = asdict(matches[0])
+            if len(anchors) == 3:
+                event_panel = anchors
+                scene, confidence, reasons = SCENE_POPUP, .95, ["current_event_panel_title_close_and_section"]
+        hero_detail = self._hero_detail_close(path, texts) if scene in {
+            SCENE_UNKNOWN, SCENE_TRAINING, SCENE_POPUP} else None
+        unit_detail = self._unit_detail_close(path, texts) if hero_detail is None and scene in {
+            SCENE_UNKNOWN, SCENE_TRAINING, SCENE_POPUP} else None
+        if hero_detail is not None:
+            scene, confidence, reasons = SCENE_POPUP, .95, ["hero_detail_title_stats_and_close"]
+        elif unit_detail is not None:
+            scene, confidence, reasons = SCENE_POPUP, .95, ["unit_detail_title_stats_and_close"]
+        village_type_evidence = None
+        if scene == SCENE_UNKNOWN and all(
+            any(normalize_label(item.text) == label and self._in_observed_roi(item, roi)
+                for item in texts)
+            for label, roi in (("商店", (1160, 340, 1255, 420)),
+                               ("建造", (1150, 645, 1250, 715)))
+        ):
+            village_type_evidence = recognize_village_type(path, client_version=self.client_version)
+            if village_type_evidence["type"] == "home":
+                scene, confidence, reasons = SCENE_VILLAGE, .9, ["home_battle_icon", "shop_and_build_hud"]
         model_scene_evidence: dict[str, object] | None = None
         if self.scene_model is not None:
             if captured_at is None:
@@ -280,6 +324,9 @@ class ScreenshotRecognizer:
         )
         buttons = []
         for result in texts:
+            if hero_detail is not None or unit_detail is not None or event_panel is not None:
+                # Background My Army controls and upgrade text are inert under the dialog.
+                continue
             if result.bbox is None:
                 continue
             normalized = normalize_label(result.text)
@@ -308,7 +355,10 @@ class ScreenshotRecognizer:
                 ):
                     continue
                 if scene == SCENE_SEARCH and (
-                    name != "find_match" or not regular_search or not self._in_observed_roi(result, (100, 490, 350, 570))
+                    not regular_search or not (
+                        (name == "find_match" and self._in_observed_roi(result, (100, 490, 350, 570)))
+                        or (name == "edit_army" and self._in_observed_roi(result, (100, 650, 250, 710)))
+                    )
                 ):
                     continue
                 if scene in {SCENE_ENEMY_VILLAGE, SCENE_BATTLE} and not (
@@ -319,7 +369,7 @@ class ScreenshotRecognizer:
                 if any(normalized == normalize_label(label) for label in labels):
                     left, top, right, bottom = result.bbox
                     buttons.append({
-                        "name": "find_match_regular" if scene == SCENE_SEARCH else name,
+                        "name": "find_match_regular" if scene == SCENE_SEARCH and name == "find_match" else name,
                         "text": result.text, "confidence": result.confidence,
                         "bbox": list(result.bbox), "point": [(left + right) // 2, (top + bottom) // 2],
                     })
@@ -328,6 +378,19 @@ class ScreenshotRecognizer:
                 navigation = self._chat_navigation(name, path, resolution)
                 if navigation is not None:
                     buttons.append(navigation)
+        if hero_detail is not None and scene == SCENE_POPUP:
+            buttons.append(hero_detail["button"])
+        if unit_detail is not None and scene == SCENE_POPUP:
+            buttons.append(unit_detail["button"])
+        if (scene == SCENE_VILLAGE and village_type_evidence is not None
+                and village_type_evidence.get("type") == "home"
+                and not any(button["name"] == "attack" for button in buttons)):
+            buttons.append({
+                "name": "attack", "text": "战斗（图标）",
+                "confidence": village_type_evidence["scores"]["home"],
+                "bbox": village_type_evidence["bbox"],
+                "point": village_type_evidence["point"],
+            })
         observations: dict[str, object] = {
             "ocr": [asdict(result) for result in texts],
             "buttons": buttons,
@@ -340,6 +403,7 @@ class ScreenshotRecognizer:
             "resource_capacities": {"gold": None, "elixir": None, "dark_elixir": None},
             "village_type": "unknown",
             "village_type_evidence": None,
+            "event_panel": event_panel,
             "resource_evidence": {},
             "collectibles": [],
             "army": None,
@@ -354,13 +418,17 @@ class ScreenshotRecognizer:
             "surrender_dialog": surrender_dialog,
             "cloud_cover": cloud_cover,
             "startup_logo": startup_logo,
+            "hero_detail": hero_detail,
+            "unit_detail": unit_detail,
             "scene_model": model_scene_evidence,
         }
         if scene == SCENE_VILLAGE:
-            village_type = recognize_village_type(path)
+            village_type = village_type_evidence or recognize_village_type(path, client_version=self.client_version)
             observations["village_type"] = village_type["type"]
             observations["village_type_evidence"] = village_type
-            resources, evidence = self._village_resources(path, texts, resolution)
+            new_home_hud = str(village_type.get("template", "")).endswith((
+                "village_home_battle_18_647_2.png", "village_home_battle_checklist_18_647_2.png"))
+            resources, evidence = self._village_resources(path, texts, resolution, new_home_hud=new_home_hud)
             observations["resources"] = resources
             observations["resource_evidence"] = evidence
             observations["resource_source"] = "village_inventory"
@@ -400,19 +468,29 @@ class ScreenshotRecognizer:
                 observations["battle"]["model_buildings"] = model_result
             self._tracked_buildings = buildings
             if scene == SCENE_ENEMY_VILLAGE:
-                prices = [item for item in texts if self._in_observed_roi(item, (1098, 515, 1250, 560))
+                price_roi = (1098, 515, 1250, 560)
+                prices = [item for item in texts if self._in_observed_roi(item, price_roi)
                           and parse_resource_number(item.text) is not None]
                 if prices:
                     price = max(prices, key=lambda item: item.confidence)
                     observations["search_cost_gold"] = parse_resource_number(price.text)
-                    observations["search_cost_evidence"] = asdict(price)
+                    with path.open("rb") as handle:
+                        frame_sha256 = hashlib.file_digest(handle, "sha256").hexdigest()
+                    observations["search_cost_evidence"] = {**asdict(price), "frame": str(path),
+                        "frame_sha256": frame_sha256, "expected_roi_at_1280x720": list(price_roi),
+                        "candidate_count": len(prices)}
         elif regular_search:
-            prices = [item for item in texts if self._in_observed_roi(item, (145, 530, 245, 573))
+            price_roi = (145, 530, 245, 573)
+            prices = [item for item in texts if self._in_observed_roi(item, price_roi)
                       and parse_resource_number(item.text) is not None]
             if prices:
                 price = max(prices, key=lambda item: item.confidence)
                 observations["search_cost_gold"] = parse_resource_number(price.text)
-                observations["search_cost_evidence"] = asdict(price)
+                with path.open("rb") as handle:
+                    frame_sha256 = hashlib.file_digest(handle, "sha256").hexdigest()
+                observations["search_cost_evidence"] = {**asdict(price), "frame": str(path),
+                    "frame_sha256": frame_sha256, "expected_roi_at_1280x720": list(price_roi),
+                    "candidate_count": len(prices)}
         if scene not in {SCENE_ENEMY_VILLAGE, SCENE_BATTLE, SCENE_UNKNOWN}:
             self._tracked_buildings = []
         if scene in {SCENE_TRAINING, SCENE_UNKNOWN}:
@@ -613,6 +691,90 @@ class ScreenshotRecognizer:
                 "frame": str(path), "slot_bbox": list(bbox), "roi": list(roi), "readings": reads,
                 "count_bbox": list(count_bbox) if count_bbox is not None else None, "line_roi": list(line_roi),
                 "reason": "explicit_header_count" if count is not None else "header_count_unverified"}
+
+    def _hero_detail_close(self, path: Path, texts: list[OCRText]) -> dict[str, object] | None:
+        """Require the current hero detail title, stat labels and its own close icon."""
+        if self.client_version != "18.647.2":
+            return None
+        titles = [item for item in texts
+                  if item.confidence >= .9
+                  and re.fullmatch(r"\d{1,3}级[\u4e00-\u9fff]{2,8}", normalize_label(item.text))
+                  and self._in_observed_roi(item, (530, 15, 750, 95))]
+        if len(titles) != 1 or not all(
+            any(item.confidence >= .9 and normalize_label(item.text) == label
+                and self._in_observed_roi(item, roi) for item in texts)
+            for label, roi in (("生命值", (650, 110, 830, 180)),
+                               ("每秒伤害值", (900, 110, 1090, 180)))
+        ):
+            return None
+        import cv2
+
+        image = read_frame(path, cv2.IMREAD_COLOR)
+        template = read_template(Path(__file__).resolve().parents[2] /
+                                 "assets/catalogs/hero_detail_close_18_647_2.png")
+        if image is None or template is None:
+            return None
+        image = cv2.resize(image, (1280, 720), interpolation=cv2.INTER_AREA)
+        region = image[15:100, 1080:1170]
+        minimum, _, position, _ = cv2.minMaxLoc(cv2.matchTemplate(region, template, cv2.TM_SQDIFF_NORMED))
+        score = 1.0 - minimum
+        if not math.isfinite(score) or score < .92:
+            return None
+        left, top = position[0] + 1080, position[1] + 15
+        box = scale_box((left, top, left + template.shape[1], top + template.shape[0]),
+                        from_resolution=(1280, 720), to_resolution=self.baseline_resolution)
+        button = {"name": "close_hero_details", "text": "英雄详情关闭图标",
+                  "confidence": round(score, 5), "bbox": list(box),
+                  "point": [(box[0] + box[2]) // 2, (box[1] + box[3]) // 2]}
+        return {"title": asdict(titles[0]), "close_score": round(score, 5), "button": button}
+
+    def _unit_detail_close(self, path: Path, texts: list[OCRText]) -> dict[str, object] | None:
+        """Expose only the close icon on a sampled current siege detail dialog."""
+        if self.client_version != "18.647.2":
+            return None
+        anchors = {
+            "4级攻城训练营": (("生命值", (650, 110, 830, 180)),
+                          ("持续时间（秒）", (900, 110, 1110, 180)),
+                          ("皮卡超人数量", (650, 190, 840, 250)),
+                          ("法师数量", (900, 190, 1080, 250))),
+            "2级空中战车": (("生命值", (650, 110, 830, 180)),
+                         ("攻击次数", (900, 110, 1080, 180)),
+                         ("亡灵数量", (650, 190, 840, 250)),
+                         ("气球兵数量", (900, 190, 1080, 250))),
+            "1级部队发射器": (("生命值", (650, 110, 830, 180)),
+                           ("持续时间（秒）", (900, 110, 1110, 180)),
+                           ("攻击次数", (650, 190, 840, 250)),
+                           ("巨人数量", (900, 190, 1080, 250))),
+        }
+        titles = [item for item in texts if item.confidence >= .9
+                  and normalize_label(item.text) in anchors
+                  and self._in_observed_roi(item, (530, 15, 750, 95))]
+        if len(titles) != 1 or not all(
+            any(item.confidence >= .9 and normalize_label(item.text) == label
+                and self._in_observed_roi(item, roi) for item in texts)
+            for label, roi in anchors[normalize_label(titles[0].text)]
+        ):
+            return None
+        import cv2
+
+        image = read_frame(path, cv2.IMREAD_COLOR)
+        template = read_template(Path(__file__).resolve().parents[2] /
+                                 "assets/catalogs/hero_detail_close_18_647_2.png")
+        if image is None or template is None:
+            return None
+        image = cv2.resize(image, (1280, 720), interpolation=cv2.INTER_AREA)
+        region = image[15:100, 1080:1170]
+        minimum, _, position, _ = cv2.minMaxLoc(cv2.matchTemplate(region, template, cv2.TM_SQDIFF_NORMED))
+        score = 1.0 - minimum
+        if not math.isfinite(score) or score < .92:
+            return None
+        left, top = position[0] + 1080, position[1] + 15
+        box = scale_box((left, top, left + template.shape[1], top + template.shape[0]),
+                        from_resolution=(1280, 720), to_resolution=self.baseline_resolution)
+        button = {"name": "close_unit_details", "text": "攻城器械详情关闭图标",
+                  "confidence": round(score, 5), "bbox": list(box),
+                  "point": [(box[0] + box[2]) // 2, (box[1] + box[3]) // 2]}
+        return {"title": asdict(titles[0]), "close_score": round(score, 5), "button": button}
 
     def _in_observed_roi(self, item: OCRText, roi: tuple[int, int, int, int]) -> bool:
         if item.bbox is None:
@@ -1049,7 +1211,7 @@ class ScreenshotRecognizer:
             left = max(range(max(3, right - 105), right - 79), key=lambda x: edge_direction[x])
             if not left < center < right or edge_direction[left] < 150 or edge_direction[right - 1] > -150:
                 continue
-            if not supported_sides(left, right):
+            if not (supported_sides(left, right) or edge_backed_card(left, right)):
                 continue
             bottom = colored_bottom(left, right)
             if bottom is not None:
@@ -1119,7 +1281,7 @@ class ScreenshotRecognizer:
         from .unit_catalog import CATALOG_ROOT, recognize_card_identity, template_manifest
 
         phase_cards = []
-        catalog = template_manifest()
+        catalog = template_manifest(client_version=self.client_version)
         if self.client_version == catalog["client"]:
             # Duke's unequipped card can lose the top-left coloured icon, which
             # splits its contour. Its versioned face only proposes a location;
@@ -1379,14 +1541,24 @@ class ScreenshotRecognizer:
 
     def _village_resources(
         self, path: Path, results: list[OCRText], source_resolution: tuple[int, int],
+        *, new_home_hud: bool = False,
     ) -> tuple[dict[str, int | None], dict[str, object]]:
         width, height = self.baseline_resolution
         # These HUD bands are proportional to the screenshot, independent of village pan/zoom.
-        bands = {"gold": (0.025, 0.085), "elixir": (0.12, 0.18), "dark_elixir": (0.215, 0.28), "gems": (0.305, 0.365)}
-        line_rois = {
-            "gold": (1008, 19, 1210, 60), "elixir": (1008, 87, 1210, 128),
-            "dark_elixir": (1064, 153, 1210, 195), "gems": (1130, 220, 1210, 262),
-        }
+        if new_home_hud:
+            bands = {"gold": (.025, .085), "elixir": (.095, .155),
+                     "dark_elixir": (.165, .22), "gems": (.235, .29)}
+            line_rois = {
+                "gold": (1008, 19, 1240, 60), "elixir": (1008, 69, 1240, 111),
+                "dark_elixir": (1064, 115, 1240, 158), "gems": (1130, 164, 1240, 208),
+            }
+        else:
+            bands = {"gold": (.025, .085), "elixir": (.12, .18),
+                     "dark_elixir": (.215, .28), "gems": (.305, .365)}
+            line_rois = {
+                "gold": (1008, 19, 1210, 60), "elixir": (1008, 87, 1210, 128),
+                "dark_elixir": (1064, 153, 1210, 195), "gems": (1130, 220, 1210, 262),
+            }
         values: dict[str, int | None] = {name: None for name in bands}
         evidence: dict[str, object] = {}
         for name, (top, bottom) in bands.items():
@@ -1402,18 +1574,35 @@ class ScreenshotRecognizer:
                     value = ratio[0] if ratio is not None else None
                 if value is not None and left >= width * 0.78 and top * height <= (y1 + y2) / 2 <= bottom * height:
                     candidates.append((item.confidence, value, item))
-            if not candidates:
+            if not candidates or (new_home_hud and name == "gold"):
                 read_line = getattr(self.provider, "recognize_line", None)
                 if read_line is not None:
                     source_roi = scale_box(line_rois[name], from_resolution=(1280, 720), to_resolution=source_resolution)
+                    line_candidates = []
                     for result in filter_ocr_results(read_line(path, source_roi), max(0.9, self.ocr_config.confidence_threshold)):
                         value = parse_resource_number(result.text)
                         if value is None and name != "gems":
                             ratio = parse_capacity(result.text)
                             value = ratio[0] if ratio is not None else None
                         if value is not None:
-                            candidates.append((result.confidence, value, self._baseline_result(result, source_resolution)))
-                    source = "line_roi"
+                            line_candidates.append((result.confidence, value, self._baseline_result(result, source_resolution)))
+                    if line_candidates:
+                        if new_home_hud and name == "gold" and len(candidates) > 1:
+                            fragments = "".join(
+                                re.sub(r"\D", "", item.text)
+                                for _, _, item in sorted(candidates, key=lambda candidate: candidate[2].bbox[0])
+                            )
+                            line_candidates = [candidate for candidate in line_candidates
+                                               if str(candidate[1]) == fragments]
+                        elif new_home_hud and name == "gold" and candidates:
+                            line_candidates = [candidate for candidate in line_candidates
+                                               if len(str(candidate[1])) >= len(str(candidates[0][1]))]
+                        if line_candidates:
+                            candidates = line_candidates
+                            source = "line_roi"
+            if new_home_hud and name == "gold" and source != "line_roi" and len(candidates) != 1:
+                # The new wide balance can be split into overlapping OCR fragments.
+                candidates = []
             if candidates:
                 _, value, item = max(candidates, key=lambda candidate: candidate[0])
                 values[name] = value

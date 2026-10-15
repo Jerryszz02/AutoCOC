@@ -535,6 +535,7 @@ class SessionTests(unittest.TestCase):
             model.metadata = {"validation": {"status": "evaluated", "report_id": "offline-1"}}
         with patch("autococ.session.resolve_game_display", return_value=DisplayTarget(2, "physical-two")), \
                 patch("autococ.session.ScreenshotRecognizer") as recognizer, \
+                patch("autococ.model_release.require_released_model", return_value={}), \
                 patch("autococ.model_vision.SceneModel", return_value=scene_model) as load_scene, \
                 patch("autococ.model_vision.BuildingModel", return_value=building_model) as load_building:
             session = GameSession.connect(config, self.adb, "test-device", self.root / "vision-run", launch=False)

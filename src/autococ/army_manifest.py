@@ -33,7 +33,7 @@ def recognize_army_siege(
 ) -> dict[str, object]:
     """Read overlapping siege cards using visible count headers and portraits.
 
-    The 18.600.7 My Army cards overlap, so their outer contours cannot be
+    The sampled My Army cards overlap, so their outer contours cannot be
     counted as separate rectangles. The sampled ``x1`` header only locates
     cards; local OCR verifies that quantity, and a separate portrait sample
     names each machine. Other quantity appearances remain unsupported.
@@ -58,17 +58,20 @@ def recognize_army_siege(
     if used == 0:
         result["unknowns"].append("empty_siege_row_not_calibrated")
         return result
-    provenance_path = CATALOG_ROOT / "siege_count_provenance.json"
+    current_client = client_version == "18.647.2"
+    provenance_path = CATALOG_ROOT / (
+        "siege_count_provenance_18_647_2.json" if current_client else "siege_count_provenance.json")
     try:
         provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         provenance = {}
-    if (not client_version or client_version != template_manifest().get("client")
+    if (not client_version or client_version != template_manifest(client_version=client_version).get("client")
             or client_version != provenance.get("client")):
         result["unknowns"].append("siege_client_version_unverified")
         return result
     image = cv2.resize(image, _BASE, interpolation=cv2.INTER_AREA)
-    sample_path = CATALOG_ROOT / "siege_count_x1_18_600_7.png"
+    sample_path = CATALOG_ROOT / (
+        "siege_count_x1_18_647_2.png" if current_client else "siege_count_x1_18_600_7.png")
     sample = cv2.imdecode(np.fromfile(sample_path, dtype=np.uint8), cv2.IMREAD_COLOR) if sample_path.is_file() else None
     if sample is None:
         result["unknowns"].append("siege_count_header_sample_missing")

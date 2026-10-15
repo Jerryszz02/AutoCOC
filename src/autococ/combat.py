@@ -30,8 +30,8 @@ def inspect_army(session: GameSession) -> TaskResult:
     try:
         home = return_to_village(session)
         evidence.append(home.screenshot_path)
-        session.click_template(home, "hud_army", roi=(0, 450, 140, 600))
-        army_frame = session.wait_for({"training"}, timeout_sec=30, label="inspect-army")
+        from .army_navigation import open_current_army
+        army_frame = open_current_army(session, home, evidence)
         evidence.append(army_frame.screenshot_path)
         metrics.update(_read_army(army_frame))
         home = return_to_village(session)
@@ -105,11 +105,8 @@ def run_battle(session: GameSession) -> TaskResult:
                 vision_model = getattr(session, "prepared_building_model", None)
                 if vision_model is None:
                     vision_model = BuildingModel(directory / "building", client_version=session.client_version)
-                validation = vision_model.metadata.get("validation", {})
-                if (validation.get("status") != "evaluated" or
-                        not isinstance(validation.get("report_id"), str) or
-                        not validation["report_id"]):
-                    raise ModelUnavailable("Building model has no recorded evaluation report")
+                from .model_release import require_released_model
+                require_released_model(vision_model)
                 # Load and warm local inference before starting enemy search.
                 import numpy as np
                 applicability = vision_model.metadata["applicability"]
@@ -277,9 +274,25 @@ def run_battle(session: GameSession) -> TaskResult:
                         try:
                             current = session.observe("preparation-failure-check")
                             evidence.append(current.screenshot_path)
-                            _require_scene(current, {"enemy_village"})
-                            _leave_scout(session, current)
-                            home = return_to_village(session)
+                            if current.scene == "enemy_village":
+                                _require_scene(current, {"enemy_village"})
+                                _leave_scout(session, current)
+                                home = return_to_village(session)
+                            else:
+                                _require_scene(current, {"battle", "settlement"})
+                                timeout = (session.config.battle.settlement_timeout_sec
+                                           or session.config.battle.deploy_timeout_sec)
+                                settled = current if current.scene == "settlement" else session.wait_for(
+                                    {"settlement"}, timeout_sec=timeout + 35,
+                                    label="preparation-failure-settlement",
+                                    purpose="settlement", poll_interval_sec=5)
+                                _require_scene(settled, {"settlement"})
+                                evidence.append(settled.screenshot_path)
+                                metrics["settlement_observed"] = settled.observations.get("settlement")
+                                home = return_to_village(session, initial_snapshot=settled)
+                                stars = _verified_stars(metrics["settlement_observed"])
+                                metrics.update(rounds_completed=1,
+                                               victory=stars > 0 if stars is not None else None)
                             evidence.append(home.screenshot_path)
                             metrics["returned_home"] = True
                         except AutoCOCError as recovery_error:
@@ -301,7 +314,12 @@ def run_battle(session: GameSession) -> TaskResult:
             verified_partial = exc.partial_receipt.get("verified") is True and type(offensive) is int and offensive > 0
             attempted_line = line_mode and (type(issued) is int and issued > 0 or
                                            vision_mode and exc.partial_receipt.get("attempted_placements", 0) > 0)
-            if (last is None or not (verified_partial or attempted_line)
+            # Preparation can consume the preview timer before any placement.
+            # A positively observed battle still needs settlement/home cleanup;
+            # it never makes this failed deployment a successful receipt.
+            expired_preview = (line_mode and last is not None and last.scene == "battle"
+                               and math.isfinite(last.confidence) and last.confidence >= .8)
+            if (last is None or not (verified_partial or attempted_line or expired_preview)
                     or last.scene not in {"enemy_village", "battle", "settlement"}):
                 raise
             # A partial attack still needs its result recorded and a safe return

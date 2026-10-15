@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AutoCOC reviewed dynamic event window JSONL row v1",
+  "type": "object",
+  "required": ["schema_version", "kind", "window_id", "event_group_id", "split", "review_status", "reviewer", "review_method", "review_evidence", "prototype_only", "frames"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "kind": {"enum": ["r_building", "r_card", "u_position"]},
+    "window_id": {"type": "string", "minLength": 1},
+    "event_group_id": {"type": "string", "minLength": 1},
+    "split": {"enum": ["train", "val", "test"]},
+    "review_status": {"const": "reviewed"},
+    "reviewer": {"type": "string", "minLength": 1},
+    "review_method": {"enum": ["human", "agent_visual"]},
+    "review_evidence": {"type": "string", "minLength": 1},
+    "prototype_only": {"type": "boolean"},
+    "action_kind": {"enum": ["building_destroyed", "skill_available"]},
+    "truth_event": {"type": "boolean"},
+    "event_at_monotonic": {"type": "number"},
+    "truth_boxes": {"type": "array", "items": {"type": "object"}},
+    "frames": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["image", "sha256", "parent_image_sha256", "session_id", "battle_id", "layout_id", "camera_epoch", "frame_id", "captured_at_monotonic", "captured_at_utc", "client_version", "roi_bbox", "camera_stable", "zoom_verified"],
+        "properties": {
+          "image": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "parent_image_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "parent_image": {"type": "string", "minLength": 1},
+          "session_id": {"type": "string", "minLength": 1},
+          "battle_id": {"type": "string", "minLength": 1},
+          "layout_id": {"type": "string", "minLength": 1},
+          "camera_epoch": {"type": "string", "minLength": 1},
+          "frame_id": {"type": "string", "minLength": 1},
+          "captured_at_monotonic": {"type": "number"},
+          "captured_at_utc": {"type": "string", "format": "date-time"},
+          "client_version": {"type": "string", "minLength": 1},
+          "roi_bbox": {"type": "array", "prefixItems": [{"type": "integer"}, {"type": "integer"}, {"type": "integer"}, {"type": "integer"}], "minItems": 4, "maxItems": 4},
+          "target_id": {"type": "string"},
+          "state_label": {"enum": ["intact", "damaged", "rubble", "occlusion_unknown", "available", "selected", "exhausted", "unknown"]},
+          "state_review_status": {"const": "reviewed"},
+          "state_review_method": {"enum": ["human", "agent_visual"]},
+          "state_reviewer": {"type": "string", "minLength": 1},
+          "state_review_evidence": {"type": "string", "minLength": 1},
+          "state_target_id": {"type": "string", "minLength": 1},
+          "state_source_frame_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "state_roi_bbox": {"type": "array", "prefixItems": [{"type": "integer"}, {"type": "integer"}, {"type": "integer"}, {"type": "integer"}], "minItems": 4, "maxItems": 4},
+          "camera_stable": {"type": "boolean"},
+          "zoom_verified": {"type": "boolean"}
+        }
+      }
+    }
+  }
+}

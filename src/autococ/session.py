@@ -147,12 +147,9 @@ class GameSession:
                     try:
                         scene_model = SceneModel(model_dir / "scene", client_version=session.client_version)
                         building_model = BuildingModel(model_dir / "building", client_version=session.client_version)
+                        from .model_release import require_released_model
                         for model in (scene_model, building_model):
-                            validation = model.metadata.get("validation", {})
-                            if (validation.get("status") != "evaluated" or
-                                    not isinstance(validation.get("report_id"), str) or
-                                    not validation["report_id"]):
-                                raise ModelUnavailable("Model has no recorded evaluation report")
+                            require_released_model(model)
                         session.recognizer.scene_model = scene_model
                         session.prepared_building_model = building_model
                     except (ModelUnavailable, OSError, ValueError) as exc:

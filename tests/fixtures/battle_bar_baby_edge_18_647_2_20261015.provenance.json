@@ -1,0 +1,8 @@
+{
+  "client_version": "18.647.2",
+  "source": "reports/completion-20261015/live/20261015-191321-449600-d6dbc873/frames/00011-line-zoom-verified.png",
+  "source_sha256": "f0073b8ce6f8f2ebc77cb31d0eca98902562b059709b6df0e8360d0ec0eb308a",
+  "crop_native_xyxy": [170, 1170, 2380, 1440],
+  "fixture_sha256": "bf07f4fc8d6c65702bd48126bdb61e69a0d1cb74ebfd5766445322aef29c8d9e",
+  "purpose": "Independent baby dragon x1 card-border regression"
+}

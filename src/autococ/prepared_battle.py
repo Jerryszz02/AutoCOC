@@ -148,6 +148,12 @@ def _profile(session: Any) -> tuple[dict, str]:
 
 def validate_prepared_capability(session: Any, model: Any) -> tuple[dict, str]:
     """Reject absent/incompatible real-mode packages before any enemy search."""
+    from .model_release import require_released_model
+    from .model_vision import ModelUnavailable
+    try:
+        require_released_model(model)
+    except ModelUnavailable as exc:
+        raise CapabilityUnavailable(f"Building model release unavailable: {exc}") from exc
     profile, profile_sha = _profile(session)
     model_sha = getattr(model, "model_sha256", None)
     if not isinstance(model_sha, str) or profile.get("model_sha256") != model_sha:

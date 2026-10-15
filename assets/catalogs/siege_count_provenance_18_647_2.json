@@ -1,0 +1,12 @@
+{
+  "client": "18.647.2",
+  "surface": "army",
+  "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+  "crop_at_1280x720": [
+    1017,
+    374,
+    1041,
+    400
+  ],
+  "meaning": "observed x1 count-header anchor, not a siege identity"
+}

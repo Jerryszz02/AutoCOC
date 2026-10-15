@@ -30,6 +30,22 @@ def test_split_timer_and_nonstandard_resolution():
     assert frame.observations["battle"]["countdown_seconds"] == 24
 
 
+def test_live_002_slightly_overlapping_ocr_boxes_keep_current_timer():
+    # Original 00012-scout-camera-ready: OCR boxes overlap by seven pixels.
+    result = read([item("开战倒计时", (581, 12, 681, 40), .99976),
+                   item("23秒", (599, 33, 682, 80), .99997),
+                   item("133", (790, 12, 812, 28), .99978)])
+    assert result["countdown_seconds"] == 23
+    assert result["countdown_evidence"]["frame"] == "current.png"
+    assert result["countdown_evidence"]["source"] == "current_frame_ocr"
+
+
+def test_large_overlap_does_not_claim_a_timer():
+    result = read([item("开战倒计时", (581, 12, 681, 40)),
+                   item("23秒", (599, 20, 682, 80))])
+    assert "countdown_seconds" not in result
+
+
 @pytest.mark.parametrize("items,scene", [
     ([item("战斗结束倒计时30秒")], "enemy_village"),
     ([item("开战倒计时30秒")], "battle"),

@@ -1,0 +1,8 @@
+{
+  "client_version": "18.647.2",
+  "source": "reports/completion-20261015/live/20261015-191321-449600-d6dbc873/frames/00013-line-boundary.png",
+  "source_sha256": "09fa93bec9d427391003bf4e57f15e2e18fbbeb173e5e18c9ee7e274f8203a86",
+  "crop_native_xyxy": [170, 1170, 2380, 1440],
+  "fixture_sha256": "9539b7403a6bc871b0fc8a9aaccb4cf65aa32584f853d9cb8d90e44e30fd3fdb",
+  "purpose": "Selected dragon x1 portrait with threshold-line OCR noise regression"
+}

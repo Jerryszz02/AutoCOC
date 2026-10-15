@@ -93,6 +93,7 @@ class PreparedBattleTests(unittest.TestCase):
                                                "validation": {"status": "evaluated", "report_id": "offline-1"}})
         self.core = SimpleNamespace(center=(600., 260.), confidence=.99)
         self.patches = [patch("autococ.prepared_battle.measure_cloud_cover", return_value={"obscured": False}),
+                        patch("autococ.model_release.require_released_model", return_value={}),
                         patch("autococ.images.read_frame", return_value=np.zeros((720, 1280, 3), dtype=np.uint8)),
                         patch("autococ.model_vision.infer_core_geometry", return_value=self.core)]
         for item in self.patches:

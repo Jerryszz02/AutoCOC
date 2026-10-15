@@ -545,7 +545,12 @@ def ensure_army(session, recipe: ArmyRecipe) -> TaskResult:
     snapshot = session.observe("army-preparation")
     evidence.append(snapshot.screenshot_path)
     if snapshot.scene == "village":
-        session.click_template(snapshot, "hud_army", roi=(0, 460, 230, 720))
+        if getattr(session, "client_version", None) == "18.647.2":
+            from .army_navigation import open_current_army
+            snapshot = open_current_army(session, snapshot, evidence)
+            evidence.append(snapshot.screenshot_path)
+        else:
+            session.click_template(snapshot, "hud_army", roi=(0, 460, 230, 720))
         snapshot = _observe_surface(session, "current", evidence)
         if snapshot is None:
             return _result("failed", "army_page_unverified_after_navigation", evidence)

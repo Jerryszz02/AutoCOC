@@ -1,12 +1,33 @@
 # Recognition samples and coverage
 
 `unit_templates.json` is a versioned list of *observed portraits*, not a list of
-unlocked or fully supported units. All current crops came from Clash of Clans
+unlocked or fully supported units. Its crops came from Clash of Clans
 18.600.7 (versionCode 180600008) in MuMu at a 1280 × 720 baseline. Each entry
 records its source frame, crop, surface, and card state. The corresponding
 sanitized source fixtures are in `tests/fixtures/`; the original runtime frames
 are under the ignored `reports/` directory. The unit registry in
 `unit_catalog.py` is broader than these samples by design.
+
+`unit_templates_18_647_2.json` is a separate catalog for the observed 18.647.2
+My Army page. Its active-card crops cover electro dragon, dragon, baby dragon,
+balloon, lightning spell, earthquake spell, and the three visible siege machines.
+The large Grand Warden, Dragon Duke, Minion Prince, and Archer Queen cards have
+face and colour samples backed by separate in-game name panels. The source is
+`reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png`;
+the sanitized replay is `tests/fixtures/army_current_18_647_2_20261015.png`.
+Separate selected-card and army frames in `tests/fixtures/` check all four
+heroes and three siege portraits. Their identities are supported by the
+18.647.2 information panels in `reports/completion-20261015/probes/`.
+The current siege header sample verifies all three `x1` counts independently.
+The separate 18.647.2 `battle` entries cover the initial scout bar's four
+troops, Sky Wagon, four heroes and two spells. They were cropped from
+`reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png`;
+the later `00009-vision-collection-exit-fresh.png` supplies the independent,
+HUD-only replay in `tests/fixtures/battle_bar_heldout_18_647_2_20261015.png`.
+These samples verify portrait identity only. Deployed, gray, spent and hero
+ability phases remain unsampled on this client.
+
+The table below describes the original 18.600.7 catalog.
 
 | Surface | Sampled IDs | Independent replay evidence | Remaining gaps |
 | --- | --- | --- | --- |

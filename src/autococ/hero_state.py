@@ -48,6 +48,7 @@ HERO_PHASE_TEMPLATE_IDS = {
 def recognize_siege_state(
     screenshot_path: str | Path, slot_bbox: tuple[int, int, int, int] | list[int], *,
     baseline_resolution: tuple[int, int] = (1280, 720),
+    client_version: str | None = None,
 ) -> dict[str, object]:
     """An observed release control plus independent HP verifies deployment."""
     import cv2
@@ -64,6 +65,9 @@ def recognize_siege_state(
               "evidence": {"coordinate_resolution": [1280, 720], "template_source": SIEGE_TEMPLATE_SOURCE}}
     if not (0 <= left < right <= 1280 and 80 <= right - left <= 110
             and 550 <= top <= 605 and 695 <= bottom <= 720):
+        return result
+    if client_version != "18.600.7":
+        result["evidence"]["reason"] = "current_client_siege_deployment_templates_unavailable"
         return result
     release = _match(image, TEMPLATES / "siege_deployed_release.png",
                      (max(0, left - 10), 645, min(1280, right + 10), 720), mask_kind="release")
@@ -113,6 +117,9 @@ def recognize_hero_state(
             and 550 <= top <= 605 and 695 <= bottom <= 720):
         evidence["reason"] = "unrecognized_hero_slot_geometry"
         return result
+    if not isinstance(unit_id, str) or not unit_id or client_version not in {"18.600.7", "18.647.2"}:
+        evidence["reason"] = "current_frame_hero_identity_unverified"
+        return result
     if unit_id is not None:
         from .unit_catalog import recognize_card_identity
 
@@ -124,6 +131,11 @@ def recognize_hero_state(
             evidence["reason"] = "current_frame_hero_identity_unverified"
             return result
         if identity["unit_id"] is None:
+            # Phase portraits were sampled on the older client only. A known
+            # army portrait in another version does not validate a battle card.
+            if client_version != "18.600.7":
+                evidence["reason"] = "current_frame_hero_identity_unverified"
+                return result
             phase_portrait = _hero_phase_portrait(image, box, unit_id)
             evidence["phase_portrait"] = phase_portrait
             if phase_portrait is None:
@@ -172,6 +184,12 @@ def recognize_hero_state(
         result.update(state="deployed", deployed=True, defeated=False)
     elif selected is not None:
         result["state"] = "selected"
+    if client_version != "18.600.7":
+        # The ability portraits and equipment below were sampled only on the
+        # older client. Current-card identity/HP may be known independently,
+        # but neither authorizes a ready or used ability phase on 18.647.2.
+        evidence["ability_phase_reason"] = "current_client_ability_templates_unavailable"
+        return result
     # A pet can be reassigned: the Warden-specific lower-card and book images must
     # both match before interpreting this pet-equipped card as this ready layout.
     if pet is not None and Path(pet["template"]).name == "battle_hero_pet_0.png" and (unit_id is None or unit_id == "grand_warden"):

@@ -1,10 +1,10 @@
 # AutoCOC 视觉模型训练与交接计划
 
-状态：**训练实施规格；训练/导出工具和真实权重尚未交付。现有程序已提供 scene/building 模型加载与离线评估接口。**
+状态：**静态训练/导出、独立评估、发布门及动态离线工具已在工作分支实现；真实 S/B 原型已训练并导出，正式数据、正式模型质量与发布验收未通过。**
 
-计划制定：2026-09-27；状态核对：2026-10-15，代码基线 `3c6ebd76751b56d3b7cca26d4a635a5bc316348e`。本文回答“具体训练什么模型、怎么训练、怎样接回 Windows、如何验收”，可交给后续执行者独立实施。训练机器仍沿用主计划的 Mac 候选，芯片与环境需在开始训练时实测。本次核对代码与工具清单，没有训练或真实模型评估；全部剩余工作见[当前进度](../PROGRESS.md)。
+计划制定：2026-09-27；状态核对：2026-10-15，开发基线 `1a06d1a8cb9c2db6d86fb52517a055de496c1fb7`，本轮代码位于未合并的 `agent/complete-daily-vision`。本文维护训练、导出和验收规格；实际命令见[工具说明](../../training/vision/README.md)。本轮已实测 Windows / RTX 3070 Ti 8GB / CUDA 独立环境并执行 S/B 各 32 张、2 epoch 原型训练；Mac 是后续可选环境。全部剩余工作见[当前进度](../PROGRESS.md)。
 
-阅读顺序：[素材采集与标注](VISION_DATA_COLLECTION_PLAN.md) → 本文 → [已实现模型包接口](../MODEL_PACKAGE.md)；产品执行与时限要求以[主计划](VISION_AGENT_PLAN.md)为准。本文中的新增路径、工具命令和超参数均是实施目标，不表示仓库现在已有或已经验证最优。
+阅读顺序：[素材采集与标注](VISION_DATA_COLLECTION_PLAN.md) → 本文 → [模型包接口](../MODEL_PACKAGE.md)；产品执行与时限要求以[主计划](VISION_AGENT_PLAN.md)为准。实施状态见第 8 节及当前进度；建议超参数仍是实验起点，不能称为已验证最优。
 
 ## 1. 为什么拆出本计划
 
@@ -18,12 +18,12 @@
 | --- | --- | --- |
 | [model_vision.py](../../src/autococ/model_vision.py) | `SceneModel`、`BuildingModel`；ONNX Runtime CPU；版本、哈希、输入和时效校验 | 第一批交付 `scene/`、`building/` 两个模型包；不能将新 kind 假装已有支持 |
 | [MODEL_PACKAGE.md](../MODEL_PACKAGE.md) | manifest schema v1，scene logits/probabilities，building 两种坐标输出 | 训练和导出必须服从真实预处理/输出形状，不照抄框架默认推理代码 |
-| [evaluate_model_package.py](../../scripts/evaluate_model_package.py) | 加载包、已复核 JSONL 的分类与 AP50/定位/耗时评估 | 已存在的工具可复用；退出码 0 只表示过程无错误，不代表精度达标 |
+| [evaluate_model_package.py](../../scripts/evaluate_model_package.py) | 加载包、绑定快照的分类与独立 raw AP/mAP50–95、定位/耗时评估 | 运行点与独立 AP 分开；退出码 0 只表示过程无错误，不代表准入通过 |
 | `infer_core_geometry` | 按 profile 选建筑，输出一个中心和一个范围 | 多核心分区、方向/模式、墙体图和动态状态均需后续适配；模型训练完成不自动补齐这些功能 |
 | [building_vision.py](../../src/autococ/building_vision.py) | 新检测与旧模板状态分开；漏检不证明摧毁 | 不把跨帧数组序号当稳定 ID，不用“没检测到”触发主力进场 |
 | [主计划状态表](VISION_AGENT_PLAN.md#102-状态维护) | 默认连续投放；增强执行保持禁用 | 新动态权重先离线验证，不能借训练任务静默启用实战增强 |
 
-本次仅核对代码和接口，没有重新运行产品回归、连接 Mac、启动训练或做实战性能测试。过去实现 PR 的模拟测试不是当前权重验收证据。
+本轮 S/B 冒烟均走通真实训练、CPU FP32 ONNX 导出及真实加载器。S 冒烟验证 macro-F1 0.117647；后续 59 图开发训练在 16 epoch 早停，最佳验证 macro-F1 0.753846，最小类别召回仍为 0。B 冒烟训练内验证 mAP50 0.0011，随后按固定拆分和预算比较两种骨干。以上只用训练/验证集，最终测试集未用于选型；单张 parity 只是导出冒烟，均不构成正式权重或实机验收。
 
 ## 3. 到底训练哪些模型
 
@@ -100,7 +100,7 @@ Windows 的运行时基线是 CPUExecutionProvider。Mac 训练速度和 Mac 上
 - 输出“残骸概率”还需与原目标位置、稳定镜头和连续证据结合；`model:type:index` 仅是单帧编号，必须通过匹配/跟踪生成跨帧 ID。
 - 英雄/主力 U 仅在策略需要“到达某区/分流”时启用。英雄按身份定位；主力标群体区域和分群，首轮不追求每个兵的精确计数。
 - 评估单位为事件/片段，除逐帧指标外报告提前触发、漏触发、延迟分布、身份切换、遮挡错误与误动作。两个连续帧确认会增加等待时间，必须计入响应延迟。
-- 动态 ROI 的提取、跟踪丢失和重定位先在离线时序实现；对应 kind/模型包/适配器尚不存在，禁止直接塞进 `scene/` 或 `building/` 并声称可用。
+- 动态 ROI 的提取、跟踪丢失和重定位先在离线时序实现。本轮已有独立 `r_building`、`r_card`、`u_position` 契约及离线跟踪/事件工具；真实权重、事件覆盖和 Windows 动作验收仍不足，禁止塞进静态包或启用实机增强。
 
 ## 6. ONNX 导出与现有程序的精确衔接
 
@@ -148,7 +148,7 @@ manifest 至少填满代码要求的 `schema_version/kind/client_versions/code_v
 
 precision/recall 的误拒识和有效图推理失败不能从分母消失；每类报告 TP/FP/FN、样本组数与置信区间。若拒识过多，即使零误触发也不算可用。关键类缺样本时可继续原型研究，但不进入该类控制的动作验收。
 
-**现有评估脚本仍需补齐的量**：独立评估路径的 AP50/mAP50–95、P95 定位误差、分组/子集统计、核心/入口与事件指标、准入判定器。现有 `evaluate()` 从 `BuildingModel.detect()` 获取已按 manifest 置信度阈值过滤、经 NMS 和候选/检测数量上限截断的结果；因此当前 AP50 是运行配置下的截断统计，不能直接复用为模型比较或正式 AP/mAP 验收依据。实施时明确分开：
+**本轮静态评估实现**：独立 raw AP50/mAP50–95、P95 定位误差、分组/子集和准入判定器已落地。`evaluate()` 保留 `BuildingModel.detect()` 的运行点统计，独立 AP 另从无过滤、无图内 TopK/NMS 的原始输出计算；不再把运行配置下的截断预测作为正式 AP。核心/入口、事件和 Windows 指标仍须由相应真实试验提供，缺证据不能通过。两条路径必须持续满足以下约束：
 
 - AP/mAP：使用运行阈值过滤前的原始预测，或独立且足够低的评估置信度下限，保留构建完整 precision-recall 排序所需的预测。评估下限、NMS/去重规则、候选与检测上限单独配置，在模型比较前冻结并随报告版本化，不读取运行时阈值或沿用实时链路的限额。先在验证集检查降低下限、提高上限后的 AP 稳定性，并报告截断情况；导出图内已做过滤或 top-k 截断且无法满足评估协议时，必须交付兼容的评估导出，不能从已丢弃的结果恢复完整 AP。
 - 运行点指标：继续通过真实 `BuildingModel.detect()`，使用最终 manifest 的每类阈值、NMS 和数量上限，报告 precision/recall、定位与耗时；这些指标反映实际部署配置，和独立 AP/mAP 分开列出。
@@ -166,7 +166,7 @@ precision/recall 的误拒识和有效图推理失败不能从分母消失；每
 
 ## 8. 后续实施任务与工具规格
 
-以下新工具入口为拟定名称，当前只有 `scripts/evaluate_model_package.py` 已存在。实现时保持训练依赖与产品启动环境分离，新建文件先遵循仓库风格；不为规划文案新增产品测试。
+`scripts/vision_data.py`、`train_vision.py`、`export_vision_model.py`、`validate_vision_release.py` 和 `release_vision_models.py` 已在本轮工作分支实现；训练依赖与产品启动环境分离。下表保留各阶段交付条件，不能因工具存在就把对应正式数据或模型验收标为完成。
 
 | 阶段 | 应实现/执行的任务 | 产物与退出条件 |
 | --- | --- | --- |
@@ -182,7 +182,7 @@ precision/recall 的误拒识和有效图推理失败不能从分母消失；每
 
 测试优先覆盖：标签 ID 稳定/迁移、部分标注与 ignore 拒绝、未知标签映射、跨帧泄漏、Windows/Mac 路径、预处理/坐标往返、两种检测输出、哈希/版本错误、训练恢复、导出一致性、验收失败分母。复用[现有模型测试](../../tests/test_model_vision.py)与[视觉评估测试](../../tests/test_evaluate_vision.py)，给新数据/训练模块补必要测试。
 
-现有 CLI 的可运行接口如下，路径和版本需换成真实产物；本次没有运行这些模型评估命令，因为没有权重与复核真值：
+现有离线评估接口如下，路径和版本需换成真实产物；正式验收还需绑定冻结快照及独立评估协议。原型验证结果不当作封存测试集成绩：
 
 ```powershell
 python scripts/evaluate_model_package.py C:\models\AutoCOC\scene --kind scene --client-version ACTUAL_VERSION --reviewed-jsonl C:\datasets\vision\reviewed-scenes.jsonl
@@ -193,7 +193,7 @@ python scripts/evaluate_model_package.py C:\models\AutoCOC\building --kind build
 
 ## 9. 交给下一位执行者的任务说明
 
-可直接将本节和两份文档交给执行者；这是后续任务建议，不代表本次已经启动训练：
+以下保留原实施任务说明；T0 和静态训练/导出工具已有本轮实现，S/B 原型训练已实际运行，其余数据、正式训练与验收仍按这些条件继续：
 
 > 在 AutoCOC 当前 checkout 先读素材采集计划、模型训练计划和 MODEL_PACKAGE.md，核对当前分支与真实加载器。从 T0 开始补数据/训练/导出工具，复用已有 ONNX 推理和评估代码，不重写战斗执行器。导入现有 146 张候选素材时保留 ID、来源与原图，不能把历史识别直接当真值。先交付可测试工具和缺口报告，再用复核数据做 T2 冒烟；正式训练需满足 T1 数据条件和实测硬件条件。优先交付 S/B，前戏/主力素材同步积累，R/U 按 T6 独立验收。没有数据、硬件或真实权重时明确报告停在哪一门，继续完成不依赖它们的工具，不伪造训练成绩。所有模型回到 Windows 按现有接口加载、验证坐标和精度；0.5 秒只认完整链路。训练任务不自动开战、合并 PR 或上传原图。
 

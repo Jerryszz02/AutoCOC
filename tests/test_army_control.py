@@ -1,6 +1,6 @@
 from pathlib import Path
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 from autococ.army_control import ArmyRecipe, ArmyRequirement, ensure_army
 from autococ.errors import StopRequested
@@ -194,6 +194,19 @@ class DirectArmySession:
 
 
 class ArmyControlTests(unittest.TestCase):
+    def test_current_client_recipe_uses_free_edit_army_route(self):
+        home = SceneSnapshot("village", .99, Path("home.png"), {})
+        menu = SceneSnapshot("search", .99, Path("menu.png"), {})
+        army = current()
+        session = Mock(client_version="18.647.2")
+        session.observe.side_effect = [home, army]
+        session.wait_for.side_effect = [menu, army]
+        result = ensure_army(session, ArmyRecipe((ArmyRequirement("freeze_spell", 2),)))
+        self.assertEqual(result.status, "succeeded", result.reason)
+        self.assertEqual(session.click.call_args_list, [call(home, "attack"), call(menu, "edit_army")])
+        session.click_template.assert_not_called()
+        session.tap.assert_not_called()
+
     def test_direct_edit_refuses_to_remove_the_last_selected_card(self):
         shot = current()
         shot.observations["army_editor"]["controls"].append({

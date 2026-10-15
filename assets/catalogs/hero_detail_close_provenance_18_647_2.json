@@ -1,0 +1,17 @@
+{
+  "client": "18.647.2",
+  "surface": "hero_detail",
+  "source_frame": "reports/completion-20261015/probes/20261015-175700-tap/frames/00002-after.png",
+  "crop_at_1280x720": [
+    1104,
+    24,
+    1156,
+    82
+  ],
+  "meaning": "detail dialog close control; title and stats OCR are also required",
+  "independent_siege_detail_checks": [
+    "reports/completion-20261015/probes/20261015-181637-tap/frames/00002-after.png",
+    "reports/completion-20261015/probes/20261015-182536-tap/frames/00002-after.png",
+    "reports/completion-20261015/probes/20261015-182709-tap/frames/00002-after.png"
+  ]
+}

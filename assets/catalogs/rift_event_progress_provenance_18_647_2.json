@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "client_version": "18.647.2",
+  "baseline_resolution": [
+    1280,
+    720
+  ],
+  "source_probe_ids": [
+    "20261015-190953-tap",
+    "20261015-191053-tap"
+  ],
+  "mask_method": "resize to baseline then set pixels outside preserved ROI to grayscale 48",
+  "frames": [
+    {
+      "name": "home_entry",
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261015-190953-tap\\frames\\00001-before.png",
+      "source_sha256": "75bf474fa35bac7ee102965ecf1ebc9d52033c00badbcc66ee7e074d0214f4f6",
+      "masked_fixture": "tests\\fixtures\\rift_event_home_entry_18_647_2.png",
+      "masked_sha256": "ac28fa3bc0cc98deaf2687f9f98bb90640456a53d1a55227f135c9733eb6824c",
+      "preserved_roi_at_1280x720": [
+        270,
+        610,
+        365,
+        710
+      ]
+    },
+    {
+      "name": "calendar",
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261015-190953-tap\\frames\\00002-after.png",
+      "source_sha256": "930a4a96226d3dc51fffe6211129aec5898fcdf2c38aec45801a0e76848ca980",
+      "masked_fixture": "tests\\fixtures\\rift_event_calendar_18_647_2.png",
+      "masked_sha256": "6f2ea22029ee318474086a46f7b0bfcc4d3c213aef22d7d9c8f3d8f7560621c1",
+      "preserved_roi_at_1280x720": [
+        190,
+        20,
+        1090,
+        700
+      ]
+    },
+    {
+      "name": "detail",
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261015-191053-tap\\frames\\00002-after.png",
+      "source_sha256": "ea5ec2936116de5bbac05a7f2c45c51627ba82da2436754554027e2279e6ef57",
+      "masked_fixture": "tests\\fixtures\\rift_event_detail_18_647_2.png",
+      "masked_sha256": "9bfde5161894c970b0d5037aedae3f5468c1fc2726a1d1c0581905e8cf2f077a",
+      "preserved_roi_at_1280x720": [
+        115,
+        10,
+        1160,
+        710
+      ]
+    }
+  ],
+  "entry_template": "assets\\templates\\daily_event_calendar_18_647_2.png",
+  "entry_template_sha256": "f18e0149b9301c062b51c2b6d27a90651b776b425fb2805f3e2764b45966f901",
+  "entry_template_source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261015-190953-tap\\frames\\00001-before.png",
+  "entry_template_bbox_at_1280x720": [
+    284,
+    631,
+    341,
+    696
+  ],
+  "rule_evidence": "Calendar lists 裂隙之乱 with 8452/16000 and 9天13小时; detail says 在家乡村庄战斗中收集酸腐圣水. Only the calendar ratio is used for progress."
+}

@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AutoCOC vision annotation row v1",
+  "type": "object",
+  "required": ["schema_version", "sample_id"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "sample_id": {"type": "string", "minLength": 1},
+    "scene": {
+      "type": "object",
+      "required": ["label", "complete", "review_status"],
+      "properties": {
+        "label": {"type": "string"},
+        "complete": {"type": "boolean"},
+        "review_status": {"enum": ["pending", "reviewed", "rejected"]},
+        "reviewer": {"type": ["string", "null"]},
+        "review_evidence": {"type": ["string", "null"]},
+        "review_method": {"enum": ["human", "agent_visual", null]},
+        "background_scene": {"type": ["string", "null"]},
+        "overlay_type": {"type": ["string", "null"]},
+        "reason": {"type": ["string", "null"]}
+      }
+    },
+    "buildings": {
+      "type": "object",
+      "required": ["complete", "review_status", "objects"],
+      "properties": {
+        "complete": {"type": "boolean"},
+        "review_status": {"enum": ["pending", "reviewed", "rejected"]},
+        "reviewer": {"type": ["string", "null"]},
+        "review_evidence": {"type": ["string", "null"]},
+        "review_method": {"enum": ["human", "agent_visual", null]},
+        "objects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["object_id", "class_name", "bbox", "review_status", "ignore"],
+            "properties": {
+              "object_id": {"type": "string", "minLength": 1},
+              "class_name": {"type": "string"},
+              "bbox": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number"}, "description": "Original image xyxy pixels"},
+              "review_status": {"enum": ["pending", "reviewed", "rejected"]},
+              "ignore": {"type": "boolean"},
+              "ignore_reason": {"type": ["string", "null"]},
+              "level": {"type": ["integer", "null"]},
+              "appearance_variant": {"type": ["string", "null"]},
+              "mode": {"type": ["string", "null"]},
+              "direction_image_deg": {"type": ["number", "null"]},
+              "visibility": {"type": ["string", "null"]},
+              "occlusion_fraction": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+            }
+          }
+        }
+      }
+    },
+    "core_regions": {"type": "array"},
+    "geometry": {"type": ["object", "null"]},
+    "cards": {"type": "array"}
+  },
+  "additionalProperties": true
+}

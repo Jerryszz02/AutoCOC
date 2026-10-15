@@ -1,0 +1,27 @@
+{
+  "client": "Clash of Clans 18.647.2",
+  "baseline_resolution": [1280, 720],
+  "template": {
+    "file": "assets/templates/hud_chat_18_647_2.png",
+    "source": "reports/completion-20261015/live/20261015-183542-994185-6b97f3ec/frames/00002-donate-start.png",
+    "crop_at_baseline": [57, 355, 101, 398]
+  },
+  "gem_row_anchor": {
+    "file": "assets/templates/hud_gems_plus_18_647_2.png",
+    "source": "reports/completion-20261015/live/20261015-183959-224564-c890d187/frames/00009-request-dialog.png",
+    "crop_at_baseline": [1058, 168, 1097, 208],
+    "gem_text_bbox_at_baseline": [1176, 174, 1220, 200]
+  },
+  "positive_crops": [
+    {
+      "file": "home_chat_18_647_2_1.png",
+      "source": "reports/completion-20261015/live/20261015-183542-994185-6b97f3ec/frames/00002-donate-start.png",
+      "crop_at_baseline": [15, 305, 120, 415]
+    },
+    {
+      "file": "home_chat_18_647_2_2.png",
+      "source": "reports/completion-20261015/live/20261015-174504-770137-dd484309/frames/00010-welcome-home.png",
+      "crop_at_baseline": [15, 305, 120, 415]
+    }
+  ]
+}

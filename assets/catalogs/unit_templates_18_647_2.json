@@ -1,0 +1,436 @@
+{
+  "client": "18.647.2",
+  "coordinate_resolution": [
+    1280,
+    720
+  ],
+  "templates": [
+    {
+      "unit_id": "electro_dragon",
+      "surface": "army",
+      "path": "units/electro_dragon_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        580,
+        226,
+        625,
+        268
+      ],
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "dragon",
+      "surface": "army",
+      "path": "units/dragon_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        683,
+        226,
+        728,
+        268
+      ],
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "baby_dragon",
+      "surface": "army",
+      "path": "units/baby_dragon_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        785,
+        226,
+        830,
+        268
+      ],
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "balloon",
+      "surface": "army",
+      "path": "units/balloon_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        888,
+        226,
+        933,
+        268
+      ],
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "lightning_spell",
+      "surface": "army",
+      "path": "units/lightning_spell_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        580,
+        405,
+        625,
+        447
+      ],
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "earthquake_spell",
+      "surface": "army",
+      "path": "units/earthquake_spell_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        683,
+        405,
+        728,
+        447
+      ],
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "siege_barracks",
+      "surface": "army",
+      "path": "units/siege_barracks_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        1030,
+        400,
+        1080,
+        445
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-181637-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "sky_wagon",
+      "surface": "army",
+      "path": "units/sky_wagon_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        1097,
+        400,
+        1147,
+        445
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-182536-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "troop_launcher",
+      "surface": "army",
+      "path": "units/troop_launcher_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        1164,
+        400,
+        1214,
+        445
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-182709-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "dragon_duke",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/dragon_duke_army_face_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        177,
+        270,
+        212,
+        300
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-175700-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "dragon_duke",
+      "surface": "army_hero",
+      "role": "color_profile",
+      "path": "units/dragon_duke_army_color_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        158,
+        220,
+        272,
+        540
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-175700-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "grand_warden",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/grand_warden_army_face_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        60,
+        330,
+        95,
+        360
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-180859-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "grand_warden",
+      "surface": "army_hero",
+      "role": "color_profile",
+      "path": "units/grand_warden_army_color_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        28,
+        220,
+        142,
+        540
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-180859-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/minion_prince_army_face_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        325,
+        290,
+        360,
+        320
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-181106-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/minion_prince_army_face_2_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-180741-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        325,
+        290,
+        360,
+        320
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-181106-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "army_hero",
+      "role": "color_profile",
+      "path": "units/minion_prince_army_color_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        288,
+        220,
+        402,
+        540
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-181106-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/archer_queen_army_face_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        445,
+        255,
+        480,
+        285
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-181358-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "army_hero",
+      "role": "color_profile",
+      "path": "units/archer_queen_army_color_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        418,
+        220,
+        532,
+        540
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-181358-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "electro_dragon",
+      "surface": "battle",
+      "path": "units/electro_dragon_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        120,
+        634,
+        155,
+        674
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "dragon",
+      "surface": "battle",
+      "path": "units/dragon_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        214,
+        633,
+        253,
+        674
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "baby_dragon",
+      "surface": "battle",
+      "path": "units/baby_dragon_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        307,
+        634,
+        350,
+        675
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "balloon",
+      "surface": "battle",
+      "path": "units/balloon_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        403,
+        632,
+        448,
+        675
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "sky_wagon",
+      "surface": "battle",
+      "path": "units/sky_wagon_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        514,
+        635,
+        548,
+        668
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "grand_warden",
+      "surface": "battle",
+      "path": "units/grand_warden_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        628,
+        632,
+        665,
+        673
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "dragon_duke",
+      "surface": "battle",
+      "path": "units/dragon_duke_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        721,
+        632,
+        760,
+        674
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "battle",
+      "path": "units/minion_prince_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        816,
+        632,
+        855,
+        675
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "battle",
+      "path": "units/archer_queen_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        916,
+        632,
+        953,
+        674
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "lightning_spell",
+      "surface": "battle",
+      "path": "units/lightning_spell_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        1013,
+        632,
+        1063,
+        677
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "earthquake_spell",
+      "surface": "battle",
+      "path": "units/earthquake_spell_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        1113,
+        632,
+        1161,
+        676
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    }
+  ]
+}

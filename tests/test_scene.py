@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock
 
-from autococ.ocr import OCRText
+from autococ.ocr import OCRText, RapidOCRProvider
 from autococ.scene import SCENE_SETTLEMENT, SCENE_UNKNOWN, SCENE_VILLAGE, classify_scene_text, detect_scene_from_xml
 from autococ.vision import ScreenshotRecognizer, detect_collectibles, parse_capacity, parse_countdown, parse_resource_number
 
@@ -295,6 +295,230 @@ class SceneTests(unittest.TestCase):
         })
         self.assertEqual(snapshot.observations["resource_source"], "village_inventory")
 
+    def test_new_home_hud_requires_icon_and_anchored_controls(self) -> None:
+        import cv2
+        import numpy as np
+
+        template = cv2.imread(str(Path(__file__).resolve().parents[1] / "assets/catalogs/village_home_battle_18_647_2.png"))
+        image = np.zeros((720, 1280, 3), dtype=np.uint8)
+        image[590:665, 45:120] = template
+        provider = Mock()
+        provider.recognize.return_value = [
+            OCRText("商店", .99, (2380, 752, 2466, 808)),
+            OCRText("建造", .99, (2348, 1348, 2434, 1400)),
+            OCRText("27", .99, (2176, 54, 2240, 100)),
+            OCRText("280000", .99, (2220, 48, 2440, 104)),
+            OCRText("19780430", .99, (2184, 148, 2438, 200)),
+            OCRText("286817", .99, (2260, 246, 2434, 296)),
+            OCRText("216", .99, (2352, 348, 2440, 400)),
+        ]
+        provider.recognize_line.return_value = [OCRText("27280000", .95, (2016, 38, 2480, 120))]
+        recognizer = ScreenshotRecognizer(provider=provider)
+        recognizer.client_version = "18.647.2"
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "new-home.png"
+            cv2.imwrite(str(path), cv2.resize(image, (2560, 1440), interpolation=cv2.INTER_NEAREST))
+            snapshot = recognizer.recognize(path)
+            self.assertEqual(snapshot.scene, SCENE_VILLAGE)
+            self.assertEqual(snapshot.observations["village_type"], "home")
+            self.assertEqual({item["name"] for item in snapshot.observations["buttons"]}, {"attack", "shop"})
+            self.assertEqual(next(item for item in snapshot.observations["buttons"] if item["name"] == "attack")["point"], [82, 627])
+            self.assertEqual(snapshot.observations["resources"], {
+                "gold": 27280000, "elixir": 19780430, "dark_elixir": 286817, "gems": 216,
+            })
+            self.assertEqual(snapshot.observations["resource_evidence"]["gold"]["source"], "line_roi")
+
+            provider.recognize_line.return_value = [OCRText("27280001", .99, (2016, 38, 2480, 120))]
+            conflicting_gold = recognizer.recognize(path)
+            self.assertIsNone(conflicting_gold.observations["resources"]["gold"])
+            provider.recognize_line.return_value = [OCRText("27280000", .95, (2016, 38, 2480, 120))]
+
+            image[590:665, 45:120] = 0
+            cv2.imwrite(str(path), cv2.resize(image, (2560, 1440), interpolation=cv2.INTER_NEAREST))
+            missing_icon = recognizer.recognize(path)
+            self.assertEqual(missing_icon.scene, SCENE_UNKNOWN)
+            self.assertEqual(missing_icon.observations["buttons"], [])
+
+            image[590:665, 45:120] = template
+            cv2.imwrite(str(path), cv2.resize(image, (2560, 1440), interpolation=cv2.INTER_NEAREST))
+            provider.recognize.return_value = [item for item in provider.recognize.return_value if item.text != "建造"]
+            missing_build = recognizer.recognize(path)
+            self.assertEqual(missing_build.scene, SCENE_UNKNOWN)
+            self.assertEqual(missing_build.observations["buttons"], [])
+
+    def test_checklist_home_icon_requires_current_version_and_other_hud_anchors(self) -> None:
+        import cv2
+        import numpy as np
+
+        icon = cv2.imread(str(Path(__file__).parent / "fixtures/home_battle_checklist_heldout_18_647_2.png"))
+        image = np.zeros((720, 1280, 3), dtype=np.uint8)
+        image[570:700, 25:145] = icon
+        provider = Mock()
+        provider.recognize.return_value = [
+            OCRText("商店", .99, (1190, 376, 1233, 404)),
+            OCRText("建造", .99, (1174, 674, 1217, 700)),
+        ]
+        provider.recognize_line.return_value = []
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "checklist-home.png"
+            cv2.imwrite(str(path), image)
+            current = ScreenshotRecognizer(provider=provider)
+            current.client_version = "18.647.2"
+            snapshot = current.recognize(path)
+            self.assertEqual(snapshot.scene, SCENE_VILLAGE)
+            self.assertEqual({item["name"] for item in snapshot.observations["buttons"]}, {"attack", "shop"})
+            self.assertEqual(snapshot.observations["village_type_evidence"]["point"], [82, 627])
+
+            unknown = ScreenshotRecognizer(provider=provider)
+            unknown.client_version = "unknown"
+            self.assertEqual(unknown.recognize(path).scene, SCENE_UNKNOWN)
+            provider.recognize.return_value = provider.recognize.return_value[:1]
+            self.assertEqual(current.recognize(path).scene, SCENE_UNKNOWN)
+
+    def test_current_event_panel_blocks_background_village_and_resource_reads(self) -> None:
+        import cv2
+        import numpy as np
+
+        icon = cv2.imread(str(Path(__file__).parent / "fixtures/home_battle_checklist_heldout_18_647_2.png"))
+        image = np.zeros((720, 1280, 3), dtype=np.uint8)
+        image[570:700, 25:145] = icon
+        provider = Mock()
+        provider.recognize.return_value = [
+            OCRText("活动", .999, (609, 36, 672, 76)),
+            OCRText("X", .983, (1032, 30, 1078, 76)),
+            OCRText("今日活动", .999, (214, 100, 281, 124)),
+            OCRText("商店", 1.0, (1190, 375, 1234, 404)),
+            OCRText("建造", .998, (1176, 674, 1216, 700)),
+            OCRText("建筑工人", .999, (225, 573, 297, 594)),
+            OCRText("948398", .999, (1118, 75, 1219, 99)),
+            OCRText("216", .999, (1176, 174, 1220, 200)),
+        ]
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "event-panel.png"
+            cv2.imwrite(str(path), image)
+            recognizer = ScreenshotRecognizer(provider=provider)
+            recognizer.client_version = "18.647.2"
+            snapshot = recognizer.recognize(path)
+        self.assertEqual(snapshot.scene, "popup")
+        self.assertEqual(set(snapshot.observations["event_panel"]), {"title", "close", "section"})
+        self.assertEqual(snapshot.observations["buttons"], [])
+        self.assertEqual(snapshot.observations["resources"],
+                         {"gold": None, "elixir": None, "dark_elixir": None, "gems": None})
+        self.assertIsNone(snapshot.observations["resource_source"])
+
+    def test_battle_word_and_background_hud_during_popup_do_not_enable_village(self) -> None:
+        import cv2
+        import numpy as np
+
+        template = cv2.imread(str(Path(__file__).resolve().parents[1] / "assets/catalogs/village_home_battle_18_647_2.png"))
+        image = np.zeros((720, 1280, 3), dtype=np.uint8)
+        image[590:665, 45:120] = template
+        provider = Mock()
+        provider.recognize.return_value = [
+            OCRText("战斗", .99, (1300, 400, 1390, 450)),
+            OCRText("商店", .99, (2380, 752, 2466, 808)),
+            OCRText("建造", .99, (2348, 1348, 2434, 1400)),
+            OCRText("取消", .99, (1000, 950, 1090, 1000)),
+        ]
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "popup.png"
+            cv2.imwrite(str(path), cv2.resize(image, (2560, 1440), interpolation=cv2.INTER_NEAREST))
+            snapshot = ScreenshotRecognizer(provider=provider).recognize(path)
+        self.assertEqual(snapshot.scene, "popup")
+        self.assertNotIn("attack", {item["name"] for item in snapshot.observations["buttons"]})
+
+    def test_current_hero_detail_exposes_only_verified_close(self) -> None:
+        import cv2
+        import numpy as np
+
+        path = Path(__file__).parent / "fixtures/hero_detail_dragon_duke_18_647_2_20261015.png"
+        provider = RapidOCRProvider()
+        recognizer = ScreenshotRecognizer(provider=provider)
+        recognizer.client_version = "18.647.2"
+        snapshot = recognizer.recognize(path)
+        self.assertEqual(snapshot.scene, "popup")
+        self.assertEqual(snapshot.observations["hero_detail"]["title"]["text"], "16级飞龙公爵")
+        self.assertEqual([(button["name"], button["point"]) for button in snapshot.observations["buttons"]],
+                         [("close_hero_details", [1130, 53])])
+
+        wrong_version = ScreenshotRecognizer(provider=provider)
+        wrong_version.client_version = "18.647.3"
+        self.assertIsNone(wrong_version.recognize(path).observations["hero_detail"])
+
+        mocked = Mock()
+        mocked.recognize.return_value = provider.recognize(path)
+        with TemporaryDirectory() as tmp:
+            hidden_close = Path(tmp) / "detail-no-close.png"
+            image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            image[24:82, 1104:1156] = 0
+            cv2.imencode(".png", image)[1].tofile(hidden_close)
+            no_icon = ScreenshotRecognizer(provider=mocked)
+            no_icon.client_version = "18.647.2"
+            self.assertIsNone(no_icon.recognize(hidden_close).observations["hero_detail"])
+            self.assertEqual(no_icon.recognize(hidden_close).observations["buttons"], [])
+
+        mocked.recognize.return_value = [item for item in mocked.recognize.return_value
+                                         if item.text != "16级飞龙公爵"]
+        no_title = ScreenshotRecognizer(provider=mocked)
+        no_title.client_version = "18.647.2"
+        self.assertIsNone(no_title.recognize(path).observations["hero_detail"])
+
+    def test_current_siege_barracks_detail_exposes_only_verified_close(self) -> None:
+        import cv2
+        import numpy as np
+
+        path = Path(__file__).parent / "fixtures/unit_detail_siege_barracks_18_647_2_20261015.png"
+        provider = RapidOCRProvider()
+        recognizer = ScreenshotRecognizer(provider=provider)
+        recognizer.client_version = "18.647.2"
+        snapshot = recognizer.recognize(path)
+        self.assertEqual(snapshot.scene, "popup")
+        self.assertEqual(snapshot.observations["unit_detail"]["title"]["text"], "4级攻城训练营")
+        self.assertEqual([(button["name"], button["point"]) for button in snapshot.observations["buttons"]],
+                         [("close_unit_details", [1130, 53])])
+
+        wrong_version = ScreenshotRecognizer(provider=provider)
+        wrong_version.client_version = "18.647.3"
+        self.assertIsNone(wrong_version.recognize(path).observations["unit_detail"])
+
+        mocked = Mock()
+        mocked.recognize.return_value = provider.recognize(path)
+        with TemporaryDirectory() as tmp:
+            hidden_close = Path(tmp) / "detail-no-close.png"
+            image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            image[24:82, 1104:1156] = 0
+            cv2.imencode(".png", image)[1].tofile(hidden_close)
+            no_icon = ScreenshotRecognizer(provider=mocked)
+            no_icon.client_version = "18.647.2"
+            self.assertIsNone(no_icon.recognize(hidden_close).observations["unit_detail"])
+            self.assertEqual(no_icon.recognize(hidden_close).observations["buttons"], [])
+
+        mocked.recognize.return_value = [item for item in mocked.recognize.return_value
+                                         if item.text != "持续时间（秒）："]
+        no_stat = ScreenshotRecognizer(provider=mocked)
+        no_stat.client_version = "18.647.2"
+        self.assertIsNone(no_stat.recognize(path).observations["unit_detail"])
+
+    def test_current_sky_wagon_detail_exposes_only_verified_close(self) -> None:
+        path = Path(__file__).parent / "fixtures/unit_detail_sky_wagon_18_647_2_20261015.png"
+        recognizer = ScreenshotRecognizer(provider=RapidOCRProvider())
+        recognizer.client_version = "18.647.2"
+        snapshot = recognizer.recognize(path)
+        self.assertEqual(snapshot.scene, "popup")
+        self.assertEqual(snapshot.observations["unit_detail"]["title"]["text"], "2级空中战车")
+        self.assertEqual([(button["name"], button["point"]) for button in snapshot.observations["buttons"]],
+                         [("close_unit_details", [1130, 53])])
+
+    def test_current_troop_launcher_detail_exposes_only_verified_close(self) -> None:
+        path = Path(__file__).parent / "fixtures/unit_detail_troop_launcher_18_647_2_20261015.png"
+        recognizer = ScreenshotRecognizer(provider=RapidOCRProvider())
+        recognizer.client_version = "18.647.2"
+        snapshot = recognizer.recognize(path)
+        self.assertEqual(snapshot.scene, "popup")
+        self.assertEqual(snapshot.observations["unit_detail"]["title"]["text"], "1级部队发射器")
+        self.assertEqual([(button["name"], button["point"]) for button in snapshot.observations["buttons"]],
+                         [("close_unit_details", [1130, 53])])
+
     def test_timers_and_counters_are_not_resource_amounts(self) -> None:
         for text in ("0/5", "4小时41分", "-100", "100 gold"):
             self.assertIsNone(parse_resource_number(text))
@@ -469,6 +693,32 @@ class SceneTests(unittest.TestCase):
         self.assertEqual([button["name"] for button in snapshot.observations["buttons"]], ["find_match_regular"])
         self.assertEqual(snapshot.observations["buttons"][0]["point"], [218, 518])
 
+    def test_new_search_menu_exposes_only_anchored_edit_army_control(self) -> None:
+        import cv2
+        import numpy as np
+
+        provider = Mock()
+        provider.recognize.return_value = [
+            OCRText("联机模式", .99, (268, 92, 420, 144)),
+            OCRText("常规战", .99, (348, 892, 516, 966)),
+            OCRText("搜索对手", .99, (350, 1004, 522, 1068)),
+            OCRText("1700", .99, (320, 1064, 470, 1136)),
+            OCRText("编辑军队", .99, (274, 1336, 420, 1392)),
+        ]
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "search.png"
+            cv2.imwrite(str(path), np.zeros((1440, 2560, 3), dtype=np.uint8))
+            snapshot = ScreenshotRecognizer(provider=provider).recognize(path)
+            self.assertEqual(snapshot.scene, "search")
+            self.assertEqual(snapshot.observations["search_cost_gold"], 1700)
+            self.assertEqual({item["name"] for item in snapshot.observations["buttons"]},
+                             {"find_match_regular", "edit_army"})
+            self.assertEqual(next(item for item in snapshot.observations["buttons"]
+                                  if item["name"] == "edit_army")["point"], [173, 682])
+            provider.recognize.return_value[-1] = OCRText("编辑军队", .99, (800, 700, 946, 756))
+            wrong_position = ScreenshotRecognizer(provider=provider).recognize(path)
+            self.assertNotIn("edit_army", {item["name"] for item in wrong_position.observations["buttons"]})
+
     def test_scout_resources_and_card_counts_are_separate_from_inventory_and_levels(self) -> None:
         path = Path(__file__).resolve().parents[1] / "reports/live-20260922/scout-from-army-235605/frames/00007-scout-from-army.png"
         if not path.is_file():
@@ -494,6 +744,29 @@ class SceneTests(unittest.TestCase):
         self.assertEqual([slot["count"] for slot in battle["slots"] if slot["kind"] == "troop"], [10, 1, 2, 1])
         self.assertEqual([slot["count"] for slot in battle["slots"] if slot["kind"] == "spell"], [6, 5])
         self.assertEqual([slot["count"] for slot in battle["slots"] if slot["kind"] == "hero"], [None] * 4)
+
+    def test_current_baby_dragon_edge_and_count_keep_all_four_troop_slots(self) -> None:
+        import cv2
+        import numpy as np
+
+        bar = cv2.imread(str(Path(__file__).parent / "fixtures/battle_bar_baby_edge_18_647_2_20261015.png"))
+        image = np.zeros((1440, 2560, 3), dtype=np.uint8)
+        image[1170:1440, 170:2380] = bar
+        texts = [OCRText(value, .995, bbox) for value, bbox in (
+            ("x10", (130, 592, 179, 621)), ("x1", (244, 594, 276, 621)),
+            ("x1", (342, 595, 372, 620)), ("x2", (434, 594, 470, 620)),
+            ("x6", (1044, 592, 1086, 622)), ("x5", (1142, 592, 1183, 622)),
+        )]
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "battle-bar.png"
+            cv2.imwrite(str(path), image)
+            recognizer = ScreenshotRecognizer(provider=Mock())
+            recognizer.client_version = "18.647.2"
+            battle = recognizer._battle_observation(path, texts, "enemy_village")
+        troops = [(slot["unit_id"], slot["count"]) for slot in battle["slots"]
+                  if slot["kind"] == "troop"]
+        self.assertEqual(troops, [("electro_dragon", 10), ("dragon", 1),
+                                  ("baby_dragon", 1), ("balloon", 2)])
 
     def test_countdown_parsing_rejects_inventory_and_capacity(self) -> None:
         self.assertEqual(parse_countdown("2分59秒"), 179)

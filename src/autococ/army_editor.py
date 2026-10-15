@@ -120,6 +120,10 @@ def _picker_row(image: np.ndarray) -> tuple[str | None, list[tuple[int, int, int
             if _red_minus(image, left + 78, top + 16):
                 boxes.append((left, top, left + 98, top + 98))
         found[kind] = boxes
+    # The current siege tray shares the shifted spell row but starts at the
+    # right of the army. Only fully visible cards anchor this navigation view.
+    found["siege"] = [(left, 287, left + 98, 385) for left in (1015, 1119)
+                       if _red_minus(image, left + 78, 303)]
     active = [kind for kind, boxes in found.items() if boxes]
     return (active[0], found[active[0]]) if len(active) == 1 else (None, [])
 
@@ -316,6 +320,11 @@ def _current_picker(path: Path, image: np.ndarray, provider: OCRProvider | None,
                                "confidence": .95, "enabled": True, "cost_free": True,
                                "evidence": {"visual": "observed_dimmed_background_dismissal",
                                             "editing_kind": kind}})
+    if kind == "siege":
+        # Detail inspection and paging do not need to change this lineup.
+        # Do not infer hidden counts or expose add/remove actions from this view.
+        result["unknowns"].append("siege_picker_mutation_not_calibrated")
+        return result
     if boxes != [(558 + i * 104, boxes[0][1], 656 + i * 104, boxes[0][1] + 98)
                  for i in range(len(boxes))]:
         result["unknowns"].append("picker_selected_cards_not_contiguous")
@@ -467,11 +476,14 @@ def recognize_army_editor(
         # clipping both tabs. The fully occupied hero header at its observed
         # shifted location distinguishes this sampled current layout from the
         # saved-plan editor's partially filled hero row.
-        shifted_current = (picker_kind == "spell" and army_title is None and
+        shifted_current = (picker_kind in {"spell", "siege"} and army_title is None and
                            _one(canonical, "4/4", (40, 55, 105, 100)) is not None and
                            _one(canonical, "强化军队", (850, 15, 1050, 100)) is not None and
                            _one(canonical, "强化英雄", (1020, 15, 1220, 100)) is not None and
                            not edit_titles)
+        if picker_kind == "siege" and client_version != "18.647.2":
+            result["unknowns"].append("siege_picker_client_unverified")
+            return result
         if (saved_title is not None and army_title is not None) or shifted_current:
             return _current_picker(path, image, provider, canonical, (width, height),
                                    client_version, baseline_resolution)
