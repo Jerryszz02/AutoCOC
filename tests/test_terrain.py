@@ -104,13 +104,14 @@ class TerrainTests(unittest.TestCase):
             self.assertLess(edge["evidence"]["intercept"], 490 if edge["edge"] == 0 else 260)
             self.assertGreater(edge["evidence"]["intercept"], 455 if edge["edge"] == 0 else 220)
 
-    def test_shifted_crop_rejects_inner_upper_line_with_visible_outer_red(self):
+    def test_shifted_crop_conservatively_rejects_ambiguous_western_red_segment(self):
         from autococ.terrain import find_line_deployment_edges
 
         path = Path(__file__).parent / "fixtures/line-boundary-shifted.png"
-        # The old assertion compared only the fitted red line. At y=172 its
-        # fitted x=362, while another visible red segment is farther west at
-        # x=318; the proposed tap x=330 was still inside that outer segment.
+        # Near candidate y=172, the +/-3px frontier window includes a red
+        # decoration at about (318,175). This is a conservative veto, not
+        # independent proof of the outer deployment boundary. Distinguishing
+        # such decorations remains a false-rejection limitation.
         self.assertEqual(find_line_deployment_edges(path), [])
 
     def test_short_sunlit_boundary_is_not_replaced_by_long_interior_roofs(self):
