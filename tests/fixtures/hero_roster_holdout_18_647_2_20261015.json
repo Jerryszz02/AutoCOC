@@ -1,0 +1,20 @@
+{
+  "client_version": "18.647.2",
+  "surface": "my_army_large_heroes_v1",
+  "derivation": "resize source to 1280x720 with cv2.INTER_AREA, then crop [y185:668, x23:537] without changing card pixels",
+  "source_crop_bbox_1280": [23, 185, 537, 668],
+  "frames": [
+    {
+      "fixture": "hero_roster_holdout_00007_18_647_2_20261015.png",
+      "fixture_sha256": "114a93598da35584acc5d6aa71a7f42a5579df6fc62167a0efefd6d71df66362",
+      "source_frame": "reports/completion-20261015/live/20261015-223012-576315-88e25bff/frames/00007-battle-hero-roster-reread.png",
+      "source_sha256": "ec9dd2d311cc83182ade6dbb6df49689bd3c2d22f213cc32708bd0290e0e2617"
+    },
+    {
+      "fixture": "hero_roster_holdout_00008_18_647_2_20261015.png",
+      "fixture_sha256": "a2d774af9650e6fbded325ba64cbe3fd20202a47632b269dd8b391627fb55ce8",
+      "source_frame": "reports/completion-20261015/live/20261015-223012-576315-88e25bff/frames/00008-battle-hero-roster-reread.png",
+      "source_sha256": "c80acee3ff69335e796e75573495f7eb19ade243fe39a6c6dd9b61ff4e320ebe"
+    }
+  ]
+}

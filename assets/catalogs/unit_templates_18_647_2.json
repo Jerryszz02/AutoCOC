@@ -199,6 +199,18 @@
       "client_version": "18.647.2"
     },
     {
+      "unit_id": "grand_warden",
+      "surface": "army_hero",
+      "role": "color_profile",
+      "path": "units/grand_warden_army_color_roster_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261015-223012-576315-88e25bff/frames/00006-battle-army-confirmation.png",
+      "source_bbox_1280": [28, 220, 142, 540],
+      "source_sha256": "cb95dc2245d4fd9be2d42d4f0380bc35ccfe294395a9fc1eabca04a9c3db7ea9",
+      "template_sha256": "082a36d0c4032526f2fd4d9272502792dd7b5e951c09d3d2e8ebfbac4dd269c0",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
       "unit_id": "minion_prince",
       "surface": "army_hero",
       "role": "face",

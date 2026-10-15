@@ -1,4 +1,5 @@
 import json
+import hashlib
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -7,6 +8,7 @@ import cv2
 import numpy as np
 
 from autococ.unit_catalog import ArmyRecipe, ArmyRequirement, coverage, recognize_card_identity, recognize_large_hero_identity, template_manifest
+from autococ.army_manifest import recognize_army_heroes
 from autococ.locator import scale_box
 from autococ.ocr import OCRText, RapidOCRProvider
 from autococ.scene import SCENE_BATTLE, SCENE_ENEMY_VILLAGE
@@ -139,6 +141,57 @@ class UnitCatalogTests(unittest.TestCase):
         wrong_version = recognize_large_hero_identity(image, (23, 185, 147, 668),
                                                        client_version="18.600.8")
         self.assertIsNone(wrong_version["unit_id"])
+
+    def test_current_hero_roster_heldout_frames_keep_all_four_identities(self):
+        expected = ("grand_warden", "dragon_duke", "minion_prince", "archer_queen")
+        metadata = json.loads((Path(__file__).parent / "fixtures/hero_roster_holdout_18_647_2_20261015.json")
+                              .read_text(encoding="utf-8"))
+        for number in (7, 8):
+            path = Path(__file__).parent / f"fixtures/hero_roster_holdout_{number:05d}_18_647_2_20261015.png"
+            source = metadata["frames"][number - 7]
+            self.assertEqual(path.name, source["fixture"])
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), source["fixture_sha256"])
+            image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            source_path = Path(r"E:\projects\AutoCOC") / source["source_frame"]
+            if source_path.is_file():
+                self.assertEqual(hashlib.sha256(source_path.read_bytes()).hexdigest(), source["source_sha256"])
+                original = cv2.imdecode(np.fromfile(source_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+                original = cv2.resize(original, (1280, 720), interpolation=cv2.INTER_AREA)
+                self.assertTrue(np.array_equal(image, original[185:668, 23:537]))
+            for index, unit_id in enumerate(expected):
+                with self.subTest(frame=number, unit_id=unit_id):
+                    left = index * 130
+                    result = recognize_large_hero_identity(
+                        image, (left, 0, left + 124, 483), client_version="18.647.2")
+                    self.assertEqual(result["unit_id"], unit_id, result)
+                    self.assertGreaterEqual(result["confidence"], .9)
+                    self.assertEqual(result["reason"], "face_and_upper_card_visual_profile")
+                    self.assertIsNone(recognize_large_hero_identity(
+                        image, (left, 0, left + 124, 483), client_version="18.647.3")["unit_id"])
+            # Preserve the observed card pixels and geometry while masking the
+            # account and village before testing the full hero-roster reader.
+            anonymous = np.zeros((720, 1280, 3), dtype=np.uint8)
+            anonymous[185:668, 23:537] = image
+            with TemporaryDirectory() as folder:
+                replay = Path(folder) / "anonymous-roster.png"
+                cv2.imencode(".png", anonymous)[1].tofile(replay)
+                roster = recognize_army_heroes(replay, {"used": 4, "capacity": 4},
+                                               client_version="18.647.2")
+            self.assertTrue(roster["complete"], roster["unknowns"])
+            self.assertEqual([card["unit_id"] for card in roster["cards"]], list(expected))
+
+        template = next(entry for entry in template_manifest(client_version="18.647.2")["templates"]
+                        if entry.get("path") == "units/grand_warden_army_color_roster_18_647_2.png")
+        template_path = Path(__file__).parents[1] / "assets/catalogs" / template["path"]
+        self.assertEqual(hashlib.sha256(template_path.read_bytes()).hexdigest(), template["template_sha256"])
+        source_path = Path(r"E:\projects\AutoCOC") / template["source_frame"]
+        if source_path.is_file():
+            self.assertEqual(hashlib.sha256(source_path.read_bytes()).hexdigest(), template["source_sha256"])
+            original = cv2.imdecode(np.fromfile(source_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            original = cv2.resize(original, (1280, 720), interpolation=cv2.INTER_AREA)
+            left, top, right, bottom = template["source_bbox_1280"]
+            sampled = cv2.imdecode(np.fromfile(template_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            self.assertTrue(np.array_equal(sampled, original[top:bottom, left:right]))
 
     def test_new_minion_prince_sample_matches_independent_selected_view(self):
         path = Path(__file__).parent / "fixtures/hero_minion_prince_selected_18_647_2_20261015.png"
