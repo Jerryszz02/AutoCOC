@@ -1,11 +1,13 @@
 """Synthetic contract tests only; these fixtures are never R model readiness."""
 
+import hashlib
 import json
 import os
 from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import cv2
@@ -91,6 +93,67 @@ class DynamicTrainingTests(unittest.TestCase):
         self.config_path.write_text(json.dumps(broken), encoding="utf-8")
         with self.assertRaisesRegex(TrainingError, "outside declared applicability"):
             _config(self.snapshot, self.config_path)
+
+    @unittest.skipUnless(os.environ.get("AUTOCOC_DYNAMIC_INTEGRATION") == "1",
+                         "isolated training environment only")
+    def test_r_resume_across_head_boundary_preserves_global_best_and_new_patience(self):
+        import torch
+
+        class TinyR(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.features = torch.nn.Sequential(torch.nn.Conv2d(3, 4, 1),
+                                                    torch.nn.BatchNorm2d(4),
+                                                    torch.nn.AdaptiveAvgPool2d(1))
+                self.classifier = torch.nn.Sequential(torch.nn.Flatten(), torch.nn.Linear(4, 3))
+
+            def forward(self, images):
+                return self.classifier(self.features(images))
+
+        scores = [(.5, .5), (.6, .6), (.7, .7)] + [(.1, .1)] * 9
+        measured = []
+        stop_after = [5]
+
+        def metric(_truth, _prediction, _classes):
+            score = scores[len(measured)]
+            measured.append(score)
+            return {"macro_f1": score[0], "minimum_recall": score[1]}
+
+        def now():
+            return 1000.0 if len(measured) >= stop_after[0] else 0.0
+
+        run = self.root / "resume-run"
+        with (patch("training.vision.dynamic_train._scene_model", side_effect=lambda *_: (TinyR(), None)),
+              patch("training.vision.dynamic_train.roi_tensor", return_value=np.ones((3, 8, 8), dtype=np.float32)),
+              patch("training.vision.dynamic_train._metric", side_effect=metric),
+              patch("training.vision.dynamic_train.time.monotonic", side_effect=now)):
+            for limit, expected_bad in ((5, 2), (6, 1), (9, 4), (12, 7)):
+                stop_after[0] = limit
+                report = train_dynamic_state(self.snapshot_path, self.config_path, run,
+                                             device="cpu", max_epochs=20, deadline_seconds=120,
+                                             resume=run / "last.pt" if run.exists() else None,
+                                             pretrained=None)
+                self.assertEqual(report["epochs_completed"], limit)
+                state = torch.load(run / "last.pt", map_location="cpu", weights_only=True)
+                self.assertEqual(state["bad_epochs"], expected_bad)
+                self.assertEqual(tuple(state["best_score"]), (.7, .7))
+                self.assertEqual(state["phase"], "head" if limit == 5 else "finetune")
+            self.assertEqual(torch.load(run / "best.pt", map_location="cpu", weights_only=True)["epoch"], 2)
+            recipe = json.loads((run / "training_config.json").read_text())
+            self.assertEqual(recipe["trainer_recipe_version"], 2)
+            self.assertEqual(recipe["finetune_patience"], 7)
+            old = torch.load(run / "last.pt", map_location="cpu", weights_only=True)
+            old_identity = {key: value for key, value in recipe.items()
+                            if key not in {"deadline_seconds", "trainer_recipe_version",
+                                           "head_features_mode", "finetune_features_mode",
+                                           "finetune_patience", "finetune_patience_policy"}}
+            old["signature"] = hashlib.sha256(json.dumps(old_identity, sort_keys=True,
+                                                         separators=(",", ":")).encode()).hexdigest()
+            torch.save(old, run / "last.pt")
+            with self.assertRaisesRegex(TrainingError, "R resume config/snapshot/pretrained/version differs"):
+                train_dynamic_state(self.snapshot_path, self.config_path, run, device="cpu",
+                                    resume=run / "last.pt", max_epochs=20,
+                                    deadline_seconds=120, pretrained=None)
 
     @unittest.skipUnless(os.environ.get("AUTOCOC_DYNAMIC_INTEGRATION") == "1",
                          "isolated training environment only")

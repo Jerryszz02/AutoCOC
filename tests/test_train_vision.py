@@ -4,18 +4,162 @@ import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 import cv2
 import numpy as np
 
 from autococ.model_vision import _ONNXModel
 from training.vision.train import (SCENE_PREPROCESS, TrainingError, _config, _scene_rows,
+                                   _advance_scene_patience, _set_scene_training_phase,
                                    _stage_building_inputs,
                                    _validate_scene_mode,
                                    prepare_bgr, train_building, train_scene, verify_snapshot)
 
 
 class TrainingContractTests(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get("AUTOCOC_TRAINING_INTEGRATION") == "1", "training environment only")
+    def test_head_freezes_feature_bn_buffers_but_updates_classifier_then_finetune_updates_features(self):
+        import torch
+
+        class TinyScene(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.features = torch.nn.Sequential(torch.nn.Conv2d(3, 4, 1),
+                                                    torch.nn.BatchNorm2d(4),
+                                                    torch.nn.AdaptiveAvgPool2d(1))
+                self.classifier = torch.nn.Sequential(torch.nn.Flatten(), torch.nn.Linear(4, 2))
+
+            def forward(self, images):
+                return self.classifier(self.features(images))
+
+        torch.manual_seed(7)
+        model = TinyScene()
+        images = torch.randn(8, 3, 8, 8) + 3
+        labels = torch.tensor([0, 1] * 4)
+        bn = model.features[1]
+        before_mean = bn.running_mean.clone()
+        before_var = bn.running_var.clone()
+        before_count = bn.num_batches_tracked.clone()
+        before_features = model.features[0].weight.detach().clone()
+        before_classifier = model.classifier[1].weight.detach().clone()
+
+        _set_scene_training_phase(model, "head")
+        self.assertFalse(model.features.training)
+        self.assertTrue(model.classifier.training)
+        optimizer = torch.optim.SGD((p for p in model.parameters() if p.requires_grad), lr=.1)
+        optimizer.zero_grad()
+        torch.nn.functional.cross_entropy(model(images), labels).backward()
+        optimizer.step()
+        self.assertTrue(torch.equal(bn.running_mean, before_mean))
+        self.assertTrue(torch.equal(bn.running_var, before_var))
+        self.assertTrue(torch.equal(bn.num_batches_tracked, before_count))
+        self.assertTrue(torch.equal(model.features[0].weight, before_features))
+        self.assertFalse(torch.equal(model.classifier[1].weight, before_classifier))
+
+        _set_scene_training_phase(model, "finetune")
+        self.assertTrue(model.features.training)
+        self.assertTrue(all(p.requires_grad for p in model.features.parameters()))
+        optimizer = torch.optim.SGD(model.parameters(), lr=.1)
+        optimizer.zero_grad()
+        torch.nn.functional.cross_entropy(model(images), labels).backward()
+        optimizer.step()
+        self.assertFalse(torch.equal(bn.running_mean, before_mean))
+        self.assertFalse(torch.equal(bn.running_var, before_var))
+        self.assertGreater(int(bn.num_batches_tracked), int(before_count))
+        self.assertFalse(torch.equal(model.features[0].weight, before_features))
+
+    def test_head_stalls_do_not_consume_finetune_patience_and_resume_does_not_reset_twice(self):
+        best, bad = (.8, .8), 2  # head's last checkpoint, after two stagnant epochs
+        for epoch in range(5, 12):
+            best, bad, improved = _advance_scene_patience((.1, .1), best, bad,
+                                                          epoch=epoch, head_epochs=5)
+            self.assertFalse(improved)
+            self.assertEqual(best, (.8, .8))
+            self.assertEqual(bad, epoch - 4)
+            if epoch == 5:
+                boundary_checkpoint = {"epoch": epoch, "phase": "finetune", "bad_epochs": bad,
+                                       "best_score": best}
+                best, bad = boundary_checkpoint["best_score"], boundary_checkpoint["bad_epochs"]
+            if epoch == 8:
+                middle_checkpoint = {"epoch": epoch, "phase": "finetune", "bad_epochs": bad,
+                                     "best_score": best}
+                best, bad = middle_checkpoint["best_score"], middle_checkpoint["bad_epochs"]
+            self.assertEqual(bad >= 7, epoch == 11)
+
+    @unittest.skipUnless(os.environ.get("AUTOCOC_TRAINING_INTEGRATION") == "1", "training environment only")
+    def test_scene_resume_across_head_boundary_and_mid_finetune_keeps_seven_fine_misses(self):
+        import torch
+
+        class TinyScene(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.features = torch.nn.Sequential(torch.nn.Conv2d(3, 4, 1),
+                                                    torch.nn.BatchNorm2d(4),
+                                                    torch.nn.AdaptiveAvgPool2d(1))
+                self.classifier = torch.nn.Sequential(torch.nn.Flatten(), torch.nn.Linear(4, 2))
+
+            def forward(self, images):
+                return self.classifier(self.features(images))
+
+        metadata = json.loads((self.root / "snapshot.json").read_text())
+        metadata["prototype_only"] = True
+        (self.root / "snapshot.json").write_text(json.dumps(metadata))
+        split = json.loads((self.root / "split.json").read_text())
+        split["prototype_only"] = True
+        (self.root / "split.json").write_text(json.dumps(split))
+        self.hash_snapshot()
+        config_path = self.root / "config.json"
+        config_path.write_text(json.dumps({
+            "task": "scene", "data_version": "test", "client_versions": ["test-client"],
+            "source_width_range": [40, 40], "source_height_range": [32, 32],
+            "zoom": "minimum", "code_version": "test-code", "classes": ["battle", "village"],
+            "output": {"format": "logits", "min_confidence": .5, "min_margin": .1},
+            "prototype_only": True, "batch": 1}), encoding="utf-8")
+        run = self.root / "run"
+        scores = [(.5, .5), (.6, .6), (.7, .7)] + [(.1, .1)] * 9
+        measured = []
+        stop_after = [5]
+
+        def metric(_truth, _prediction, _classes):
+            score = scores[len(measured)]
+            measured.append(score)
+            return {"macro_f1": score[0], "minimum_recall": score[1]}
+
+        def now():
+            return 1000.0 if len(measured) >= stop_after[0] else 0.0
+
+        with (patch("training.vision.train._scene_model", side_effect=lambda *_: (TinyScene(), None)),
+              patch("training.vision.train.prepare_bgr", return_value=np.ones((3, 8, 8), dtype=np.float32)),
+              patch("training.vision.train._metric", side_effect=metric),
+              patch("training.vision.train.time.monotonic", side_effect=now)):
+            for limit, expected_bad in ((5, 2), (6, 1), (9, 4), (12, 7)):
+                stop_after[0] = limit
+                result = train_scene(self.root, config_path, run, device="cpu", seed=42,
+                                     resume=run / "last.pt" if run.exists() else None,
+                                     prototype=True, development=True, max_epochs=20,
+                                     deadline_seconds=120, pretrained=None)
+                self.assertEqual(result["epochs_completed"], limit)
+                last = torch.load(run / "last.pt", map_location="cpu", weights_only=True)
+                self.assertEqual(last["bad_epochs"], expected_bad)
+                self.assertEqual(tuple(last["best_score"]), (.7, .7))
+                self.assertEqual(last["phase"], "head" if limit == 5 else "finetune")
+            self.assertEqual(torch.load(run / "best.pt", map_location="cpu", weights_only=True)["epoch"], 2)
+            recipe = json.loads((run / "training_config.json").read_text())
+            self.assertEqual(recipe["head_features_mode"], "eval_frozen_parameters_and_buffers")
+            self.assertEqual(recipe["finetune_patience_policy"], "reset_at_boundary_keep_global_best")
+            old = torch.load(run / "last.pt", map_location="cpu", weights_only=True)
+            old_identity = {key: value for key, value in recipe.items()
+                            if key not in {"deadline_seconds", "trainer_recipe_version",
+                                           "head_features_mode", "finetune_features_mode",
+                                           "finetune_patience", "finetune_patience_policy"}}
+            old["signature"] = hashlib.sha256(json.dumps(old_identity, sort_keys=True).encode()).hexdigest()
+            torch.save(old, run / "last.pt")
+            with self.assertRaisesRegex(TrainingError, "Resume config or snapshot differs"):
+                train_scene(self.root, config_path, run, device="cpu", seed=42,
+                            resume=run / "last.pt", prototype=True, development=True,
+                            max_epochs=20, deadline_seconds=120, pretrained=None)
+
     def test_development_scene_mode_remains_explicit_and_bounded(self):
         _validate_scene_mode(True, True, 20)
         with self.assertRaisesRegex(TrainingError, "Prototype smoke"):

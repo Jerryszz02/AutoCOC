@@ -26,6 +26,11 @@ SCENE_PREPROCESS = {"width": 320, "height": 192, "color": "RGB", "resize": "lett
 BUILDING_PREPROCESS = {"width": 640, "height": 640, "color": "RGB", "resize": "letterbox",
                        "scale": 1 / 255, "mean": [0, 0, 0], "std": [1, 1, 1],
                        "pad_value": 114}
+SCENE_TRAINER_RECIPE = {"trainer_recipe_version": 2,
+                        "head_features_mode": "eval_frozen_parameters_and_buffers",
+                        "finetune_features_mode": "train_all_parameters_and_buffers",
+                        "finetune_patience": 7,
+                        "finetune_patience_policy": "reset_at_boundary_keep_global_best"}
 
 
 from .snapshot import TrainingError, verify_snapshot
@@ -133,6 +138,27 @@ def _environment() -> dict:
 
 def _signature(document: dict) -> str:
     return hashlib.sha256(json.dumps(document, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _set_scene_training_phase(model, phase: str) -> None:
+    """Freeze feature weights and running statistics during head training."""
+    if phase not in {"head", "finetune"}:
+        raise TrainingError(f"Unknown scene training phase: {phase}")
+    train_features = phase == "finetune"
+    for parameter in model.features.parameters():
+        parameter.requires_grad = train_features
+    model.train()
+    if not train_features:
+        model.features.eval()
+
+
+def _advance_scene_patience(score: tuple[float, float], best_score: tuple[float, float],
+                            bad_epochs: int, *, epoch: int, head_epochs: int) -> tuple[tuple[float, float], int, bool]:
+    """Start fine tuning's seven misses afresh without replacing the global best."""
+    if head_epochs and epoch == head_epochs:
+        bad_epochs = 0
+    improved = score > best_score
+    return (score if improved else best_score, 0 if improved else bad_epochs + 1, improved)
 
 
 def _offline_ultralytics(config_dir: Path):
@@ -276,7 +302,8 @@ def train_scene(snapshot_root: Path, config_path: Path, output: Path, *, device:
                    "split_sha256": snapshot["split_sha256"], "pretrained_sha256": sha256(pretrained) if pretrained else None,
                    "architecture": "mobilenet_v3_small", "prototype_only": prototype,
                    "development": development,
-                   "max_epochs": max_epochs or (2 if prototype else 35), "deadline_seconds": deadline_seconds})
+                   "max_epochs": max_epochs or (2 if prototype else 35), "deadline_seconds": deadline_seconds,
+                   **SCENE_TRAINER_RECIPE})
     resume_identity = {key: value for key, value in config.items() if key != "deadline_seconds"}
     signature = hashlib.sha256(json.dumps(resume_identity, sort_keys=True).encode()).hexdigest()
     if resume:
@@ -336,8 +363,7 @@ def train_scene(snapshot_root: Path, config_path: Path, output: Path, *, device:
         if time.monotonic() - began >= deadline_seconds:
             break
         phase = "head" if epoch < head_epochs else "finetune"
-        for parameter in model.features.parameters():
-            parameter.requires_grad = phase == "finetune"
+        _set_scene_training_phase(model, phase)
         if optimizer is None or epoch == head_epochs:
             optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad),
                                           lr=0.001 if phase == "head" else 0.0001, weight_decay=0.0001)
@@ -345,7 +371,6 @@ def train_scene(snapshot_root: Path, config_path: Path, output: Path, *, device:
             if resume and epoch == start_epoch and checkpoint.get("phase") == phase:
                 optimizer.load_state_dict(checkpoint["optimizer"])
                 scheduler.load_state_dict(checkpoint["scheduler"])
-        model.train()
         losses = []
         for images, labels in train_loader:
             images, labels = images.to(device), labels.to(device)
@@ -366,8 +391,8 @@ def train_scene(snapshot_root: Path, config_path: Path, output: Path, *, device:
         metrics = _metric(truth, predicted, classes)
         score = (metrics["macro_f1"], metrics["minimum_recall"])
         scheduler.step()
-        better = score > best_score
-        best_score, bad_epochs = (score, 0) if better else (best_score, bad_epochs + 1)
+        best_score, bad_epochs, better = _advance_scene_patience(
+            score, best_score, bad_epochs, epoch=epoch, head_epochs=head_epochs)
         record = {"epoch": epoch, "phase": phase, "train_loss": sum(losses) / len(losses),
                   "validation": metrics, "elapsed_seconds": time.monotonic() - began}
         history.append(record)
@@ -379,7 +404,7 @@ def train_scene(snapshot_root: Path, config_path: Path, output: Path, *, device:
         if better:
             torch.save(state, output / "best.pt")
         (output / "history.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
-        if (development or not prototype) and phase == "finetune" and bad_epochs >= 7:
+        if (development or not prototype) and phase == "finetune" and bad_epochs >= SCENE_TRAINER_RECIPE["finetune_patience"]:
             break
     result = {"task": "scene", "prototype_only": prototype, "epochs_completed": len(history),
               "train_images": len(train_rows), "validation_images": len(val_rows),

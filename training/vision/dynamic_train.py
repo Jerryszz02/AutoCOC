@@ -14,7 +14,8 @@ from .data import sha256
 from .dynamic_snapshot import verify_dynamic_snapshot
 from .snapshot import TrainingError
 from .train import (_environment, _metric, _restore_rng, _rng_state, _scene_model,
-                    _seed, _signature)
+                    _seed, _signature, _advance_scene_patience,
+                    _set_scene_training_phase, SCENE_TRAINER_RECIPE)
 
 
 R_PREPROCESS = {"width": 224, "height": 224, "color": "RGB", "resize": "stretch",
@@ -166,7 +167,8 @@ def train_dynamic_state(snapshot_root: Path, config_path: Path, output: Path, *,
                    "deadline_seconds": deadline_seconds,
                    "pretrained_sha256": sha256(pretrained) if pretrained else None,
                    "torch_version": environment["packages"]["torch"],
-                   "torchvision_version": environment["packages"]["torchvision"]})
+                   "torchvision_version": environment["packages"]["torchvision"],
+                   **SCENE_TRAINER_RECIPE})
     identity = {key: value for key, value in config.items() if key != "deadline_seconds"}
     signature = _signature(identity)
     checkpoint = None
@@ -216,8 +218,7 @@ def train_dynamic_state(snapshot_root: Path, config_path: Path, output: Path, *,
         if time.monotonic() - began >= deadline_seconds:
             break
         phase = "head" if epoch < head_epochs else "finetune"
-        for parameter in model.features.parameters():
-            parameter.requires_grad = phase == "finetune"
+        _set_scene_training_phase(model, phase)
         if optimizer is None or epoch == head_epochs:
             optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad),
                                           lr=.001 if phase == "head" else .0001, weight_decay=.0001)
@@ -225,7 +226,6 @@ def train_dynamic_state(snapshot_root: Path, config_path: Path, output: Path, *,
             if checkpoint and epoch == start and checkpoint["phase"] == phase:
                 optimizer.load_state_dict(checkpoint["optimizer"])
                 scheduler.load_state_dict(checkpoint["scheduler"])
-        model.train()
         losses = []
         for images, labels in train_loader:
             images, labels = images.to(device), labels.to(device)
@@ -245,8 +245,8 @@ def train_dynamic_state(snapshot_root: Path, config_path: Path, output: Path, *,
         metrics = _metric(truth, predictions, classes)
         score = (metrics["macro_f1"], metrics["minimum_recall"])
         scheduler.step()
-        improved = score > best_score
-        best_score, bad_epochs = (score, 0) if improved else (best_score, bad_epochs + 1)
+        best_score, bad_epochs, improved = _advance_scene_patience(
+            score, best_score, bad_epochs, epoch=epoch, head_epochs=head_epochs)
         history.append({"epoch": epoch, "phase": phase, "loss": sum(losses) / len(losses),
                         "validation": metrics, "elapsed_seconds": time.monotonic() - began})
         state = {"signature": signature, "model": model.state_dict(),
@@ -257,7 +257,7 @@ def train_dynamic_state(snapshot_root: Path, config_path: Path, output: Path, *,
         if improved:
             torch.save(state, output / "best.pt")
         (output / "history.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
-        if phase == "finetune" and bad_epochs >= 7:
+        if phase == "finetune" and bad_epochs >= SCENE_TRAINER_RECIPE["finetune_patience"]:
             break
     report = {"kind": config["kind"], "prototype_only": config["prototype_only"],
               "train_frames": len(train_rows), "validation_frames": len(val_rows),
