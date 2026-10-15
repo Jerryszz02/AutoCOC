@@ -48,6 +48,7 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--task", choices=("scene", "building"), required=True)
         if name == "split":
             command.add_argument("--seed", type=int, default=42)
+            command.add_argument("--classes", nargs="+", help="Building classes reviewed exhaustively in every selected image; fixes output order")
             command.add_argument("--prototype-only", action="store_true",
                                  help="Allow reviewed but version-unknown images for pipeline smoke tests")
             command.add_argument("--near-duplicate-review", type=Path,
@@ -90,6 +91,7 @@ def main(argv: list[str] | None = None) -> int:
                     raise DatasetError("Validation failed: " + "; ".join(checks["errors"][:10]))
                 report = split(args.root, manifest, annotations, task=args.task, seed=args.seed,
                                prototype_only=args.prototype_only,
+                               classes=args.classes, taxonomy=taxonomy,
                                near_duplicate_reviews=(json.loads(args.near_duplicate_review.read_text(encoding="utf-8"))
                                                        if args.near_duplicate_review else None))
             else:

@@ -9,8 +9,9 @@ import numpy as np
 
 from training.vision.data import (DatasetError, _pixel_hash, _verify_near_duplicate_reviews,
                                   export, image_path,
-                                  import_annotations, import_legacy, inspect, leakage_groups, sha256,
+                                  import_annotations, import_legacy, inspect, leakage_groups, load_taxonomy, sha256,
                                   split, stage_sources, validate)
+from training.vision.snapshot import TrainingError, verify_snapshot
 
 
 class VisionDataTests(unittest.TestCase):
@@ -132,6 +133,117 @@ class VisionDataTests(unittest.TestCase):
         with self.assertRaisesRegex(DatasetError, "overwrite"):
             export(self.root, self.samples, self.annotations, split_doc, output,
                    task="building", data_version="v001", classes=["town_hall"])
+
+    def test_scoped_building_snapshot_keeps_partial_truth_and_filters_other_boxes(self) -> None:
+        labels = copy.deepcopy(self.annotations)
+        for index, annotation in enumerate(labels):
+            buildings = annotation["buildings"]
+            buildings.update(complete=False, complete_classes=["town_hall", "air_defense"])
+            if index != 0:
+                buildings["objects"].append({"object_id": f"S{index + 1:03d}-air", "class_name": "air_defense",
+                                             "bbox": [22, 7, 35, 20], "ignore": False, "review_status": "reviewed"})
+            buildings["objects"].append({"object_id": f"S{index + 1:03d}-cannon", "class_name": "cannon",
+                                         "bbox": [1, 1, 3, 4], "ignore": False, "review_status": "reviewed"})
+        self.assertTrue(validate(self.root, self.samples, labels)["valid"])
+        with self.assertRaisesRegex(DatasetError, "No reviewed"):
+            split(self.root, self.samples, labels, task="building")
+        classes = ["town_hall", "air_defense"]
+        split_doc = split(self.root, self.samples, labels, task="building", classes=classes)
+        self.assertEqual(split_doc["building_scope"]["stable_ids"], {"town_hall": 1, "air_defense": 3})
+        output = Path(self.temp.name) / "scoped-snapshot"
+        export(self.root, self.samples, labels, split_doc, output,
+               task="building", data_version="scoped-v1", classes=classes)
+        self.assertEqual(verify_snapshot(output, "building")["metadata"]["building_scope"],
+                         split_doc["building_scope"])
+        reviewed = [json.loads(line) for line in (output / "reviewed-buildings.jsonl").read_text().splitlines()]
+        self.assertEqual([box["class"] for box in reviewed[0]["boxes"]], ["town_hall"])
+        self.assertEqual([box["class"] for box in reviewed[1]["boxes"]], classes)
+        self.assertEqual(len((output / "labels" / "S001.txt").read_text().splitlines()), 1)
+        original = json.loads((output / "annotations" / "S001.jsonl").read_text())
+        self.assertIs(original["buildings"]["complete"], False)
+        self.assertIn("cannon", [obj["class_name"] for obj in original["buildings"]["objects"]])
+
+        metadata_path = output / "snapshot.json"
+        original_metadata = metadata_path.read_text()
+        metadata = json.loads(original_metadata)
+        metadata["building_scope"]["classes"] = ["air_defense", "town_hall"]
+        metadata_path.write_text(json.dumps(metadata))
+        self._rehash_snapshot(output)
+        with self.assertRaisesRegex(TrainingError, "scope differs"):
+            verify_snapshot(output, "building")
+        metadata_path.write_text(original_metadata)
+        annotation_path = output / "annotations" / "S001.jsonl"
+        original_annotation = annotation_path.read_text()
+        annotation = json.loads(original_annotation)
+        annotation["buildings"]["complete_classes"] = ["town_hall"]
+        annotation_path.write_text(json.dumps(annotation) + "\n")
+        self._rehash_snapshot(output)
+        with self.assertRaisesRegex(TrainingError, "scoped completeness"):
+            verify_snapshot(output, "building")
+        annotation_path.write_text(original_annotation)
+        mapping_path = output / "class_mapping.json"
+        mapping = json.loads(mapping_path.read_text())
+        mapping["stable_ids"]["air_defense"] = 99
+        mapping_path.write_text(json.dumps(mapping))
+        self._rehash_snapshot(output)
+        with self.assertRaisesRegex(TrainingError, "frozen building scope"):
+            verify_snapshot(output, "building")
+
+    @staticmethod
+    def _rehash_snapshot(root: Path) -> None:
+        (root / "SHA256SUMS").write_text("".join(
+            f"{sha256(path)}  {path.relative_to(root).as_posix()}\n"
+            for path in sorted(root.rglob("*")) if path.is_file() and path.name != "SHA256SUMS"),
+            encoding="utf-8")
+
+    def test_scoped_building_rejects_missing_coverage_and_class_drift(self) -> None:
+        labels = copy.deepcopy(self.annotations)
+        for annotation in labels:
+            annotation["buildings"].update(complete=False, complete_classes=["town_hall", "air_defense"])
+        for invalid in ([], ["town_hall", "town_hall"], ["invented"], "town_hall"):
+            broken = copy.deepcopy(labels)
+            broken[0]["buildings"]["complete_classes"] = invalid
+            self.assertFalse(validate(self.root, self.samples, broken)["valid"])
+        incomplete = copy.deepcopy(labels)
+        incomplete[0]["buildings"]["complete_classes"] = ["town_hall"]
+        scope = ["town_hall", "air_defense"]
+        split_doc = split(self.root, self.samples, incomplete, task="building", classes=scope)
+        self.assertNotIn("S001", split_doc["sample_assignments"])
+        complete_split = split(self.root, self.samples, labels, task="building", classes=scope)
+        old_split = split(self.root, self.samples, self.annotations, task="building")
+        with self.assertRaisesRegex(DatasetError, "not eligible"):
+            export(self.root, self.samples, labels, old_split, Path(self.temp.name) / "implicit",
+                   task="building", data_version="v1", classes=scope)
+        for changed in (["air_defense", "town_hall"], ["town_hall"], ["town_hall", "cannon"]):
+            with self.assertRaisesRegex(DatasetError, "scope.*changed"):
+                export(self.root, self.samples, labels, complete_split, Path(self.temp.name) / "drift",
+                       task="building", data_version="v1", classes=changed)
+        changed_taxonomy = load_taxonomy()
+        changed_taxonomy = copy.deepcopy(changed_taxonomy)
+        next(item for item in changed_taxonomy["building_classes"] if item["name"] == "air_defense")["id"] = 30
+        with self.assertRaisesRegex(DatasetError, "scope.*changed"):
+            export(self.root, self.samples, labels, complete_split, Path(self.temp.name) / "taxonomy-drift",
+                   task="building", data_version="v1", classes=scope, taxonomy=changed_taxonomy)
+        after = copy.deepcopy(labels)
+        after[0]["buildings"]["complete_classes"] = ["town_hall"]
+        with self.assertRaisesRegex(DatasetError, "not eligible"):
+            export(self.root, self.samples, after, complete_split, Path(self.temp.name) / "incomplete",
+                   task="building", data_version="v1", classes=scope)
+        agent = copy.deepcopy(labels)
+        for source, annotation in zip(self.samples, agent):
+            annotation["buildings"]["review_method"] = "agent_visual"
+        with self.assertRaisesRegex(DatasetError, "No reviewed"):
+            split(self.root, self.samples, agent, task="building", classes=scope)
+
+    def test_legacy_full_building_split_still_rejects_omitted_labeled_class(self) -> None:
+        labels = copy.deepcopy(self.annotations)
+        labels[0]["buildings"]["objects"].append({"object_id": "S001-air", "class_name": "air_defense",
+                                                  "bbox": [22, 7, 35, 20], "ignore": False,
+                                                  "review_status": "reviewed"})
+        legacy = split(self.root, self.samples, labels, task="building")
+        with self.assertRaisesRegex(DatasetError, "enabled classes omit labeled objects"):
+            export(self.root, self.samples, labels, legacy, Path(self.temp.name) / "legacy-omission",
+                   task="building", data_version="v1", classes=["town_hall"])
 
     def test_split_balances_large_groups_without_breaking_leakage(self) -> None:
         samples, labels = [], []

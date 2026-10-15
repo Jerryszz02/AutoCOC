@@ -1,0 +1,23 @@
+[
+  {
+    "id": "electro-visible-layout-v1",
+    "units": ["electro_dragon"],
+    "reason": "雷龙具有连锁攻击；比较已观察到的建筑分布可辅助选择入口。visible_layout 只包含当前帧检测，未检出目标不代表不存在，屏幕距离不是游戏格数或射程。",
+    "order": "仅比较给定候选的主力入口、核心距离及可见建筑位置。缺少可靠的布局差异时保持本地最近核心候选；不能增加新动作或自行换算连锁距离。",
+    "failure_conditions": "来源帧、模型、合法边界或配兵不一致时停止；缺失防空检测不能推断该侧安全；不知道吹风机朝向、建筑等级、陷阱或生命值时保留未知。"
+  },
+  {
+    "id": "baby-dragon-funnel-order-v1",
+    "units": ["baby_dragon", "electro_dragon"],
+    "reason": "在布局档案已接受龙宝宝清边的前提下，可以比较先清边、后主力的有限顺序。放下清边兵并不证明边路建筑已经清除。",
+    "order": "只在候选 funnel_units 包含 baby_dragon 且 unit_order 将它排在 electro_dragon 之前时采用先清边顺序。比较清边入口与主力入口，不临时等待识别、不虚构清边完成事件。",
+    "failure_conditions": "候选未包含该清边单位、顺序不匹配或需要等待建筑摧毁确认时，不把候选描述为已完成断边；不得改变兵量、坐标或冻结时限。"
+  },
+  {
+    "id": "air-spell-target-evidence-v1",
+    "units": ["electro_dragon", "lightning_spell"],
+    "reason": "法术只能使用已接受档案中的目标与预算；大本营中心或可见建筑中心不能自动替代未识别的防空目标，也不能由兵种名称推算所需法术数量。",
+    "order": "比较候选现有 spell_targets 和 unit_order；仅选择其目标证据与已知状态相符的候选。法术数量、坐标和执行顺序由已验证候选提供。",
+    "failure_conditions": "目标类别、法术等级、建筑等级或剩余生命值未知时，不能保证摧毁；不得编造需要几发雷电、临时追加地震或保证胜利。"
+  }
+]

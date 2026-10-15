@@ -90,6 +90,7 @@ class FrozenBattlePlan:
     actions: tuple[PreparedInput, ...]
     budgets: tuple[tuple[str, str, str, int], ...]
     plan_sha256: str
+    visible_layout: dict | None = None
 
     @property
     def input_count(self) -> int:
@@ -364,6 +365,15 @@ def prepare_battle(session: Any, scout: SceneSnapshot, *, model: Any, decider: A
     if clock() >= latest_start:
         raise FlowError("Preparation budget expired after model inference")
     centers = {edge: spread_on_edge(list(terrain), edge, 1)[0] for edge in (0, 1)}
+    from .battle_layout import describe_visible_layout
+    try:
+        visible_layout = describe_visible_layout(
+            detections, classes=model.metadata.get("classes", []), frame_id=frame.frame_id,
+            captured_at=frame.captured_at, model_sha256=model_sha,
+            source_resolution=(image.shape[1], image.shape[0]),
+            baseline_resolution=frame.resolution, entries=centers)
+    except ValueError as exc:
+        raise FlowError(f"Current battle layout evidence is invalid: {exc}") from exc
     first = min(centers, key=lambda edge: (centers[edge][0] - core_point[0]) ** 2 +
                 (centers[edge][1] - core_point[1]) ** 2)
     accepted_orders = profile.get("candidate_orders")
@@ -403,6 +413,7 @@ def prepare_battle(session: Any, scout: SceneSnapshot, *, model: Any, decider: A
                            "funnel_entry_point": centers[funnel_flank],
                            "funnel_units": funnel_units,
                            "core_distance_pixels": round(math.dist(entry, core_point), 2),
+                           "observed_entry": visible_layout["entries"][str(main_flank)],
                            "unit_order": accepted_orders[order_index],
                            "spell_targets": spell_targets,
                            "input_count": len(actions),
@@ -417,6 +428,7 @@ def prepare_battle(session: Any, scout: SceneSnapshot, *, model: Any, decider: A
     if decider is not None:
         state = {"core": {"center": core_point,
                  "confidence": core.confidence}, "cards": cards,
+                 "visible_layout": visible_layout,
                  "countdown_remaining_sec": max(0., frame.captured_at + remaining - clock())}
         from .jev import relevant_guides
         selected_guides = relevant_guides(guides, {card["unit_id"] for card in cards})
@@ -449,7 +461,7 @@ def prepare_battle(session: Any, scout: SceneSnapshot, *, model: Any, decider: A
                             decision_source, decision_reason, decision_model,
                             decision_elapsed_sec, decision_confidence,
                             profile_sha, model_sha, _digest(cards), actions,
-                            budgets, "")
+                            budgets, "", visible_layout)
     from dataclasses import replace
     plan = replace(plan, plan_sha256=_plan_digest(plan))
     session.event("prepared_battle_frozen", plan_id=plan.plan_id, battle_id=plan.battle_id,
@@ -457,6 +469,7 @@ def prepare_battle(session: Any, scout: SceneSnapshot, *, model: Any, decider: A
                   decision_reason=decision_reason, decision_model=decision_model,
                   decision_elapsed_sec=decision_elapsed_sec, decision_confidence=decision_confidence,
                   input_count=plan.input_count, burst_limit_sec=plan.burst_limit_sec,
+                  visible_layout=visible_layout,
                   preparation_deadline=preparation_deadline, plan_sha256=plan.plan_sha256)
     return plan
 
@@ -578,6 +591,7 @@ def execute_prepared_battle(session: Any, plan: FrozenBattlePlan, *,
             session.prepared_battle_receipt = {
                 "mode": "continuous", "plan_id": plan.plan_id, "battle_id": plan.battle_id,
                 "plan_sha256": plan.plan_sha256, "candidate_id": plan.candidate_id,
+                "visible_layout": plan.visible_layout,
                 "input_count": plan.input_count, "burst_limit_sec": plan.burst_limit_sec,
                 "burst_elapsed_sec": clock() - start, "burst_pass": False,
                 "actions": [asdict(r) for r in receipts], "attempted_placements": attempted,
@@ -600,6 +614,7 @@ def execute_prepared_battle(session: Any, plan: FrozenBattlePlan, *,
                   "decision_elapsed_sec": plan.decision_elapsed_sec,
                   "decision_confidence": plan.decision_confidence,
                   "plan_sha256": plan.plan_sha256, "input_count": plan.input_count,
+                  "visible_layout": plan.visible_layout,
                   "burst_limit_sec": plan.burst_limit_sec, "burst_elapsed_sec": elapsed,
                   "actions": [asdict(r) for r in receipts], "error": error,
                   "attempted_placements": attempted,

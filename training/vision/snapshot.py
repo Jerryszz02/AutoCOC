@@ -72,6 +72,7 @@ def verify_snapshot(root: Path, task: str) -> dict:
     if set(sample_assignments) != {row["sample_id"] for row in reviewed} or set(sample_groups) != set(sample_assignments):
         raise TrainingError("Split sample assignments do not cover reviewed images")
     class_indices = None
+    building_scope = None
     if task == "building":
         if "class_mapping.json" not in entries:
             raise TrainingError("Building class mapping omitted from frozen hashes")
@@ -80,6 +81,23 @@ def verify_snapshot(root: Path, task: str) -> dict:
         if (not isinstance(class_indices, dict) or not class_indices
                 or set(class_indices.values()) != set(range(len(class_indices)))):
             raise TrainingError("Invalid building class mapping")
+        scope_values = (split.get("building_scope"), metadata.get("building_scope"), mapping.get("building_scope"))
+        if any(value is not None for value in scope_values):
+            if not all(value == scope_values[0] for value in scope_values):
+                raise TrainingError("Building scope differs across split, snapshot and class mapping")
+            building_scope = scope_values[0]
+            taxonomy = json.loads((root / "taxonomy.json").read_text(encoding="utf-8"))
+            registered = {item["name"]: item["id"] for item in taxonomy.get("building_classes", [])}
+            classes = building_scope.get("classes") if isinstance(building_scope, dict) else None
+            if (not isinstance(classes, list) or not classes or
+                    any(not isinstance(name, str) or name not in registered for name in classes) or
+                    len(set(classes)) != len(classes) or
+                    building_scope != {"classes": classes,
+                                       "stable_ids": {name: registered[name] for name in classes},
+                                       "output_indices": {name: index for index, name in enumerate(classes)}} or
+                    class_indices != building_scope["output_indices"] or
+                    mapping.get("stable_ids") != building_scope["stable_ids"]):
+                raise TrainingError("Invalid frozen building scope or taxonomy mapping")
     for row in reviewed:
         sample_id, group_id, image = row.get("sample_id"), row.get("group_id"), row["image"]
         if not isinstance(sample_id, str) or not isinstance(group_id, str):
@@ -104,17 +122,33 @@ def verify_snapshot(root: Path, task: str) -> dict:
         if len(original) != 1 or original[0].get("sample_id") != sample_id:
             raise TrainingError(f"{sample_id}: original annotation mismatch")
         item = original[0].get("scene" if task == "scene" else "buildings")
-        if (not isinstance(item, dict) or item.get("complete") is not True or item.get("review_status") != "reviewed"
+        if (not isinstance(item, dict) or item.get("review_status") != "reviewed"
                 or item.get("review_method") not in methods or not item.get("reviewer") or not item.get("review_evidence")):
             raise TrainingError(f"{sample_id}: annotation lacks complete reviewed evidence")
+        if task == "scene" and item.get("complete") is not True:
+            raise TrainingError(f"{sample_id}: annotation lacks complete reviewed evidence")
+        if task == "building" and item.get("complete") is not True:
+            complete_classes = item.get("complete_classes")
+            if (building_scope is None or item.get("complete") is not False or
+                    not isinstance(complete_classes, list) or
+                    any(not isinstance(name, str) for name in complete_classes) or
+                    len(set(complete_classes)) != len(complete_classes) or
+                    not set(complete_classes) <= set(registered) or
+                    not set(building_scope["classes"]) <= set(complete_classes)):
+                raise TrainingError(f"{sample_id}: annotation lacks scoped completeness")
         if task == "scene":
             if item.get("label") != row.get("label"):
                 raise TrainingError(f"{sample_id}: scene label differs from original annotation")
         else:
             objects = item.get("objects", [])
             boxes = row.get("boxes", [])
-            if (any(obj.get("ignore") or obj.get("review_status") != "reviewed" for obj in objects)
-                    or not isinstance(boxes, list) or len(objects) != len(boxes)):
+            if (not isinstance(objects, list) or
+                    any(not isinstance(obj, dict) or obj.get("ignore") or obj.get("review_status") != "reviewed"
+                        for obj in objects) or not isinstance(boxes, list)):
+                raise TrainingError(f"{sample_id}: building annotation incomplete")
+            if building_scope is not None:
+                objects = [obj for obj in objects if obj.get("class_name") in class_indices]
+            if len(objects) != len(boxes):
                 raise TrainingError(f"{sample_id}: building annotation incomplete")
             expected_boxes = [(obj.get("class_name"), obj.get("bbox")) for obj in objects]
             reviewed_boxes = [(box.get("class"), box.get("bbox")) for box in boxes]

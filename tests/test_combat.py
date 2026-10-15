@@ -225,7 +225,7 @@ class CombatTests(unittest.TestCase):
             input_calls = []
             session.frozen_battle_tap = lambda point, **kw: input_calls.append(point)
             model = SimpleNamespace(model_sha256="modelhash", detect=Mock(return_value=()),
-                                    metadata={"applicability": {"zoom": "minimum_stable",
+                                    metadata={"classes": ["town_hall"], "applicability": {"zoom": "minimum_stable",
                                                "source_width_range": [1280, 2560],
                                                "source_height_range": [720, 1440]},
                                               "validation": {"status": "evaluated", "report_id": "offline-1"}})

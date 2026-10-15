@@ -6,6 +6,10 @@ Ultralytics 的设置在每次运行目录隔离；首次导入前即写入 `syn
 
 输入必须是 `scripts/vision_data.py export` 产生的完整复核快照，带 `SHA256SUMS`、`train.txt`、`val.txt`、`test.txt`、`split.json` 和标签文件。训练和导出会核对全部文件哈希。32 图 2 epoch 冒烟用 `--prototype --max-epochs 2`。原型完成冒烟后，可用 `--prototype --development --max-epochs 20` 在同一冻结划分上使用全部训练及验证图探索；场景最多 35 epoch，建筑最多 100 epoch 且 batch 不超过 8，仍不可把测试集用于调参。建筑训练把原图和标签复制到运行目录，避免 Ultralytics 缓存写入冻结快照。原型数据和模型始终标 `prototype_only`，不能充当正式验收。
 
+建筑可按明确的类别范围制作快照。逐张标注中的 `buildings.complete=false` 和 `buildings.complete_classes=["town_hall","air_defense"]` 表示审核者已在**整张图**穷尽这两类，包括该类确实为零实例的图；它不表示只框出了目前看见的几个目标。若遮挡、裁切或证据不足以确认某类已穷尽，不要把该类写进 `complete_classes`。该字段只接受非空、无重复的注册类别，且必须保留审核人、方法与证据。旧的 `complete=true` 仍表示全部建筑类已穷尽。
+
+对类别子集，`split` 与 `export` 必须以相同顺序显式传 `--classes town_hall air_defense`。拆分仅选择每张图都对这两类完整复核的样本；快照保留原标注供核查，但训练标签只含启用类，且 split、snapshot、class mapping 三处固定类别顺序与稳定 ID。任何类别或 taxonomy ID 变化均拒绝导出或训练前验证。没有显式 `--classes` 的旧拆分仍只接受 `complete=true`，不会自动放宽到部分标注；正式训练仍要求人工复核和已知客户端版本，`--prototype-only` 不会升格为正式数据。
+
 需要补充实机候选图时，可由独占模拟器的操作者运行 `python scripts/collect_vision_samples.py --config config.toml --output C:\data\new-collection --max-samples 10 --max-search-cost-gold 20000`。输出目录须事先不存在，包含原图、`unreviewed-manifest.jsonl` 和 `collection.json` 搜索费用记录。同一采集会话的图必须归入同一泄漏组；这些图尚未逐张复核、标注，不能直接导出正式训练快照。
 
 配置 JSON 必填 `task`、`code_version`、`data_version`、`client_versions`、`source_width_range`、`source_height_range`、`zoom`、`output`。场景还需按模型输出顺序给 `classes`；建筑类顺序从快照 `class_mapping.json` 读取，并要求 `architecture` 为 `yolo11n` 或 `yolo26n`。分辨率和版本应由已复核快照实际覆盖，`output` 阈值由验证集定稿。示例原型配置：

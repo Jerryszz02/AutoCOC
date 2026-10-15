@@ -102,3 +102,13 @@ def test_guide_schema_and_applicability(tmp_path: Path):
     path.write_text(json.dumps([rule, rule]), encoding="utf-8")
     with pytest.raises(CapabilityUnavailable):
         load_guides(path)
+
+
+def test_shipped_air_guides_load_and_require_the_observed_units():
+    path = Path(__file__).resolve().parents[1] / "assets/guides/air-prebattle-v1.json"
+    guides = load_guides(path)
+    assert len(guides) == 3
+    assert relevant_guides(guides, {"archer"}) == ()
+    assert [rule["id"] for rule in relevant_guides(guides, {"electro_dragon"})] == [
+        "electro-visible-layout-v1"]
+    assert len(relevant_guides(guides, {"electro_dragon", "baby_dragon", "lightning_spell"})) == 3

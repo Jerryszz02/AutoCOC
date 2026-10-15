@@ -89,7 +89,7 @@ class PreparedBattleTests(unittest.TestCase):
         self.session.frozen_battle_tap = tap
         self.session.observe = observe
         self.model = SimpleNamespace(model_sha256="modelhash", detect=Mock(return_value=()),
-                                     metadata={"applicability": {"zoom": "minimum_stable"},
+                                     metadata={"classes": ["town_hall"], "applicability": {"zoom": "minimum_stable"},
                                                "validation": {"status": "evaluated", "report_id": "offline-1"}})
         self.core = SimpleNamespace(center=(600., 260.), confidence=.99)
         self.patches = [patch("autococ.prepared_battle.measure_cloud_cover", return_value={"obscured": False}),
@@ -219,6 +219,11 @@ class PreparedBattleTests(unittest.TestCase):
             self.prepare()
 
     def test_core_driven_funnel_candidates_and_jev_order_are_finite(self):
+        from autococ.model_vision import BuildingObservation
+        self.model.metadata["classes"] = ["town_hall", "air_defense"]
+        self.model.detect.return_value = [
+            BuildingObservation("town_hall", (560., 220., 640., 300.), .99, 100., "modelhash"),
+            BuildingObservation("air_defense", (260., 430., 300., 470.), .98, 100., "modelhash")]
         wizard = {"kind": "troop", "unit_id": "wizard", "source": "army", "count": 1,
                   "point": [220, 630]}
         self.scout.observations["battle"]["slots"].append({**wizard, "confidence": .99,
@@ -242,6 +247,16 @@ class PreparedBattleTests(unittest.TestCase):
                           and action.kind == "deploy"], [(250, 420), (350, 500)])
         self.assertEqual(plan.decision_source, "jev")
         self.assertEqual(plan.decision_model, "jev-1.13.0")
+        visible = decider.select.call_args.args[0]["visible_layout"]
+        self.assertEqual(visible["observed_counts"], {"air_defense": 1, "town_hall": 1})
+        self.assertIs(plan.visible_layout, visible)
+        candidates = decider.select.call_args.args[1]
+        self.assertNotEqual(candidates[0]["observed_entry"], candidates[-1]["observed_entry"])
+        # Even decision-only evidence is bound by the frozen-plan digest.
+        plan.visible_layout["observed_counts"]["air_defense"] = 0
+        with self.assertRaisesRegex(FlowError, "modified"):
+            execute_prepared_battle(self.session, plan, clock=self.clock)
+        self.assertEqual(self.inputs, [])
 
 
 if __name__ == "__main__":

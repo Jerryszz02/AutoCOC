@@ -285,7 +285,16 @@ def validate(root: Path, manifest: list[dict], annotations: list[dict], *,
             if not isinstance(buildings, dict):
                 errors.append(prefix + "buildings annotation must be object")
                 continue
-            if buildings.get("complete") is not True and buildings.get("review_status") == REVIEWED:
+            complete_classes = buildings.get("complete_classes")
+            if complete_classes is not None:
+                try:
+                    _mapping(taxonomy, complete_classes)
+                except DatasetError as exc:
+                    errors.append(prefix + f"invalid buildings.complete_classes: {exc}")
+                if buildings.get("complete") is not False:
+                    errors.append(prefix + "buildings.complete_classes requires complete=false")
+            if (buildings.get("complete") is not True and buildings.get("review_status") == REVIEWED
+                    and complete_classes is None):
                 errors.append(prefix + "reviewed buildings are incomplete")
             if buildings.get("review_status") == REVIEWED and (not buildings.get("reviewer") or not buildings.get("review_evidence") or buildings.get("review_method") not in {"human", "agent_visual"}):
                 errors.append(prefix + "reviewed buildings need reviewer, review_evidence and review_method")
@@ -388,7 +397,8 @@ def inspect(root: Path, manifest: list[dict], annotations: list[dict], *, near_d
     }
 
 
-def _eligible(row: dict, annotation: dict | None, task: str, *, prototype_only: bool = False) -> bool:
+def _eligible(row: dict, annotation: dict | None, task: str, *, prototype_only: bool = False,
+              building_classes: list[str] | None = None) -> bool:
     if (row.get("review_status") != REVIEWED or (not prototype_only and not row.get("client_version"))
             or not isinstance(annotation, dict) or not row.get("reviewer") or not row.get("review_evidence")):
         return False
@@ -405,9 +415,16 @@ def _eligible(row: dict, annotation: dict | None, task: str, *, prototype_only: 
             layout_group.startswith("provisional:")):
         return False
     item = annotation.get("scene" if task == "scene" else "buildings")
-    if (not isinstance(item, dict) or item.get("complete") is not True or item.get("review_status") != REVIEWED
+    if (not isinstance(item, dict) or item.get("review_status") != REVIEWED
             or not item.get("reviewer") or not item.get("review_evidence")):
         return False
+    if item.get("complete") is not True:
+        if (task != "building" or item.get("complete") is not False or building_classes is None
+                or not isinstance(item.get("complete_classes"), list)
+                or any(not isinstance(name, str) for name in item["complete_classes"])
+                or len(set(item["complete_classes"])) != len(item["complete_classes"])
+                or not set(building_classes) <= set(item["complete_classes"])):
+            return False
     if item.get("review_method") not in ({"human", "agent_visual"} if prototype_only else {"human"}):
         return False
     if task == "building" and any(obj.get("ignore") or obj.get("review_status") != REVIEWED for obj in item.get("objects", [])):
@@ -445,9 +462,14 @@ def _verify_near_duplicate_reviews(near: list[dict], manifest: list[dict],
 
 def split(root: Path, manifest: list[dict], annotations: list[dict], *, task: str,
           seed: int = 42, near_duplicates: bool = True, prototype_only: bool = False,
-          near_duplicate_reviews: list[dict] | None = None) -> dict:
+          near_duplicate_reviews: list[dict] | None = None,
+          classes: list[str] | None = None, taxonomy: dict | None = None) -> dict:
+    if task == "scene" and classes is not None:
+        raise DatasetError("Scene class order comes from taxonomy")
+    scope = _building_scope(taxonomy or load_taxonomy(), classes) if classes is not None else None
     labels = _ids(annotations, "sample_id")
-    eligible = [row for row in manifest if _eligible(row, labels.get(row["sample_id"]), task, prototype_only=prototype_only)]
+    eligible = [row for row in manifest if _eligible(row, labels.get(row["sample_id"]), task,
+                prototype_only=prototype_only, building_classes=classes)]
     if not eligible:
         raise DatasetError(f"No reviewed, versioned, fully annotated {task} samples with stable grouping")
     groups, near = leakage_groups(root, manifest, near_duplicates=near_duplicates)
@@ -475,7 +497,7 @@ def split(root: Path, manifest: list[dict], annotations: list[dict], *, task: st
         name = max(candidates, key=lambda split_name: targets[split_name] - allocated[split_name])
         assignments.update({sample_id: name for sample_id in by_group[group_id]})
         allocated[name] += len(by_group[group_id])
-    return {"schema_version": 1, "task": task, "seed": seed, "prototype_only": prototype_only,
+    result = {"schema_version": 1, "task": task, "seed": seed, "prototype_only": prototype_only,
             "algorithm": "group_size_greedy_v2", "target_sample_ratios": [0.7, 0.15, 0.15],
             "near_duplicate_reviews": reviews,
             "group_assignments": {group_id: assignments[members[0]] for group_id, members in by_group.items()},
@@ -483,14 +505,27 @@ def split(root: Path, manifest: list[dict], annotations: list[dict], *, task: st
             "sample_groups": {sample_id: groups[sample_id] for sample_id in assignments},
             "group_count": count, "counts": dict(Counter(assignments.values())),
             "created_at_utc": datetime.now(timezone.utc).isoformat()}
+    if scope is not None:
+        result["building_scope"] = scope
+    return result
 
 
 def _mapping(taxonomy: dict, classes: list[str]) -> dict[str, int]:
     registered = {item["name"]: item["id"] for item in taxonomy["building_classes"]}
-    if len(set(classes)) != len(classes) or not classes or any(name not in registered for name in classes):
+    if (not isinstance(classes, list) or not classes or
+            any(not isinstance(name, str) or name not in registered for name in classes) or
+            len(set(classes)) != len(classes)):
         raise DatasetError("Classes must be unique registered building names")
     # Caller order is intentional and frozen in class_mapping.json.
     return {name: index for index, name in enumerate(classes)}
+
+
+def _building_scope(taxonomy: dict, classes: list[str]) -> dict:
+    indices = _mapping(taxonomy, classes)
+    registered = {item["name"]: item["id"] for item in taxonomy["building_classes"]}
+    return {"classes": list(classes),
+            "stable_ids": {name: registered[name] for name in classes},
+            "output_indices": indices}
 
 
 def export(root: Path, manifest: list[dict], annotations: list[dict], split_doc: dict,
@@ -506,6 +541,13 @@ def export(root: Path, manifest: list[dict], annotations: list[dict], split_doc:
         raise DatasetError("Split schema/task mismatch")
     if split_doc.get("prototype_only", False) != prototype_only:
         raise DatasetError("Split prototype_only mode mismatch")
+    split_scope = split_doc.get("building_scope")
+    if task == "scene" and (classes is not None or split_scope is not None):
+        raise DatasetError("Scene class order comes from taxonomy")
+    mapping = _mapping(taxonomy, classes or []) if task == "building" else None
+    if task == "building" and split_scope is not None:
+        if classes is None or split_scope != _building_scope(taxonomy, classes):
+            raise DatasetError("Building split/export class scope or taxonomy mapping changed")
     assignments = split_doc.get("sample_assignments", {})
     if not assignments or set(assignments.values()) != set(SPLITS):
         raise DatasetError("Split must contain train/val/test")
@@ -517,7 +559,9 @@ def export(root: Path, manifest: list[dict], annotations: list[dict], split_doc:
     _verify_near_duplicate_reviews(relevant, manifest, split_doc.get("near_duplicate_reviews"),
                                    prototype_only=prototype_only)
     for sample_id, name in assignments.items():
-        if name not in SPLITS or not _eligible(samples[sample_id], labels.get(sample_id), task, prototype_only=prototype_only):
+        if name not in SPLITS or not _eligible(samples[sample_id], labels.get(sample_id), task,
+                                               prototype_only=prototype_only,
+                                               building_classes=classes if split_scope is not None else None):
             raise DatasetError(f"{sample_id}: not eligible for formal {task} export")
         if split_doc.get("sample_groups", {}).get(sample_id) != groups[sample_id]:
             raise DatasetError(f"{sample_id}: grouping changed since split")
@@ -525,13 +569,10 @@ def export(root: Path, manifest: list[dict], annotations: list[dict], split_doc:
         member_splits = {assignments[sample_id] for sample_id in assignments if groups[sample_id] == group_id}
         if len(member_splits) > 1:
             raise DatasetError(f"Leakage group {group_id} crosses splits")
-    mapping = _mapping(taxonomy, classes or []) if task == "building" else None
-    if task == "scene" and classes:
-        raise DatasetError("Scene class order comes from taxonomy")
     selected = [samples[sample_id] for sample_id in sorted(assignments)]
     # Complete annotation means all present registered buildings are labeled;
     # exporting a subset must fail if omitted classes would become background.
-    if task == "building":
+    if task == "building" and split_scope is None:
         for row in selected:
             objects = labels[row["sample_id"]]["buildings"].get("objects", [])
             omitted = {obj["class_name"] for obj in objects} - set(mapping)
@@ -567,6 +608,8 @@ def export(root: Path, manifest: list[dict], annotations: list[dict], split_doc:
                                  "sample_id": sample_id, "group_id": groups[sample_id]})
             else:
                 objects = annotation["buildings"].get("objects", [])
+                if split_scope is not None:
+                    objects = [obj for obj in objects if obj["class_name"] in mapping]
                 boxes, lines = [], []
                 for obj in objects:
                     name, (x0, y0, x1, y1) = obj["class_name"], obj["bbox"]
@@ -581,15 +624,18 @@ def export(root: Path, manifest: list[dict], annotations: list[dict], split_doc:
         write_jsonl(output / f"reviewed-{'scenes' if task == 'scene' else 'buildings'}.jsonl", reviewed)
         write_jsonl(output / "reviewed-manifest.jsonl", reviewed_manifest)
         (output / "split.json").write_text(json.dumps(split_doc, indent=2, ensure_ascii=False), encoding="utf-8")
-        (output / "snapshot.json").write_text(json.dumps({"schema_version": 1, "task": task,
+        snapshot_metadata = {"schema_version": 1, "task": task,
             "data_version": data_version, "prototype_only": prototype_only,
             "review_policy": "agent_or_human_reviewed_prototype" if prototype_only else "human_reviewed",
             "review_methods": sorted({samples[sample_id]["review_method"] for sample_id in assignments}),
-            "client_versions": sorted({row["client_version"] or "unknown" for row in selected})}, indent=2), encoding="utf-8")
+            "client_versions": sorted({row["client_version"] or "unknown" for row in selected})}
+        if split_scope is not None:
+            snapshot_metadata["building_scope"] = split_scope
+        (output / "snapshot.json").write_text(json.dumps(snapshot_metadata, indent=2), encoding="utf-8")
         (output / "taxonomy.json").write_text(json.dumps(taxonomy, indent=2, ensure_ascii=False), encoding="utf-8")
         if mapping is not None:
             (output / "class_mapping.json").write_text(json.dumps({"stable_ids": {item["name"]: item["id"] for item in taxonomy["building_classes"] if item["name"] in mapping},
-                "output_indices": mapping}, indent=2), encoding="utf-8")
+                "output_indices": mapping, **({"building_scope": split_scope} if split_scope is not None else {})}, indent=2), encoding="utf-8")
             (output / "data.yaml").write_text("path: .\ntrain: train.txt\nval: val.txt\ntest: test.txt\nnames:\n" +
                 "".join(f"  {index}: {name}\n" for name, index in mapping.items()), encoding="utf-8")
         card = (f"# Vision dataset {data_version}\n\nTask: {task}\nStatus: {'prototype_only; no client-version compatibility claim' if prototype_only else 'reviewed formal snapshot; model acceptance pending'}\n"
@@ -599,6 +645,8 @@ def export(root: Path, manifest: list[dict], annotations: list[dict], split_doc:
                 "Source images copied with hash verification. "
                 + ("Unknown client versions may be present for offline prototype smoke tests; no current-client compatibility or formal review is claimed. "
                    if prototype_only else "Unknown client versions are excluded. ")
+                + (f"Building class scope: {split_scope['classes']}; other annotated classes are excluded from training labels. "
+                   if split_scope is not None else "")
                 + "Incomplete labels and unresolved near duplicates are excluded.\n")
         (output / "DATASET_CARD.md").write_text(card, encoding="utf-8")
         sums = [f"{sha256(path)}  {path.relative_to(output).as_posix()}" for path in sorted(output.rglob("*")) if path.is_file() and path.name != "SHA256SUMS"]

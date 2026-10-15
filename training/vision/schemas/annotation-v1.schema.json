@@ -24,8 +24,10 @@
     "buildings": {
       "type": "object",
       "required": ["complete", "review_status", "objects"],
+      "allOf": [{"if": {"required": ["complete_classes"]}, "then": {"properties": {"complete": {"const": false}}}}],
       "properties": {
         "complete": {"type": "boolean"},
+        "complete_classes": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}, "description": "All visible instances of these registered classes were annotated; other classes remain incomplete. Requires explicit matching split/export scope."},
         "review_status": {"enum": ["pending", "reviewed", "rejected"]},
         "reviewer": {"type": ["string", "null"]},
         "review_evidence": {"type": ["string", "null"]},
