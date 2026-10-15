@@ -11,7 +11,7 @@ import time
 
 from .config import OCRConfig
 from .images import read_frame, read_template
-from .errors import LocatorError, SceneError
+from .errors import LocatorError, OCRError, SceneError
 from .locator import find_template, scale_box
 from .ocr import OCRProvider, OCRText, create_ocr_provider, filter_ocr_results
 from .scene import SCENE_ACCOUNT_IN_USE, SCENE_BATTLE, SCENE_CLAN_CHAT, SCENE_DISCONNECTED, SCENE_ENEMY_VILLAGE, SCENE_MAINTENANCE, SCENE_POPUP, SCENE_REQUEST, SCENE_SEARCH, SCENE_SETTLEMENT, SCENE_STARTING, SCENE_TRAINING, SCENE_UNKNOWN, SCENE_VILLAGE, SceneSnapshot, account_in_use_dialog_evidence, classify_scene_text, surrender_dialog_evidence
@@ -1131,6 +1131,50 @@ class ScreenshotRecognizer:
         timers = [item for item in texts if self._in_observed_roi(item, (530, 30, 750, 95)) and parse_countdown(item.text) is not None]
         timer = max(timers, key=lambda item: item.confidence) if timers else None
         image = cv2.resize(read_frame(path, cv2.IMREAD_COLOR), (1280, 720), interpolation=cv2.INTER_AREA)
+        count_texts = list(texts)
+        local_count_proofs: dict[OCRText, dict[str, object]] = {}
+        local_count_conflicts: set[OCRText] = set()
+        threshold = max(.9, self.ocr_config.confidence_threshold)
+        line_reader = getattr(self.provider, "recognize_line_image", None)
+        if self.client_version == "18.647.2" and callable(line_reader):
+            for anchor in texts:
+                if (anchor.bbox is None or type(anchor.confidence) not in (int, float)
+                        or not math.isfinite(anchor.confidence)
+                        or not self.ocr_config.confidence_threshold <= anchor.confidence < threshold
+                        or not self._in_observed_roi(anchor, (60, 588, 1230, 627))
+                        or not re.fullmatch(r"[xX×]\s*[1-9][0-9]*", anchor.text.strip())):
+                    continue
+                left, top, right, bottom = scale_box(
+                    anchor.bbox, from_resolution=self.baseline_resolution, to_resolution=(1280, 720))
+                if not (15 <= right - left <= 60 and 18 <= bottom - top <= 40):
+                    continue
+                roi = (max(0, left - 6), max(585, top - 6), min(1280, right + 6), min(632, bottom + 6))
+                x0, y0, x1, y1 = roi
+                if not (20 <= x1 - x0 <= 72 and 20 <= y1 - y0 <= 47):
+                    continue
+                try:
+                    reads = line_reader(image[y0:y1, x0:x1])
+                except OCRError:
+                    continue
+                if not isinstance(reads, list) or len(reads) != 1:
+                    continue
+                local = reads[0]
+                if (not isinstance(local, OCRText) or type(local.confidence) not in (int, float)
+                        or not math.isfinite(local.confidence) or not threshold <= local.confidence <= 1
+                        or not re.fullmatch(r"[xX×]\s*[1-9][0-9]*", local.text.strip())):
+                    continue
+                proof = OCRText(local.text, local.confidence, anchor.bbox)
+                strong_near = [item for item in texts if item.bbox is not None
+                               and type(item.confidence) in (int, float)
+                               and math.isfinite(item.confidence) and threshold <= item.confidence <= 1
+                               and self._in_observed_roi(item, roi)]
+                if strong_near and all(item.text.strip() == local.text.strip() for item in strong_near):
+                    continue  # Existing high-confidence OCR already proves this header.
+                count_texts.append(proof)
+                local_count_proofs[proof] = {"source": "same_frame_local_header_ocr", "frame": str(path),
+                                             "roi": list(roi), "weak_anchor": asdict(anchor)}
+                if strong_near:
+                    local_count_conflicts.add(proof)
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv, np.array([75, 65, 60]), np.array([170, 255, 255]))
         contours, _ = cv2.findContours(mask[585:720], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -1173,7 +1217,7 @@ class ScreenshotRecognizer:
             if colored_bottom(left, right) is None:
                 return False
             counts = []
-            for item in texts:
+            for item in count_texts:
                 if (item.bbox is None or not math.isfinite(item.confidence)
                         or not max(.9, self.ocr_config.confidence_threshold) <= item.confidence <= 1
                         or not re.fullmatch(r"[xX×]\s*[0-9]+", item.text.strip())):
@@ -1244,7 +1288,7 @@ class ScreenshotRecognizer:
         # card still needs its own two long side borders and a complete bottom.
         # Blue map backgrounds can join both card bodies and headers. Explicit
         # quantities provide independent anchors, still requiring actual borders.
-        for item in texts:
+        for item in count_texts:
             if (not self._in_observed_roi(item, (60, 588, 1230, 627))
                     or not math.isfinite(item.confidence) or not max(.9, self.ocr_config.confidence_threshold) <= item.confidence <= 1
                     or not re.fullmatch(r"[xX×]\s*[0-9]+", item.text.strip())):
@@ -1442,7 +1486,7 @@ class ScreenshotRecognizer:
         for index, box in enumerate(sorted(boxes)):
             baseline_box = scale_box(box, from_resolution=(1280, 720), to_resolution=self.baseline_resolution)
             count_roi = (box[0], 588, box[2], 627)
-            counts = [item for item in texts if self._in_observed_roi(item, count_roi)
+            counts = [item for item in count_texts if self._in_observed_roi(item, count_roi)
                       and math.isfinite(item.confidence) and max(.9, self.ocr_config.confidence_threshold) <= item.confidence <= 1
                       and re.fullmatch(r"[xX×]\s*[0-9]+", item.text.strip())]
             count = counts[0] if len(counts) == 1 else None
@@ -1513,6 +1557,16 @@ class ScreenshotRecognizer:
                 identity = {"unit_id": None, "confidence": event_portrait["confidence"],
                             "reason": "unversioned_event_portrait_anonymous",
                             "evidence": [event_portrait], "version_verified": False}
+            if count in local_count_proofs and (
+                count in local_count_conflicts or kind not in {"troop", "spell"}
+                or identity.get("unit_id") is None or identity.get("version_verified") is not True
+                or identity.get("template_client_version") != self.client_version
+                or type(identity.get("confidence")) not in (int, float)
+                or not math.isfinite(identity["confidence"]) or identity["confidence"] < .97
+                or colored_bottom(box[0], box[2]) is None
+                or not (supported_sides(box[0], box[2]) or edge_backed_card(box[0], box[2]))
+            ):
+                count = None
             slots.append({
                 "index": index, "kind": kind, "bbox": list(baseline_box),
                 "unit_id": identity["unit_id"], "confidence": identity["confidence"],
@@ -1524,7 +1578,8 @@ class ScreenshotRecognizer:
                              "hero_pet_icon": hero_evidence,
                              "clan_badge": clan_evidence,
                              "event_portrait": event_portrait if is_event else None,
-                             "count": asdict(count) if count is not None else None},
+                             "count": ({**asdict(count), **local_count_proofs.get(count, {})}
+                                       if count is not None else None)},
             })
             slots[-1]["evidence"]["identity"] = identity
         return {"phase": "scout" if scene == SCENE_ENEMY_VILLAGE else "active",

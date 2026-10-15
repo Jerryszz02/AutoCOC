@@ -1,5 +1,6 @@
 from collections import Counter
 from dataclasses import replace
+import hashlib
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -9,7 +10,7 @@ from unittest.mock import Mock
 import cv2
 import numpy as np
 
-from autococ.ocr import OCRText
+from autococ.ocr import OCRText, RapidOCRProvider
 from autococ.scene import SceneSnapshot
 from autococ.strategy_execution import _match_card
 from autococ.unit_catalog import recognize_card_identity
@@ -18,6 +19,75 @@ from autococ.vision import ScreenshotRecognizer
 
 class BattleCardTests(unittest.TestCase):
     root = Path(__file__).resolve().parents[1]
+
+    def test_current_weak_full_ocr_recovers_baby_only_from_same_frame_local_proof(self) -> None:
+        metadata = json.loads((self.root / "tests/fixtures/battle_toolbar_weak_baby_18_647_2_20261015.json")
+                              .read_text(encoding="utf-8"))
+        provider = RapidOCRProvider()
+        for entry in metadata["frames"]:
+            with self.subTest(frame=entry["fixture"]), TemporaryDirectory() as folder:
+                fixture = self.root / "tests/fixtures" / entry["fixture"]
+                self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(), entry["fixture_sha256"])
+                source = Path(r"E:\projects\AutoCOC") / entry["source_frame"]
+                if source.is_file():
+                    self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), entry["source_sha256"])
+                toolbar = cv2.imdecode(np.fromfile(fixture, dtype=np.uint8), cv2.IMREAD_COLOR)
+                if source.is_file():
+                    original = cv2.imdecode(np.fromfile(source, dtype=np.uint8), cv2.IMREAD_COLOR)
+                    original = cv2.resize(original, (1280, 720), interpolation=cv2.INTER_AREA)
+                    self.assertTrue(np.array_equal(toolbar, original[585:720, 85:1190]))
+                image = np.zeros((720, 1280, 3), dtype=np.uint8)
+                image[585:720, 85:1190] = toolbar
+                path = Path(folder) / "anonymous-toolbar.png"
+                cv2.imencode(".png", image)[1].tofile(path)
+                texts = [OCRText(item["text"], item["confidence"], tuple(item["bbox"]))
+                         for item in entry["full_ocr"]]
+                self.assertEqual(next(item.confidence for item in texts if item.bbox[0] == 341), .80682)
+                vision = ScreenshotRecognizer(provider=provider)
+                vision.client_version = "18.647.2"
+                slots = vision._battle_observation(path, texts, "enemy_village")["slots"]
+                troops = [(slot["unit_id"], slot["count"]) for slot in slots if slot["kind"] == "troop"]
+                self.assertEqual(troops, [("electro_dragon", 10), ("dragon", 1),
+                                          ("baby_dragon", 1), ("balloon", 2)])
+                baby = next(slot for slot in slots if slot["unit_id"] == "baby_dragon")
+                self.assertEqual(baby["evidence"]["count"]["source"], "same_frame_local_header_ocr")
+                self.assertGreaterEqual(baby["evidence"]["count"]["confidence"], .9)
+                self.assertTrue(baby["evidence"]["identity"]["version_verified"])
+
+    def test_current_weak_full_ocr_never_bypasses_local_conflict_portrait_or_border(self) -> None:
+        metadata = json.loads((self.root / "tests/fixtures/battle_toolbar_weak_baby_18_647_2_20261015.json")
+                              .read_text(encoding="utf-8"))
+        entry = metadata["frames"][-1]
+        toolbar = cv2.imdecode(np.fromfile(self.root / "tests/fixtures" / entry["fixture"],
+                                             dtype=np.uint8), cv2.IMREAD_COLOR)
+        baseline = np.zeros((720, 1280, 3), dtype=np.uint8)
+        baseline[585:720, 85:1190] = toolbar
+        texts = [OCRText(item["text"], item["confidence"], tuple(item["bbox"]))
+                 for item in entry["full_ocr"]]
+        weak = next(item for item in texts if item.bbox[0] == 341)
+        for case in ("local_missing", "local_low", "conflicting_high", "portrait_missing",
+                     "bottom_missing", "wrong_version"):
+            with self.subTest(case=case), TemporaryDirectory() as folder:
+                image = baseline.copy()
+                if case == "portrait_missing":
+                    image[633:677, 304:365] = 0
+                if case == "bottom_missing":
+                    image[700:716, 288:376] = 0
+                path = Path(folder) / "anonymous-toolbar.png"
+                cv2.imencode(".png", image)[1].tofile(path)
+                provider = RapidOCRProvider() if case in {"conflicting_high", "portrait_missing",
+                                                        "bottom_missing", "wrong_version"} else Mock()
+                if case in {"local_missing", "local_low"}:
+                    provider.recognize_line_image.return_value = ([] if case == "local_missing" else
+                        [OCRText("x1", .85, (0, 0, 43, 38))])
+                readings = texts + ([replace(weak, text="x2", confidence=.99)]
+                                    if case == "conflicting_high" else [])
+                vision = ScreenshotRecognizer(provider=provider)
+                vision.client_version = "18.647.3" if case == "wrong_version" else "18.647.2"
+                slots = vision._battle_observation(path, readings, "enemy_village")["slots"]
+                self.assertFalse(any(slot["unit_id"] == "baby_dragon"
+                                     and type(slot["count"]) is int and slot["count"] > 0
+                                     for slot in slots))
 
     def test_deployed_duke_keeps_named_binding_only_with_own_card_and_hp(self) -> None:
         # Held-out 00076 card from the same observed select/tap/deploy chain

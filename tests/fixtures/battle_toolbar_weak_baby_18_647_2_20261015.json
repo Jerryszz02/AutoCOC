@@ -1,0 +1,157 @@
+{
+  "client_version": "18.647.2",
+  "surface": "battle_toolbar",
+  "source_crop_bbox_1280": [
+    85,
+    585,
+    1190,
+    720
+  ],
+  "derivation": "resize source to 1280x720 with cv2.INTER_AREA, then crop [y585:720, x85:1190]; only battle toolbar pixels retained",
+  "frames": [
+    {
+      "fixture": "battle_toolbar_weak_baby_00012_18_647_2_20261015.png",
+      "fixture_sha256": "0d201e8798b47268b4bbdd45d0c4a001ba7fb01385965201a1900856d91027f2",
+      "source_frame": "reports/completion-20261015/live/20261015-223639-910436-2bb23c8d/frames/00012-line-zoom-verified.png",
+      "source_sha256": "278af76b5a4c00898d06ac2fda0c03837952c4c95b29a0ab548c1b2d290c2af4",
+      "full_ocr": [
+        {
+          "text": "x10",
+          "confidence": 0.99833,
+          "bbox": [
+            132,
+            594,
+            179,
+            620
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99512,
+          "bbox": [
+            244,
+            594,
+            276,
+            621
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.80682,
+          "bbox": [
+            341,
+            594,
+            372,
+            620
+          ]
+        },
+        {
+          "text": "x2",
+          "confidence": 0.99658,
+          "bbox": [
+            434,
+            594,
+            470,
+            620
+          ]
+        }
+      ]
+    },
+    {
+      "fixture": "battle_toolbar_weak_baby_00013_18_647_2_20261015.png",
+      "fixture_sha256": "47b3388a377328cd6ae4554297e657da99ff31c1dbda04b54628111ccdafe0c3",
+      "source_frame": "reports/completion-20261015/live/20261015-223639-910436-2bb23c8d/frames/00013-line-boundary.png",
+      "source_sha256": "41c80fba6b4f5e501430851906c94bc8b60ddcded3d95aadf32c124e26f8e060",
+      "full_ocr": [
+        {
+          "text": "x10",
+          "confidence": 0.99833,
+          "bbox": [
+            132,
+            594,
+            179,
+            620
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99513,
+          "bbox": [
+            244,
+            594,
+            276,
+            621
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.80682,
+          "bbox": [
+            341,
+            594,
+            372,
+            620
+          ]
+        },
+        {
+          "text": "x2",
+          "confidence": 0.99658,
+          "bbox": [
+            434,
+            594,
+            470,
+            620
+          ]
+        }
+      ]
+    },
+    {
+      "fixture": "battle_toolbar_weak_baby_00014_18_647_2_20261015.png",
+      "fixture_sha256": "f912534ec30b4eb6f448200df2e42496e96dc7b070bd72ef132784c1b2811d28",
+      "source_frame": "reports/completion-20261015/live/20261015-223639-910436-2bb23c8d/frames/00014-line-boundary.png",
+      "source_sha256": "9de02cad3fbe79597374dbb0872d30d54dc4790ee11f069d3219a0dd2b10f58a",
+      "full_ocr": [
+        {
+          "text": "x10",
+          "confidence": 0.99786,
+          "bbox": [
+            130,
+            586,
+            182,
+            616
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99513,
+          "bbox": [
+            244,
+            594,
+            276,
+            621
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.80682,
+          "bbox": [
+            341,
+            594,
+            372,
+            620
+          ]
+        },
+        {
+          "text": "x2",
+          "confidence": 0.99658,
+          "bbox": [
+            434,
+            594,
+            470,
+            620
+          ]
+        }
+      ]
+    }
+  ]
+}
