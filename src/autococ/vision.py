@@ -188,6 +188,26 @@ def detect_collectibles(
     return sorted(kept, key=lambda item: (item["point"][1], item["point"][0]))
 
 
+def _colliding_card_groups(boxes: list[tuple[int, int, int, int]]) -> list[list[tuple[int, int, int, int]]]:
+    """Return horizontal-overlap components, independent of contour order."""
+    remaining = list(boxes)
+    groups = []
+    while remaining:
+        group = [remaining.pop(0)]
+        expanded = True
+        while expanded:
+            expanded = False
+            for candidate in list(remaining):
+                if any(min(candidate[2], member[2]) > max(candidate[0], member[0])
+                       for member in group):
+                    group.append(candidate)
+                    remaining.remove(candidate)
+                    expanded = True
+        if len(group) > 1:
+            groups.append(group)
+    return groups
+
+
 class ScreenshotRecognizer:
     def __init__(
         self,
@@ -1280,6 +1300,26 @@ class ScreenshotRecognizer:
             if bottom is not None:
                 boxes.append((left, top + 595, right, bottom))
 
+        # Adjacent spell art can extend a coloured contour a few pixels into
+        # its neighbour. Rebuild only collided groups from independent current
+        # quantities; otherwise the final overlap guard rejects the whole group.
+        collision_groups = []
+        for group in _colliding_card_groups(boxes):
+            left, right = min(box[0] for box in group), max(box[2] for box in group)
+            anchors = [item for item in count_texts if item.bbox is not None
+                       and math.isfinite(item.confidence)
+                       and threshold <= item.confidence <= 1
+                       and re.fullmatch(r"[xX×]\s*[1-9][0-9]*", item.text.strip())
+                       and self._in_observed_roi(item, (left, 588, right, 627))]
+            centers = [sum(scale_box(item.bbox, from_resolution=self.baseline_resolution,
+                                     to_resolution=(1280, 720))[x] for x in (0, 2)) / 2
+                       for item in anchors]
+            if len(anchors) < 2 or any(abs(a - b) < 40 for index, a in enumerate(centers)
+                                       for b in centers[index + 1:]):
+                continue
+            boxes = [box for box in boxes if box not in group]
+            collision_groups.append((left, right, anchors))
+
         from .hero_state import _match
 
         hero_templates = sorted((Path(__file__).resolve().parents[2] / "assets/templates").glob("battle_hero_pet_*.png"))
@@ -1326,6 +1366,30 @@ class ScreenshotRecognizer:
                         continue
                 boxes.append((left, 595, right, bottom))
                 break
+
+        if collision_groups:
+            from .unit_catalog import recognize_card_identity
+
+            for group_left, group_right, anchors in collision_groups:
+                recovered = [box for box in boxes if group_left <= box[0] and box[2] <= group_right]
+                valid = len(recovered) == len(anchors) and all(
+                    not any(min(box[2], other[2]) > max(box[0], other[0])
+                            for other in recovered if other != box)
+                    and supported_sides(box[0], box[2])
+                    and colored_bottom(box[0], box[2]) is not None
+                    and edge_direction[box[0]] >= 150 and edge_direction[box[2] - 1] <= -150
+                    and sum(1 for item in anchors if box[0] <
+                            sum(scale_box(item.bbox, from_resolution=self.baseline_resolution,
+                                          to_resolution=(1280, 720))[x] for x in (0, 2)) / 2
+                            < box[2]) == 1
+                    and sum(identity["unit_id"] is not None and identity["version_verified"] is True
+                            and identity["confidence"] >= .97
+                            for identity in (recognize_card_identity(
+                                image, box, kind, surface="battle", client_version=self.client_version)
+                                for kind in ("troop", "spell"))) == 1
+                    for box in recovered)
+                if not valid:
+                    boxes = [box for box in boxes if box not in recovered]
 
         for template_path in hero_templates:
             match = _match(image, template_path, (0, 595, 1280, 646), mask_kind="pet")
