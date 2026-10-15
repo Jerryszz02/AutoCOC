@@ -11,13 +11,83 @@ import numpy as np
 
 from autococ.model_vision import _ONNXModel
 from training.vision.train import (SCENE_PREPROCESS, TrainingError, _config, _scene_rows,
-                                   _advance_scene_patience, _set_scene_training_phase,
+                                   _advance_scene_patience, _scene_validation_diagnostics,
+                                   _set_scene_training_phase,
                                    _stage_building_inputs,
                                    _validate_scene_mode,
                                    prepare_bgr, train_building, train_scene, verify_snapshot)
 
 
 class TrainingContractTests(unittest.TestCase):
+    def test_scene_validation_diagnostics_report_real_acceptance_by_truth_class(self):
+        logits = np.array([[3., 0., 0., -10.], [0., 3., 0., -10.],
+                           [.2, .1, 0., -10.], [0., 0., 3., -10.]], dtype=np.float32)
+        result = _scene_validation_diagnostics(
+            logits, [0, 0, 1, 2], ["battle", "village", "settlement", "training"],
+            {"format": "logits", "min_confidence": .7, "min_margin": .2})
+        self.assertEqual(result["threshold_status"], "established")
+        self.assertEqual((result["accepted"], result["rejected"], result["coverage"]),
+                         (3, 1, .75))
+        self.assertEqual(result["per_class"]["battle"],
+                         {"support": 2, "correct_accepted": 1, "incorrect_accepted": 1,
+                          "rejected": 0, "coverage": 1.0})
+        self.assertEqual(result["per_class"]["village"]["rejected"], 1)
+        self.assertEqual(result["per_class"]["settlement"]["correct_accepted"], 1)
+        self.assertEqual(result["per_class"]["training"]["coverage"], None)
+
+    def test_scene_validation_cross_entropy_and_runtime_threshold_boundaries(self):
+        zeros = np.zeros((2, 3), dtype=np.float32)
+        result = _scene_validation_diagnostics(
+            zeros, [0, 2], ["battle", "village", "settlement"],
+            {"format": "logits", "min_confidence": 0., "min_margin": 0.})
+        self.assertAlmostEqual(result["val_cross_entropy"], float(np.log(3)))
+        tie = np.zeros((1, 2), dtype=np.float32)
+        classes = ["battle", "village"]
+        for confidence, margin, accepted in ((.5, 0., 1),
+                                             (float(np.nextafter(.5, 1.)), 0., 0),
+                                             (.5, .01, 0)):
+            with self.subTest(confidence=confidence, margin=margin):
+                row = _scene_validation_diagnostics(
+                    tie, [1], classes, {"format": "logits", "min_confidence": confidence,
+                                        "min_margin": margin})
+                self.assertEqual(row["accepted"], accepted)
+                self.assertEqual(row["per_class"]["village"]["correct_accepted"], accepted)
+        logits = np.array([[2., 0.]], dtype=np.float32)
+        shifted = logits[0] - logits[0].max()
+        probabilities = np.exp(shifted) / np.exp(shifted).sum()
+        exact_margin = float(probabilities[0]) - float(probabilities[1])
+        for margin, accepted in ((exact_margin, 1),
+                                 (float(np.nextafter(exact_margin, np.inf)), 0)):
+            with self.subTest(margin=margin):
+                row = _scene_validation_diagnostics(
+                    logits, [0], classes, {"format": "logits", "min_confidence": 0.,
+                                          "min_margin": margin})
+                self.assertEqual(row["accepted"], accepted)
+
+    def test_scene_validation_missing_threshold_contract_is_diagnostic_not_failure(self):
+        logits = np.array([[2., 0.]], dtype=np.float32)
+        empty = _scene_validation_diagnostics(
+            np.empty((0, 2), dtype=np.float32), [], ["battle", "village"],
+            {"format": "logits", "min_confidence": .8, "min_margin": .1})
+        self.assertEqual(empty["threshold_status"], "not_established")
+        self.assertEqual(empty["threshold_reason"], "no_validation_samples")
+        self.assertIsNone(empty["val_cross_entropy"])
+        for output, reason in (({"format": "logits", "min_confidence": .8}, "min_margin_missing_or_invalid"),
+                               ({"format": "probabilities", "min_confidence": .8, "min_margin": .1},
+                                "logits_output_contract_missing_or_unsupported"),
+                               ({"format": "logits", "min_confidence": float("nan"), "min_margin": .1},
+                                "min_confidence_missing_or_invalid")):
+            with self.subTest(output=output):
+                result = _scene_validation_diagnostics(logits, [0], ["battle", "village"], output)
+                self.assertEqual(result["threshold_status"], "not_established")
+                self.assertEqual(result["threshold_reason"], reason)
+                self.assertIn("val_cross_entropy", result)
+                self.assertNotIn("accepted", result)
+        with self.assertRaisesRegex(TrainingError, "logits/truth"):
+            _scene_validation_diagnostics(np.array([[float("nan"), 0.]], dtype=np.float32),
+                                          [0], ["battle", "village"],
+                                          {"format": "logits", "min_confidence": .8, "min_margin": .1})
+
     @unittest.skipUnless(os.environ.get("AUTOCOC_TRAINING_INTEGRATION") == "1", "training environment only")
     def test_head_freezes_feature_bn_buffers_but_updates_classifier_then_finetune_updates_features(self):
         import torch
@@ -145,6 +215,17 @@ class TrainingContractTests(unittest.TestCase):
                 self.assertEqual(tuple(last["best_score"]), (.7, .7))
                 self.assertEqual(last["phase"], "head" if limit == 5 else "finetune")
             self.assertEqual(torch.load(run / "best.pt", map_location="cpu", weights_only=True)["epoch"], 2)
+            history = json.loads((run / "history.json").read_text())
+            self.assertEqual(len(history), 12)
+            self.assertEqual(last["history"], history)
+            for epoch_record in history:
+                diagnostics = epoch_record["validation_diagnostics"]
+                self.assertEqual(diagnostics["scope"], "validation_diagnostic_only")
+                self.assertEqual(diagnostics["threshold_status"], "established")
+                self.assertEqual(diagnostics["sample_count"], 1)
+                self.assertTrue(np.isfinite(diagnostics["val_cross_entropy"]))
+                self.assertEqual(diagnostics["accepted"] + diagnostics["rejected"], 1)
+                self.assertEqual(sum(row["support"] for row in diagnostics["per_class"].values()), 1)
             recipe = json.loads((run / "training_config.json").read_text())
             self.assertEqual(recipe["head_features_mode"], "eval_frozen_parameters_and_buffers")
             self.assertEqual(recipe["finetune_patience_policy"], "reset_at_boundary_keep_global_best")

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import random
@@ -235,6 +236,60 @@ def _metric(truth: list[int], predicted: list[int], classes: list[str]) -> dict:
             "minimum_recall": min(recalls) if recalls else 0.0, "per_class": per_class}
 
 
+def _scene_validation_diagnostics(logits: np.ndarray, truth: list[int],
+                                  classes: list[str], output: dict) -> dict:
+    """Describe one validation epoch without affecting checkpoint selection."""
+    if (not isinstance(logits, np.ndarray) or len(classes) < 2 or
+            logits.shape != (len(truth), len(classes)) or
+            not np.issubdtype(logits.dtype, np.floating) or not np.isfinite(logits).all() or
+            any(type(label) is not int or not 0 <= label < len(classes) for label in truth)):
+        raise TrainingError("Scene validation logits/truth are incomplete or non-finite")
+    if not truth:
+        return {"scope": "validation_diagnostic_only", "sample_count": 0,
+                "val_cross_entropy": None, "threshold_status": "not_established",
+                "threshold_reason": "no_validation_samples"}
+    shifted = logits - logits.max(axis=1, keepdims=True)
+    exponentials = np.exp(shifted)
+    probabilities = exponentials / exponentials.sum(axis=1, keepdims=True)
+    labels = np.asarray(truth)
+    count = len(truth)
+    result = {"scope": "validation_diagnostic_only", "sample_count": count,
+              "val_cross_entropy": float(np.mean(np.log(exponentials.sum(axis=1)) -
+                                                 shifted[np.arange(count), labels]))}
+    if not isinstance(output, dict) or output.get("format") != "logits":
+        return {**result, "threshold_status": "not_established",
+                "threshold_reason": "logits_output_contract_missing_or_unsupported"}
+    thresholds = {}
+    for key in ("min_confidence", "min_margin"):
+        value = output.get(key)
+        if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1:
+            return {**result, "threshold_status": "not_established",
+                    "threshold_reason": f"{key}_missing_or_invalid"}
+        thresholds[key] = float(value)
+    # Mirror SceneModel.classify: stable softmax, descending argsort, then both strict-minimum gates.
+    order = np.argsort(probabilities, axis=1)[:, ::-1]
+    predicted = order[:, 0]
+    # Runtime converts each float32 probability to Python float before comparing.
+    confidence = probabilities[np.arange(count), predicted].astype(np.float64)
+    second = probabilities[np.arange(count), order[:, 1]].astype(np.float64)
+    accepted = (confidence >= thresholds["min_confidence"]) & (
+        confidence - second >= thresholds["min_margin"])
+    per_class = {}
+    for index, name in enumerate(classes):
+        selected = labels == index
+        support = int(selected.sum())
+        correct = int((selected & accepted & (predicted == labels)).sum())
+        incorrect = int((selected & accepted & (predicted != labels)).sum())
+        rejected = support - correct - incorrect
+        per_class[name] = {"support": support, "correct_accepted": correct,
+                           "incorrect_accepted": incorrect, "rejected": rejected,
+                           "coverage": (correct + incorrect) / support if support else None}
+    accepted_count = int(accepted.sum())
+    return {**result, "threshold_status": "established", **thresholds,
+            "accepted": accepted_count, "rejected": count - accepted_count,
+            "coverage": accepted_count / count, "per_class": per_class}
+
+
 def _validate_scene_mode(prototype: bool, development: bool, max_epochs: int | None) -> None:
     if max_epochs is not None and max_epochs <= 0:
         raise TrainingError("Epoch cap must be positive")
@@ -382,19 +437,24 @@ def train_scene(snapshot_root: Path, config_path: Path, output: Path, *, device:
             optimizer.step()
             losses.append(float(loss.detach().cpu()))
         model.eval()
-        truth, predicted = [], []
+        truth, predicted, validation_logits = [], [], []
         with torch.inference_mode():
             for images, labels in val_loader:
-                result = model(images.to(device)).argmax(1).cpu().tolist()
-                predicted.extend(result)
+                logits = model(images.to(device)).cpu().numpy()
+                validation_logits.append(logits)
+                predicted.extend(logits.argmax(axis=1).tolist())
                 truth.extend(labels.tolist())
         metrics = _metric(truth, predicted, classes)
+        diagnostics = _scene_validation_diagnostics(
+            np.concatenate(validation_logits) if validation_logits else
+            np.empty((0, len(classes)), dtype=np.float32), truth, classes, config["output"])
         score = (metrics["macro_f1"], metrics["minimum_recall"])
         scheduler.step()
         best_score, bad_epochs, better = _advance_scene_patience(
             score, best_score, bad_epochs, epoch=epoch, head_epochs=head_epochs)
         record = {"epoch": epoch, "phase": phase, "train_loss": sum(losses) / len(losses),
-                  "validation": metrics, "elapsed_seconds": time.monotonic() - began}
+                  "validation": metrics, "validation_diagnostics": diagnostics,
+                  "elapsed_seconds": time.monotonic() - began}
         history.append(record)
         state = {"signature": signature, "model": model.state_dict(), "optimizer": optimizer.state_dict(),
                  "scheduler": scheduler.state_dict(),
