@@ -1255,14 +1255,33 @@ class ScreenshotRecognizer:
                 continue
             right = max(range(max(4, text_box[2] - 4), min(1277, text_box[2] + 7)),
                         key=lambda x: -edge_direction[x - 1])
-            left = max(range(max(3, right - 105), right - 79), key=lambda x: edge_direction[x])
-            if not left < center < right or edge_direction[left] < 150 or edge_direction[right - 1] > -150:
-                continue
-            if not (supported_sides(left, right) or edge_backed_card(left, right)):
-                continue
-            bottom = colored_bottom(left, right)
-            if bottom is not None:
+            # The strongest left gradient may be the right border of an
+            # already located neighbour. Try the remaining observed edges in
+            # strength order, while keeping every independent card check.
+            left_candidates = sorted(range(max(3, right - 105), right - 79),
+                                     key=lambda x: edge_direction[x], reverse=True)
+            for left in left_candidates:
+                if (any(box[0] <= left < box[2] for box in boxes)
+                        or not left < center < right
+                        or edge_direction[left] < 150 or edge_direction[right - 1] > -150):
+                    continue
+                if not (supported_sides(left, right) or edge_backed_card(left, right)):
+                    continue
+                bottom = colored_bottom(left, right)
+                if bottom is None or any(min(right, box[2]) > max(left, box[0]) for box in boxes):
+                    continue
+                if left != left_candidates[0]:
+                    # A secondary edge needs a versioned portrait as well as
+                    # its own sides, bottom and current-frame quantity.
+                    from .unit_catalog import recognize_card_identity
+                    identities = [recognize_card_identity(
+                        image, (left, 595, right, bottom), kind, surface="battle",
+                        client_version=self.client_version) for kind in ("troop", "spell")]
+                    if sum(identity["unit_id"] is not None and identity["confidence"] >= .97
+                           and identity.get("version_verified") is True for identity in identities) != 1:
+                        continue
                 boxes.append((left, 595, right, bottom))
+                break
 
         for template_path in hero_templates:
             match = _match(image, template_path, (0, 595, 1280, 646), mask_kind="pet")

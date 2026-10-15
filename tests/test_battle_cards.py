@@ -322,6 +322,36 @@ class BattleCardTests(unittest.TestCase):
         self.assertEqual(selected["bbox"], [185, 587, 283, 715])
         self.assertEqual([slot["count"] for slot in slots if slot["kind"] == "troop"], [1, 1])
 
+    def test_selected_electro_border_cannot_steal_adjacent_dragon_left_edge(self) -> None:
+        # Only the two current-version cards are retained from live 00016;
+        # account and opponent details are absent from this fixture.
+        path = self.root / "tests/fixtures/selected-electro-dragon-adjacent-20261015.png"
+        texts = [OCRText("x10", .99814, (130, 588, 182, 616)),
+                 OCRText("x1", .99512, (244, 594, 276, 621))]
+        vision = ScreenshotRecognizer(provider=Mock())
+        vision.client_version = "18.647.2"
+        slots = vision._battle_observation(path, texts, "battle")["slots"]
+        self.assert_independent(slots)
+        self.assertEqual([(slot["unit_id"], slot["count"], slot["bbox"]) for slot in slots], [
+            ("electro_dragon", 10, [92, 591, 183, 708]),
+            ("dragon", 1, [190, 595, 278, 711]),
+        ])
+
+        image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        image[625:695, 183:205] = 0  # The occupied edge remains; no separate left side survives.
+        with TemporaryDirectory() as directory:
+            missing_side = Path(directory) / "missing-dragon-side.png"
+            cv2.imencode(".png", image)[1].tofile(missing_side)
+            broken = vision._battle_observation(missing_side, texts, "battle")["slots"]
+        self.assertEqual([(slot["unit_id"], slot["count"]) for slot in broken],
+                         [("electro_dragon", 10)])
+        low_count = [texts[0], replace(texts[1], confidence=.89)]
+        self.assertFalse(any(slot["unit_id"] == "dragon" for slot in
+                             vision._battle_observation(path, low_count, "battle")["slots"]))
+        vision.client_version = "18.647.1"
+        self.assertFalse(any(slot["unit_id"] == "dragon" for slot in
+                             vision._battle_observation(path, texts, "battle")["slots"]))
+
     def test_broken_white_side_does_not_supply_a_selected_card(self) -> None:
         frame, texts, scene = self.fixture("reports/20260923-235238-479708-a0aa6220", 17)
         image = cv2.resize(cv2.imdecode(np.fromfile(frame, dtype=np.uint8), cv2.IMREAD_COLOR),

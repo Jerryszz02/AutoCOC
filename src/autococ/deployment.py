@@ -521,6 +521,26 @@ def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, 
     return current
 
 
+def _minimum_zoom_motion(motion: dict) -> bool:
+    """Require near-identity map motion after a completed native zoom gesture."""
+    affine = motion.get("affine")
+    matches, inliers = motion.get("matched_points"), motion.get("inliers")
+    return bool(
+        motion.get("stationary") is True
+        and type(matches) is int and matches >= 40
+        and type(inliers) is int and inliers >= 40 and inliers / matches >= .8
+        and isinstance(affine, list) and len(affine) == 2
+        and all(isinstance(row, list) and len(row) == 3 for row in affine)
+        and all(type(value) in (int, float) and math.isfinite(value)
+                for row in affine for value in row)
+        and abs(affine[0][0] - 1) <= .002
+        and abs(affine[0][1]) <= .002
+        and abs(affine[1][0]) <= .002
+        and abs(affine[1][1] - 1) <= .002
+        and math.hypot(affine[0][2], affine[1][2]) < 3
+    )
+
+
 def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt: dict, *,
                            capture_context: dict | None = None) -> tuple[SceneSnapshot, list[dict]]:
     from .battle_vision import selected_card_bbox
@@ -528,24 +548,98 @@ def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt
 
     if session.native is None:
         raise FlowError("Two-edge minimum zoom requires the MuMu native transport")
-    for _ in range(3):
-        session._validate_snapshot(current)
+    if capture_context is not None:
+        # The continuous batch must be frozen inside the preparation countdown.
+        # Each native pinch takes about 1.7 s on the observed client. Observe
+        # after each pinch so a camera already at minimum scale costs one pinch,
+        # rather than spending the whole preview on four blind gestures.
+        from .prepared_battle import _remaining_seconds
+
+        if current.scene != "enemy_village":
+            raise FlowError("Minimum zoom requires the current enemy preview")
+        captured_at = current.observations.get("observed_at_monotonic")
+        if type(captured_at) not in (int, float) or not math.isfinite(captured_at):
+            raise FlowError("Minimum zoom requires a current preview capture time")
+        preview_end = captured_at + _remaining_seconds(current) - 1
+        before = current
+        motion = None
+        probes = receipt.setdefault("zoom_probes", [])
+        for attempt in range(4):
+            # Reserve time for one pinch, a full roster read, selected-border
+            # verification and freezing. The final freeze still applies its own
+            # stricter fresh-frame deadline.
+            if time.monotonic() + 7 >= preview_end:
+                raise FlowError("Preview time is insufficient to verify minimum zoom")
+            session._validate_snapshot(before)
+            gesture_started = time.monotonic()
+            session.native.zoom_out()
+            session.action_count += 1
+            gesture_elapsed = time.monotonic() - gesture_started
+            time.sleep(.2)
+            observation_started = time.monotonic()
+            after = session.observe("line-zoom-probe", purpose="settlement")
+            observation_elapsed = time.monotonic() - observation_started
+            receipt["evidence"].append(str(after.screenshot_path))
+            if (after.scene != "enemy_village" or not math.isfinite(after.confidence)
+                    or after.confidence < .8):
+                raise FlowError("Enemy preview was lost while verifying minimum zoom")
+            motion_started = time.monotonic()
+            motion = measure_camera_motion(before.screenshot_path, after.screenshot_path)
+            motion_elapsed = time.monotonic() - motion_started
+            # The general camera detector tolerates 2% scale drift. That is
+            # suitable for scene stability, but not proof of minimum zoom:
+            # the real 00012->00013 pair drifted 0.42% and the subsequent
+            # 00013->00014 pinch was still needed.
+            converged = _minimum_zoom_motion(motion)
+            probe = {"attempt": attempt + 1, "frame": str(after.screenshot_path),
+                     "gesture_elapsed_sec": gesture_elapsed,
+                     "observation_elapsed_sec": observation_elapsed,
+                     "motion_elapsed_sec": motion_elapsed,
+                     "converged": converged, "motion": motion}
+            probes.append(probe)
+            session.event("line_zoom_probe", **probe)
+            if converged:
+                break
+            before = after
+        else:
+            raise FlowError("Minimum zoom did not stabilize before line deployment")
+        if time.monotonic() + 5 >= preview_end:
+            raise FlowError("Preview time is insufficient for the selected boundary")
+        full_started = time.monotonic()
+        current = session.observe("line-zoom-verified")
+        full_elapsed = time.monotonic() - full_started
+        receipt["evidence"].append(str(current.screenshot_path))
+        if (current.scene != "enemy_village" or not math.isfinite(current.confidence)
+                or current.confidence < .8):
+            raise FlowError("Enemy preview was lost before line deployment")
+        confirmation = measure_camera_motion(after.screenshot_path, current.screenshot_path)
+        if not _minimum_zoom_motion(confirmation):
+            raise FlowError("Minimum zoom changed before the full roster read")
+        _remaining_seconds(current)
+    else:
+        for _ in range(3):
+            session._validate_snapshot(current)
+            session.native.zoom_out()
+            session.action_count += 1
+            time.sleep(.5)
+        time.sleep(1)
+        before = session.observe("line-zoom-out")
+        _battle_frame(before)
+        session._validate_snapshot(before)
         session.native.zoom_out()
         session.action_count += 1
-        time.sleep(.5)
-    time.sleep(1)
-    before = session.observe("line-zoom-out")
-    _battle_frame(before)
-    session._validate_snapshot(before)
-    session.native.zoom_out()
-    session.action_count += 1
-    time.sleep(1)
-    current = session.observe("line-zoom-verified")
-    _battle_frame(current)
-    motion = measure_camera_motion(before.screenshot_path, current.screenshot_path)
-    receipt["evidence"].extend([str(before.screenshot_path), str(current.screenshot_path)])
+        time.sleep(1)
+        current = session.observe("line-zoom-verified")
+        _battle_frame(current)
+        motion = measure_camera_motion(before.screenshot_path, current.screenshot_path)
+        receipt["evidence"].extend([str(before.screenshot_path), str(current.screenshot_path)])
     receipt["minimum_zoom"] = {"verified": motion["stationary"] is True, "motion": motion,
                                "frame": str(current.screenshot_path)}
+    if capture_context is not None:
+        receipt["minimum_zoom"].update(confirmation_motion=confirmation,
+                                       gesture_count=attempt + 1,
+                                       gesture_frame=str(after.screenshot_path),
+                                       full_roster_elapsed_sec=full_elapsed)
     session.event("line_minimum_zoom", **receipt["minimum_zoom"])
     if motion["stationary"] is not True:
         raise FlowError("Minimum zoom did not stabilize before line deployment")

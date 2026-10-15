@@ -1,14 +1,17 @@
 from copy import deepcopy
 from dataclasses import replace
+import json
+import os
+from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from autococ.deployment import (_prepare_two_edge_view, _remaining, _verified_line_card_reading,
+from autococ.deployment import (_minimum_zoom_motion, _prepare_two_edge_view, _remaining, _verified_line_card_reading,
                                 deploy_army, spread_along_edges)
-from autococ.errors import CaptureError, DeploymentError, FlowError, StopRequested
+from autococ.errors import CaptureError, DeploymentError, FlowError, SceneError, StopRequested
 from autococ.scene import SceneSnapshot
 from autococ.session import GameSession
 from autococ.vision import ScreenshotRecognizer
@@ -607,6 +610,99 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(anchor["verified_slot_bbox"], selected_box)
         self.assertEqual(anchor["unit_id"], "electro_dragon")
         self.assertNotIn("bbox", slot["evidence"]["count"], "Fast count ROI is not a glyph box")
+
+    def _continuous_zoom_session(self, countdown=24):
+        session = FakeSession(self.clock, [card(count=10)])
+        session.native = Mock()
+        session.native.zoom_out.side_effect = lambda: self.clock.advance(1.7)
+        session.recognizer = Mock()
+        preview_end = session.scout.observations["observed_at_monotonic"] + countdown
+
+        def add_countdown(label, frame):
+            seconds = max(1, int(preview_end - frame.observations["observed_at_monotonic"]))
+            frame.observations["battle"].update(countdown_seconds=seconds, countdown_evidence={
+                "frame": str(frame.screenshot_path), "source": "current_frame_ocr", "confidence": .99})
+            return frame
+
+        session.observe_hook = add_countdown
+        add_countdown("scout", session.scout)
+        return session
+
+    @staticmethod
+    def _motion(scale=1.0):
+        return {"stationary": True, "matched_points": 800, "inliers": 800,
+                "affine": [[scale, 0.0, 0.0], [0.0, scale, 0.0]]}
+
+    def test_continuous_zoom_stops_after_verified_gesture_and_keeps_full_roster(self):
+        session = self._continuous_zoom_session()
+        session.observe = Mock(wraps=session.observe)
+        self.camera_motion.side_effect = [self._motion(.9958), self._motion(), self._motion()]
+        terrain = [{"edge": edge, "point": point} for edge, points in (
+            (0, ([450, 210], [300, 320])), (1, ([300, 370], [440, 470]))) for point in points]
+        receipt = {"evidence": []}
+        with patch("autococ.battle_vision.selected_card_bbox", return_value=[177, 587, 253, 703]), \
+             patch("autococ.deployment._verified_line_card_reading",
+                   return_value={"count": 10, "portrait_score": .99}), \
+             patch("autococ.terrain.find_line_deployment_edges", return_value=terrain):
+            current, result = _prepare_two_edge_view(session, session.scout, receipt,
+                                                     capture_context={})
+        self.assertEqual(result, terrain)
+        self.assertEqual(session.native.zoom_out.call_count, 2)
+        self.assertEqual(receipt["minimum_zoom"]["gesture_count"], 2)
+        self.assertEqual(receipt["minimum_zoom"]["frame"], str(session.frames[-2].screenshot_path))
+        self.assertEqual(current.observations["battle"]["slots"][0]["count"], 10)
+        self.assertEqual(len(receipt["zoom_probes"]), 2)
+        self.assertEqual(sum(event == "line_zoom_probe" for event, _ in session.events), 2)
+        self.assertTrue(all(probe["gesture_elapsed_sec"] > 0 for probe in receipt["zoom_probes"]))
+        self.assertEqual([call.kwargs.get("purpose") for call in session.observe.call_args_list
+                          if call.args[0] == "line-zoom-probe"], ["settlement", "settlement"])
+
+    def test_continuous_zoom_rejects_short_preview_before_any_gesture(self):
+        session = self._continuous_zoom_session(countdown=4)
+        with self.assertRaisesRegex(FlowError, "Preview time is insufficient"):
+            _prepare_two_edge_view(session, session.scout, {"evidence": []}, capture_context={})
+        session.native.zoom_out.assert_not_called()
+
+    def test_continuous_zoom_does_not_treat_tolerated_scale_drift_as_minimum(self):
+        session = self._continuous_zoom_session(countdown=60)
+        self.camera_motion.return_value = self._motion(.9958)
+        with self.assertRaisesRegex(FlowError, "Minimum zoom did not stabilize"):
+            _prepare_two_edge_view(session, session.scout, {"evidence": []}, capture_context={})
+        self.assertEqual(session.native.zoom_out.call_count, 4)
+        self.assertEqual(len([frame for frame in session.frames if frame is not session.scout]), 4)
+        inconsistent = self._motion()
+        inconsistent["affine"][1][1] = .99
+        self.assertFalse(_minimum_zoom_motion(inconsistent))
+
+    def test_continuous_zoom_rejects_lost_preview_or_nonfinite_confidence(self):
+        for scene, confidence in (("battle", .99), ("unknown", .0), ("enemy_village", float("nan"))):
+            with self.subTest(scene=scene, confidence=confidence):
+                session = self._continuous_zoom_session()
+                original = session.observe_hook
+
+                def lose_preview(label, frame):
+                    frame = original(label, frame)
+                    return replace(frame, scene=scene, confidence=confidence) if label == "line-zoom-probe" else frame
+
+                session.observe_hook = lose_preview
+                with self.assertRaisesRegex(FlowError, "Enemy preview was lost"):
+                    _prepare_two_edge_view(session, session.scout, {"evidence": []}, capture_context={})
+                self.assertEqual(session.native.zoom_out.call_count, 1)
+                self.assertEqual(session.taps, [])
+
+    def test_continuous_zoom_missing_camera_frame_or_interrupted_gesture_never_selects(self):
+        session = self._continuous_zoom_session()
+        self.camera_motion.side_effect = SceneError("Unable to decode camera screenshot")
+        with self.assertRaises(SceneError):
+            _prepare_two_edge_view(session, session.scout, {"evidence": []}, capture_context={})
+        self.assertEqual(session.native.zoom_out.call_count, 1)
+        self.assertEqual(session.taps, [])
+        session = self._continuous_zoom_session()
+        session.native.zoom_out.side_effect = KeyboardInterrupt()
+        with self.assertRaises(KeyboardInterrupt):
+            _prepare_two_edge_view(session, session.scout, {"evidence": []}, capture_context={})
+        self.assertEqual(session.native.zoom_out.call_count, 1)
+        self.assertEqual(session.taps, [])
 
     def test_edrag_waits_for_selection_animation_without_clicking_again(self):
         session, _ = self.line_session([card(count=1), card("hero", None, 280)])
@@ -1567,6 +1663,46 @@ class DeploymentTests(unittest.TestCase):
         spell_events = [event for event in result["consumption_events"] if event["unit_kind"] == "spell"]
         self.assertEqual(sum(event["consumed"] for event in spell_events), 10)
         self.assertTrue(all(event["consumed"] <= 8 for event in spell_events))
+
+
+class CurrentPreviewZoomReplayTests(unittest.TestCase):
+    def test_current_preview_camera_and_time_evidence(self):
+        """Optional replay uses original local frames; no synthesized map or timer."""
+        report = os.environ.get("AUTOCOC_CURRENT_BATTLE_REPLAY")
+        if not report:
+            self.skipTest("Set AUTOCOC_CURRENT_BATTLE_REPLAY to the preserved live run")
+        root = Path(report)
+        observations = {}
+        for line in (root / "events.jsonl").read_text(encoding="utf-8").splitlines():
+            event = json.loads(line)
+            if event.get("kind") == "observation":
+                observations[Path(event["frame"]).name] = event
+        names = ("00011-battle-candidate.png", "00012-scout-camera-ready.png",
+                 "00013-line-zoom-out.png", "00014-line-zoom-verified.png",
+                 "00017-continuous-line-failure-check.png")
+        self.assertTrue(all(name in observations for name in names))
+        countdowns = [observations[name]["observations"]["battle"]["countdown_seconds"]
+                      for name in names[:4]]
+        self.assertEqual(countdowns, [28, 24, 14, 7])
+        captured = [datetime.fromisoformat(observations[name]["observations"]["captured_at_utc"])
+                    for name in names[:4]]
+        self.assertGreater((captured[3] - captured[1]).total_seconds(), 15)
+        self.assertLess((captured[3] - captured[1]).total_seconds(), 18)
+        from autococ.terrain import measure_camera_motion
+
+        first = measure_camera_motion(root / "frames" / names[1], root / "frames" / names[2])
+        second = measure_camera_motion(root / "frames" / names[2], root / "frames" / names[3])
+        self.assertTrue(first["stationary"])  # General camera tolerance is too wide for minimum zoom.
+        self.assertFalse(_minimum_zoom_motion(first))
+        self.assertTrue(_minimum_zoom_motion(second))
+        recognizer = ScreenshotRecognizer()
+        recognizer.client_version = "18.647.2"
+        for name, scene in ((names[1], "enemy_village"), (names[3], "enemy_village"),
+                            (names[4], "battle")):
+            with self.subTest(frame=name):
+                observed = recognizer.recognize_battle(root / "frames" / name,
+                                                       purpose="settlement", previous=None)
+                self.assertEqual(observed.scene, scene)
 
 
 if __name__ == "__main__":
