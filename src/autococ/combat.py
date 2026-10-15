@@ -13,6 +13,7 @@ from .battle import BattleTarget, score_target
 from .errors import AutoCOCError, CapabilityUnavailable, DeploymentError, FlowError
 from .flow import return_to_village
 from .reporting import TaskResult
+from .resource_capacity import read_resource_capacity
 from .scene import SceneSnapshot
 from .session import GameSession
 from .strategies import is_line_strategy
@@ -504,8 +505,7 @@ def run_battle(session: GameSession) -> TaskResult:
         # are now observed; keep that fact even when later checks fail.
         provisional_outcome = line_mode and _settlement_requires_inventory_reconciliation(settlement)
         observed_stars = None if provisional_outcome else _verified_stars(metrics["settlement_observed"])
-        metrics.update(returned_home=True, rounds_completed=1,
-                       victory=observed_stars > 0 if type(observed_stars) is int and 0 <= observed_stars <= 3 else None)
+        metrics.update(returned_home=True, rounds_completed=1, victory=None)
         if vision_mode:
             progress("战斗完成")
         metrics["resources_after"] = home_after.observations.get("resources")
@@ -541,14 +541,13 @@ def run_battle(session: GameSession) -> TaskResult:
                 except FlowError:
                     pass
                 else:
-                    delta = {name: verified_after[name] - verified_before[name] for name in (*RESOURCES, "gems")}
-                    expected = {name: settlement["loot"][name] + settlement["bonus"][name]
-                                - (total_search_cost if name == "gold" else 0) for name in RESOURCES}
-                    metrics.update(inventory_delta=delta, expected_inventory_delta=expected)
-                    if delta["gems"] == 0 and all(delta[name] == expected[name] for name in RESOURCES):
-                        metrics["inventory_reconciled"] = True
-            if provisional_outcome and not metrics["inventory_reconciled"]:
-                raise FlowError("Provisional settlement rewards need exact inventory reconciliation")
+                    ledger, home_after = _reconcile_return_inventory(
+                        session, home_after, verified_before, verified_after, settlement,
+                        total_search_cost, evidence, allow_capacity=not provisional_outcome)
+                    metrics.update(ledger)
+            if not metrics["inventory_reconciled"]:
+                raise FlowError("Provisional settlement rewards need exact inventory reconciliation" if provisional_outcome
+                                else "Battle settlement does not reconcile with return-home inventory")
             for group, prefix in (("loot", "loot"), ("bonus", "bonus")):
                 for resource in RESOURCES:
                     proof = (observed.get("evidence") or {}).get(group) or {}
@@ -573,20 +572,18 @@ def run_battle(session: GameSession) -> TaskResult:
         if settlement_error is not None:
             raise FlowError(settlement_error)
         after = _inventory(home_after)
-        metrics["inventory_delta"] = {name: after[name] - before[name] for name in (*RESOURCES, "gems")}
         for resource in RESOURCES:
             metrics[f"loot_{resource}"] = settlement["loot"][resource]
             metrics[f"bonus_{resource}"] = settlement["bonus"][resource]
         metrics.update({"stars": settlement["stars"], "percentage": settlement["percentage"],
                         "victory": settlement["stars"] > 0})
-        expected = {resource: settlement["loot"][resource] + settlement["bonus"][resource]
-                    - (total_search_cost if resource == "gold" else 0) for resource in RESOURCES}
-        metrics["expected_inventory_delta"] = expected
+        ledger, home_after = _reconcile_return_inventory(
+            session, home_after, before, after, settlement, total_search_cost, evidence, allow_capacity=True)
+        metrics.update(ledger)
         if after["gems"] != before["gems"]:
             raise FlowError("Gem balance changed during battle")
-        if any(after[resource] - before[resource] != expected[resource] for resource in RESOURCES):
+        if not metrics["inventory_reconciled"]:
             raise FlowError("Battle settlement does not reconcile with return-home inventory")
-        metrics["inventory_reconciled"] = True
         if deployment.get("completed") is not True:
             raise FlowError(metrics.get("deployment_error") or "Army or hero ability deployment is incomplete")
         session.event("battle_verified", settlement_frame=str(settlement_frame.screenshot_path),
@@ -668,6 +665,48 @@ def _inventory(snapshot: SceneSnapshot) -> dict[str, int]:
     if any(type(values.get(name)) is not int or values[name] < 0 for name in (*RESOURCES, "gems")):
         raise FlowError("Village inventory is incomplete")
     return {name: values[name] for name in (*RESOURCES, "gems")}
+
+
+def _reconcile_return_inventory(
+    session: GameSession, home: SceneSnapshot, before: dict[str, int], after: dict[str, int],
+    settlement: dict, search_cost: int, evidence: list[Path], *, allow_capacity: bool,
+) -> tuple[dict[str, object], SceneSnapshot]:
+    """Use a capacity only for a positive shortfall confirmed by its own HUD detail."""
+    gross = {name: settlement["loot"][name] + settlement["bonus"][name] for name in RESOURCES}
+    base = {name: before[name] - (search_cost if name == "gold" else 0) for name in RESOURCES}
+    expected = {name: base[name] + gross[name] for name in RESOURCES}
+    delta = {name: after[name] - before[name] for name in (*RESOURCES, "gems")}
+    result: dict[str, object] = {
+        "inventory_delta": delta,
+        "expected_inventory_delta": {name: expected[name] - before[name] for name in RESOURCES},
+        "inventory_reconciled": False,
+    }
+    if delta["gems"] != 0:
+        return result, home
+    mismatched = [name for name in RESOURCES if after[name] != expected[name]]
+    capacities: dict[str, int] = {}
+    capacity_proofs: dict[str, object] = {}
+    if mismatched and allow_capacity and getattr(session, "client_version", None) == "18.647.2" and all(
+        gross[name] > 0 and base[name] <= after[name] < expected[name] for name in mismatched
+    ):
+        for name in mismatched:
+            proof, home, frames = read_resource_capacity(session, home, name)
+            evidence.extend(frames)
+            capacities[name] = proof["capacity"]
+            capacity_proofs[name] = proof
+        result["resource_capacity_evidence"] = capacity_proofs
+        result["resources_after"] = home.observations.get("resources")
+    if any(after[name] != min(expected[name], capacities.get(name, expected[name])) for name in RESOURCES):
+        return result, home
+    if any(capacities[name] < base[name] or capacities[name] >= expected[name] for name in capacities):
+        return result, home
+    result["inventory_reconciled"] = True
+    result["inventory_reconciliation_method"] = "capacity_capped" if capacities else "exact"
+    for name in RESOURCES:
+        credited = after[name] - base[name]
+        result[f"battle_credited_{name}"] = credited
+        result[f"overflow_{name}"] = gross[name] - credited
+    return result, home
 
 
 def _read_army(snapshot: SceneSnapshot) -> dict[str, object]:

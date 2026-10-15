@@ -352,17 +352,20 @@ def write_report(report_dir: Path, stats: RunStats, *, save_decision_trace: bool
     revenue = payload["resource_metrics"]
     lines.extend([
         "## Resource Ledger", "",
-        "Unknown values are not zero. Rates use the entire run wall-clock duration.", "",
-        "| Resource | Battle loot | Bonus | Collected | Donation spend | Search spend | Battle gross / h | Operating net / h |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "Unknown values are not zero. Source net follows settlement rewards and costs; credited net excludes verified overflow. Rates use the entire run wall-clock duration.", "",
+        "| Resource | Battle loot | Bonus | Battle credited | Overflow | Collected | Donation spend | Search spend | Battle gross / h | Source net / h | Credited net / h |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ])
     for resource, values in revenue["resources"].items():
-        columns = ("battle_loot", "battle_bonus", "collected_credited", "donation_spend", "search_spend", "battle_gross_per_hour", "operating_net_per_hour")
+        columns = ("battle_loot", "battle_bonus", "battle_credited", "battle_overflow", "collected_credited",
+                   "donation_spend", "search_spend", "battle_gross_per_hour", "operating_net_per_hour",
+                   "credited_operating_net_per_hour")
         lines.append(f"| {resource} | " + " | ".join(_format_number(values[key]) for key in columns) + " |")
     lines.extend([
         "",
         f"- Gold + elixir battle gross / hour: {_format_number(revenue['battle_gold_elixir_per_hour'])}",
         f"- Gold + elixir operating net / hour: {_format_number(revenue['net_gold_elixir_per_hour'])}",
+        f"- Gold + elixir credited net / hour: {_format_number(revenue['credited_net_gold_elixir_per_hour'])}",
         "- Full acceptance remains subject to the evidence requirements in docs/ACCEPTANCE.md.", "",
     ])
 
@@ -519,23 +522,30 @@ def resource_metrics(stats: RunStats, *, elapsed_sec: float | None = None) -> di
                 and result.status in {"succeeded", "failed", "limited"}]
     resources: dict[str, dict[str, int | float | None]] = {}
     for resource in ("gold", "elixir", "dark_elixir"):
+        credits, overflow = _battle_storage_amounts(battles, resource)
         values = {
             "battle_loot": _sum_metric(battles, f"loot_{resource}"),
             "battle_bonus": _sum_metric(battles, f"bonus_{resource}"),
+            "battle_credited": credits,
+            "battle_overflow": overflow,
             "collected_credited": _collection_credit(collections, resource),
             "donation_spend": _sum_metric(donations, f"donation_cost_{resource}", empty=0),
             "search_spend": _sum_metric(searches, f"search_cost_{resource}", empty=0),
         }
         gross = _sum_known(values["battle_loot"], values["battle_bonus"])
         net_in = _sum_known(gross, values["collected_credited"])
+        credited_in = _sum_known(credits, values["collected_credited"])
         spend = _sum_known(values["donation_spend"], values["search_spend"])
         net = net_in - spend if net_in is not None and spend is not None else None
+        credited_net = credited_in - spend if credited_in is not None and spend is not None else None
         values.update({
             "battle_gross": gross,
             "operating_net": net,
+            "credited_operating_net": credited_net,
             "battle_loot_per_hour": _hourly(values["battle_loot"], elapsed),
             "battle_gross_per_hour": _hourly(gross, elapsed),
             "operating_net_per_hour": _hourly(net, elapsed),
+            "credited_operating_net_per_hour": _hourly(credited_net, elapsed),
         })
         resources[resource] = values
     return {
@@ -543,7 +553,27 @@ def resource_metrics(stats: RunStats, *, elapsed_sec: float | None = None) -> di
         "resources": resources,
         "battle_gold_elixir_per_hour": _sum_known(resources["gold"]["battle_gross_per_hour"], resources["elixir"]["battle_gross_per_hour"]),
         "net_gold_elixir_per_hour": _sum_known(resources["gold"]["operating_net_per_hour"], resources["elixir"]["operating_net_per_hour"]),
+        "credited_net_gold_elixir_per_hour": _sum_known(resources["gold"]["credited_operating_net_per_hour"],
+                                                       resources["elixir"]["credited_operating_net_per_hour"]),
     }
+
+
+def _battle_storage_amounts(results: list[TaskResult], resource: str) -> tuple[int | float | None, int | float | None]:
+    """A settlement reward is not proof that full storage received it."""
+    credits: list[object] = []
+    overflow: list[object] = []
+    for result in results:
+        metrics = result.metrics
+        gross = _sum_amounts([metrics.get(f"loot_{resource}"), metrics.get(f"bonus_{resource}")])
+        credited, lost = metrics.get(f"battle_credited_{resource}"), metrics.get(f"overflow_{resource}")
+        if (metrics.get("inventory_reconciled") is not True or gross is None
+                or _sum_amounts([credited, lost]) != gross):
+            credits.append(None)
+            overflow.append(None)
+        else:
+            credits.append(credited)
+            overflow.append(lost)
+    return _sum_amounts(credits), _sum_amounts(overflow)
 
 
 def _sum_metric(results: list[TaskResult], key: str, *, empty: int | None = None) -> int | float | None:

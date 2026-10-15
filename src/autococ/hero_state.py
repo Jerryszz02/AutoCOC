@@ -262,6 +262,70 @@ def recognize_hero_state(
     return result
 
 
+def locate_current_deployed_hero_card(
+    screenshot_path: str | Path, unit_id: str, *, client_version: str | None,
+) -> dict[str, object] | None:
+    """Locate a deployed card from this frame's versioned face and card edges.
+
+    A pre-burst slot is deliberately not an input: post-burst animation may
+    change the card art or outline, so its old coordinates are only history.
+    This locates a card; ``recognize_hero_state`` must still prove HP/deployment.
+    """
+    import cv2
+    import math
+    import numpy as np
+
+    if client_version != "18.647.2":
+        return None
+    from .unit_catalog import CATALOG_ROOT, template_manifest
+
+    image = cv2.resize(read_frame(screenshot_path), (1280, 720), interpolation=cv2.INTER_AREA)
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, np.array([75, 65, 60]), np.array([170, 255, 255]))
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    candidates = []
+    for entry in template_manifest(client_version=client_version)["templates"]:
+        if (entry.get("unit_id") != unit_id or entry.get("surface") != "battle" or
+                entry.get("state") != "deployed" or entry.get("client_version") != client_version):
+            continue
+        portrait_box, card_box = entry.get("source_bbox_1280"), entry.get("source_card_bbox_1280")
+        if (not isinstance(portrait_box, list) or len(portrait_box) != 4 or
+                not isinstance(card_box, list) or len(card_box) != 4 or
+                any(type(v) is not int for v in portrait_box + card_box)):
+            continue
+        template_path = (CATALOG_ROOT / entry["path"]).resolve()
+        if not template_path.is_relative_to(CATALOG_ROOT.resolve()) or not template_path.is_file():
+            continue
+        template = cv2.imdecode(np.fromfile(template_path, np.uint8), cv2.IMREAD_COLOR)
+        search = image[620:690, 550:1010]
+        if template is None or template.shape[0] > search.shape[0] or template.shape[1] > search.shape[1]:
+            continue
+        _, score, _, (x, y) = cv2.minMaxLoc(cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED))
+        if not math.isfinite(score) or score < .94:
+            continue
+        left = 550 + x - (portrait_box[0] - card_box[0])
+        top = 620 + y - (portrait_box[1] - card_box[1])
+        right, bottom = left + card_box[2] - card_box[0], top + card_box[3] - card_box[1]
+        if not (3 <= left < right <= 1277 and 590 <= top <= 605 and 705 <= bottom <= 715):
+            continue
+        # Independent same-frame card sides and closed bottom prevent a face
+        # in battlefield art, a transient fade, or a stale slot from locating it.
+        sides = [max(float((mask[625:695, edge + shift:edge + shift + 3] > 0).mean())
+                     for shift in (-2, -1, 0, 1, 2)) for edge in (left, right - 3)]
+        bottom_contrast = float(gray[709:711, left + 8:right - 8].mean() -
+                                gray[712, left + 8:right - 8].mean())
+        if min(sides) < .5 or bottom_contrast < 40:
+            continue
+        candidates.append((score, (left, top, right, bottom), sides, bottom_contrast, str(template_path)))
+    if not candidates:
+        return None
+    score, box, sides, bottom_contrast, template_path = max(candidates)
+    return {"bbox": list(box), "portrait_score": round(score, 5), "template": template_path,
+            "template_client_version": client_version, "frame": str(screenshot_path),
+            "card_sides": sides, "bottom_contrast": bottom_contrast,
+            "method": "current_versioned_deployed_portrait_and_closed_card"}
+
+
 def _hero_phase_portrait(image, box: tuple[int, int, int, int], unit_id: str) -> dict | None:
     """Match a hero-specific deployed/used face in this card, never its pet."""
     if unit_id not in HERO_PHASE_TEMPLATE_IDS:

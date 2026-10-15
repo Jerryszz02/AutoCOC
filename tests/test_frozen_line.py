@@ -180,6 +180,10 @@ def test_plan_tamper_stale_display_and_unbound_terrain_fail_before_input(monkeyp
 
 def test_optional_identity_verified_hero_is_deployed_without_skill(monkeypatch, tmp_path):
     monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_args: [100, 580, 180, 710])
+    monkeypatch.setattr("autococ.hero_state.locate_current_deployed_hero_card",
+                        lambda path, _hero_id, **_kwargs: {
+                            "bbox": [610, 595, 699, 711], "frame": str(path),
+                            "template_client_version": "18.647.2"})
     monkeypatch.setattr("autococ.hero_state.recognize_hero_state",
                         lambda path, bbox, **_kwargs: {"deployed": True, "frame": str(path),
                             "evidence": {"portrait_identity": {"unit_id": "grand_warden",
@@ -196,6 +200,55 @@ def test_optional_identity_verified_hero_is_deployed_without_skill(monkeypatch, 
     assert len([action for action in plan.actions if action.unit_id == "grand_warden"]) == 2
     execute_frozen_line(session, plan, clock=lambda: 102., sleep=lambda _seconds: None)
     assert session.frozen_line_receipt["heroes"][0]["verified"] is True
+
+
+def test_post_hero_animation_reobserves_only_after_burst_with_fresh_frame(monkeypatch, tmp_path):
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_args: [100, 580, 180, 710])
+    monkeypatch.setattr("autococ.unit_catalog.recognize_card_identity",
+                        lambda *_args, **_kwargs: {"unit_id": "grand_warden", "confidence": .99,
+                                                     "version_verified": True})
+    monkeypatch.setattr("autococ.images.read_frame", lambda *_args: __import__("numpy").zeros((720, 1280, 3), dtype="uint8"))
+    before, selected = frame("before", 99, root=tmp_path, heroes=True), frame("selected", 100, root=tmp_path, heroes=True)
+    first, stable = frame("post-faded", 103, root=tmp_path, post=True), frame("post-stable", 104, root=tmp_path, post=True)
+    session = Session(selected, first)
+    pending = iter((first, stable))
+    def observe(purpose):
+        session.observes.append(purpose)
+        session.last_snapshot = next(pending)
+        return session.last_snapshot
+    session.observe = observe
+    monkeypatch.setattr("autococ.hero_state.locate_current_deployed_hero_card",
+                        lambda path, _hero_id, **_kwargs: None if str(path) == str(first.screenshot_path) else {
+                            "bbox": [610, 595, 699, 711], "frame": str(path),
+                            "template_client_version": "18.647.2"})
+    monkeypatch.setattr("autococ.hero_state.recognize_hero_state",
+                        lambda path, _bbox, **_kwargs: {"deployed": True, "frame": str(path),
+                            "evidence": {"portrait_identity": {"unit_id": "grand_warden",
+                                "version_verified": True, "template_client_version": "18.647.2"}}})
+    plan = freeze(session, selected, before, heroes=("grand_warden",))
+    assert execute_frozen_line(session, plan, clock=lambda: 102., sleep=lambda _seconds: None) is stable
+    assert session.observes == ["frozen-line-post", "frozen-line-post-recheck"]
+    assert len(session.inputs) == len(plan.actions)
+    assert [row["heroes"] for row in session.frozen_line_receipt["verification_frames"]] == [[False], [True]]
+    assert session.frozen_line_receipt["completed"] is True
+
+
+def test_post_recheck_rejects_reused_frame_without_more_input(monkeypatch, tmp_path):
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_args: [100, 580, 180, 710])
+    monkeypatch.setattr("autococ.unit_catalog.recognize_card_identity",
+                        lambda *_args, **_kwargs: {"unit_id": "grand_warden", "confidence": .99,
+                                                     "version_verified": True})
+    monkeypatch.setattr("autococ.images.read_frame", lambda *_args: __import__("numpy").zeros((720, 1280, 3), dtype="uint8"))
+    monkeypatch.setattr("autococ.hero_state.locate_current_deployed_hero_card", lambda *_args, **_kwargs: None)
+    before, selected, post = (frame("before", 99, root=tmp_path, heroes=True),
+                              frame("selected", 100, root=tmp_path, heroes=True),
+                              frame("post", 103, root=tmp_path, post=True))
+    session = Session(selected, post)
+    plan = freeze(session, selected, before, heroes=("grand_warden",))
+    with pytest.raises(DeploymentError, match="Fresh post-burst battle frame unavailable"):
+        execute_frozen_line(session, plan, clock=lambda: 102., sleep=lambda _seconds: None)
+    assert len(session.inputs) == len(plan.actions)
+    assert session.observes == ["frozen-line-post", "frozen-line-post-recheck"]
 
 
 def test_missing_post_count_evidence_fails_after_one_burst_without_retry(monkeypatch, tmp_path):

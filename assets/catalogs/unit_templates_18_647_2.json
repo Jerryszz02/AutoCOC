@@ -431,6 +431,94 @@
       ],
       "state": "initial_scout",
       "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "grand_warden",
+      "surface": "battle",
+      "path": "units/grand_warden_battle_deployed_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261015-215245-013077-d6fb30ed/frames/00016-battle-settlement.png",
+      "source_bbox_1280": [
+        628,
+        632,
+        665,
+        673
+      ],
+      "source_card_bbox_1280": [
+        599,
+        595,
+        688,
+        711
+      ],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "da3e4e498182ebf3fdef6b381d526c81f683261bb51e59e6fcbad9324230b76c",
+      "template_sha256": "674cbc20cff8186dc8b547774640fcefb8fdfe61714f64f246a8660f0bed52a6"
+    },
+    {
+      "unit_id": "dragon_duke",
+      "surface": "battle",
+      "path": "units/dragon_duke_battle_deployed_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261015-215245-013077-d6fb30ed/frames/00016-battle-settlement.png",
+      "source_bbox_1280": [
+        721,
+        632,
+        760,
+        674
+      ],
+      "source_card_bbox_1280": [
+        696,
+        595,
+        784,
+        711
+      ],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "da3e4e498182ebf3fdef6b381d526c81f683261bb51e59e6fcbad9324230b76c",
+      "template_sha256": "8f55b818a85aae3cfae9d45acbed70ff5dd55ee580f278656d111dc64821d025"
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "battle",
+      "path": "units/minion_prince_battle_deployed_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261015-215245-013077-d6fb30ed/frames/00016-battle-settlement.png",
+      "source_bbox_1280": [
+        816,
+        632,
+        855,
+        675
+      ],
+      "source_card_bbox_1280": [
+        792,
+        595,
+        881,
+        711
+      ],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "da3e4e498182ebf3fdef6b381d526c81f683261bb51e59e6fcbad9324230b76c",
+      "template_sha256": "d91f68fd8ccdbdd8e735f48a9006ca2cbfcdde811df312facaed7494d7dfd303"
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "battle",
+      "path": "units/archer_queen_battle_deployed_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261015-215245-013077-d6fb30ed/frames/00016-battle-settlement.png",
+      "source_bbox_1280": [
+        916,
+        632,
+        953,
+        674
+      ],
+      "source_card_bbox_1280": [
+        889,
+        595,
+        978,
+        711
+      ],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "da3e4e498182ebf3fdef6b381d526c81f683261bb51e59e6fcbad9324230b76c",
+      "template_sha256": "e32b9c740d882e7e366181a60af4fbca4e958d5728d29d1d2cdee4759b60455c"
     }
   ]
 }

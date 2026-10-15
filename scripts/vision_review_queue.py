@@ -37,8 +37,11 @@ def review_queue(session_dirs: list[Path], collection_manifests: list[Path], *,
     """Emit candidates only; every R state/event and S/B annotation remains pending."""
     if not client_version or client_version == "unknown":
         raise ValueError("Review queue needs an explicit known client version")
+    taxonomy = json.loads((Path(__file__).resolve().parents[1] / "training" / "vision" /
+                           "taxonomy.json").read_text(encoding="utf-8"))
+    building_ids = {entry["name"]: entry["id"] for entry in taxonomy["building_classes"]}
     sessions, collections = [], []
-    annotations = {}
+    annotations, building_scopes = {}, {}
     for supplied in annotation_files or []:
         path = Path(supplied).resolve()
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -51,10 +54,22 @@ def review_queue(session_dirs: list[Path], collection_manifests: list[Path], *,
             item = row.get("buildings") or {}
             if (row.get("client_version") != client_version or row.get("prototype_only") is not True
                     or item.get("review_status") != "reviewed" or item.get("review_method") != "agent_visual"
-                    or item.get("complete") is not True or not item.get("reviewer")
+                    or not item.get("reviewer")
                     or not item.get("review_evidence")):
                 raise ValueError(f"Annotation is not a reviewed current-version prototype: {sample_id}")
+            classes = item.get("complete_classes")
+            if item.get("complete") is True:
+                if classes is not None:
+                    raise ValueError(f"Invalid reviewed building scope: {sample_id}")
+            elif (item.get("complete") is not False or not isinstance(classes, list) or not classes
+                  or any(not isinstance(name, str) or name not in building_ids for name in classes)
+                  or len(set(classes)) != len(classes)):
+                raise ValueError(f"Invalid reviewed building scope: {sample_id}")
             annotations[sample_id] = (row, path)
+            building_scopes[sample_id] = ({"classes": list(classes),
+                                          "stable_ids": {name: building_ids[name] for name in classes},
+                                          "output_indices": {name: index for index, name in enumerate(classes)}}
+                                         if classes is not None else None)
     seen_frames = set()
     for supplied in session_dirs:
         directory = Path(supplied).resolve()
@@ -136,7 +151,10 @@ def review_queue(session_dirs: list[Path], collection_manifests: list[Path], *,
                                "scene_label": None,
                                "building_review": ({"status": "agent_visual_reviewed_prototype",
                                                     "reviewer": annotation["buildings"]["reviewer"],
-                                                    "annotation_file": str(annotation_path)}
+                                                    "annotation_file": str(annotation_path),
+                                                    "complete": annotation["buildings"]["complete"],
+                                                    "complete_classes": annotation["buildings"].get("complete_classes"),
+                                                    "building_scope": building_scopes[row["sample_id"]]}
                                                    if annotation else None),
                                "human_review_status": "pending",
                                "review_status": "agent_visual_reviewed_prototype" if annotation else "pending"})

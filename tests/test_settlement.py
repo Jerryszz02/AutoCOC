@@ -26,6 +26,50 @@ class EarnedStarShapeTests(unittest.TestCase):
         image[65:220, 430:845] = crop
         return image
 
+    def current_two_star_region(self) -> np.ndarray:
+        crop = cv2.imdecode(np.fromfile(
+            self.root / "tests/fixtures/settlement-two-stars-current-20261015.png",
+            dtype=np.uint8), cv2.IMREAD_COLOR)
+        image = np.zeros((720, 1280, 3), np.uint8)
+        image[20:220, 430:845] = crop
+        return image
+
+    def test_current_real_two_star_screen_needs_both_complete_five_concavity_shapes(self):
+        image = self.current_two_star_region()
+        result = recognize_earned_stars(image)
+        self.assertEqual(result["count"], 2)
+        self.assertEqual(result["evidence"]["roi_at_1280x720"], [430, 20, 845, 220])
+        self.assertEqual(len(result["evidence"]["shapes"]), 2)
+        for shape in result["evidence"]["shapes"]:
+            self.assertTrue(shape["verified"])
+            self.assertEqual(len(shape["concavity_depths"]), 5)
+
+        texts = [OCRText("胜利", .99, (608, 196, 671, 236)),
+                 OCRText("74%", .99, (610, 102, 672, 132))]
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "two-stars.png"
+            cv2.imencode(".png", image)[1].tofile(path)
+            vision = ScreenshotRecognizer(provider=Mock())
+            self.assertEqual(vision._settlement_observation(path, texts, (1280, 720))["stars"], 2)
+            # Victory text and percentage must not infer a count if star pixels are absent.
+            blank = image.copy()
+            blank[20:175, 430:845] = 0
+            cv2.imencode(".png", blank)[1].tofile(path)
+            self.assertIsNone(vision._settlement_observation(path, texts, (1280, 720))["stars"])
+
+    def test_current_real_two_star_crop_or_flash_remains_unknown(self):
+        original = self.current_two_star_region()
+        for mode in ("missing_center_tip", "flash_shape", "roi_edge_fragment"):
+            with self.subTest(mode=mode):
+                image = original.copy()
+                if mode == "missing_center_tip":
+                    image[20:62, 600:690] = 0
+                elif mode == "flash_shape":
+                    cv2.circle(image, (790, 75), 24, (240, 240, 240), -1)
+                else:
+                    cv2.rectangle(image, (430, 95), (482, 154), (240, 240, 240), -1)
+                self.assertIsNone(recognize_earned_stars(image)["count"])
+
     def test_two_real_complete_one_star_outlines(self):
         # Crops from hero-follow-1 frame 00060 and the earlier 20260924
         # victory reread frame 00061; neither needs victory text for counting.

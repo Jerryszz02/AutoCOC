@@ -43,7 +43,9 @@ def recognize_earned_stars(image) -> dict:
     import cv2
     import numpy as np
 
-    roi = (430, 65, 845, 220)
+    # The enlarged centre victory star reaches y=27 in the current client;
+    # y=65 cuts off its tip before the five-concavity check can run.
+    roi = (430, 20, 845, 220)
     left, top, right, bottom = roi
     hsv = cv2.cvtColor(image[top:bottom, left:right], cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(hsv, np.array([0, 0, 140]), np.array([180, 75, 255]))
@@ -59,7 +61,9 @@ def recognize_earned_stars(image) -> dict:
         shape = {"bbox_at_1280x720": [left + x, top + y, left + x + width, top + y + height],
                  "area": area, "verified": False}
         evidence["shapes"].append(shape)
-        if not (80 <= width <= 170 and 80 <= height <= 150 and .75 <= width / height <= 1.35):
+        if not (0 < x and 0 < y and x + width < right - left and y + height < bottom - top
+                and 80 <= width <= 185 and 80 <= height <= 165
+                and .75 <= width / height <= 1.35):
             valid = False
             continue
         solidity = area / cv2.contourArea(cv2.convexHull(contour))

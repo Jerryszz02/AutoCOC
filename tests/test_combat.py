@@ -136,6 +136,24 @@ class CombatTests(unittest.TestCase):
         self.scout_ready = patcher.start()
         self.addCleanup(patcher.stop)
 
+    def test_line_round_records_verified_storage_overflow_without_inventing_bonus(self):
+        frames = complete_frames()
+        frames[6].observations["resources"]["gold"] = 1100
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        session.client_version = "18.647.2"
+        proof = {"capacity": 1100, "resource": "gold", "frame": "gold-detail.png"}
+        with patch("autococ.combat.read_resource_capacity",
+                   return_value=(proof, frames[6], [Path("gold-detail.png")])) as read:
+            result = battle(session)
+        read.assert_called_once()
+        self.assertEqual(result.status, "succeeded")
+        self.assertTrue(result.metrics["inventory_reconciled"])
+        self.assertEqual(result.metrics["inventory_reconciliation_method"], "capacity_capped")
+        self.assertEqual(result.metrics["battle_credited_gold"], 110)
+        self.assertEqual(result.metrics["overflow_gold"], 10)
+        self.assertEqual(result.metrics["settlement_observed"]["bonus"]["gold"], 20)
+
     def test_unreleased_vision_model_is_rejected_before_enemy_search(self):
         session = FakeSession(complete_frames())
         session.config.vision_agent = VisionAgentConfig(enabled=True, model_dir="models")
@@ -335,7 +353,7 @@ class CombatTests(unittest.TestCase):
         self.assertEqual(result.reason, "after input")
         self.assertNotIn("preparation-failure-check", session.observe_labels)
 
-    def test_two_edge_round_accepts_loss_capped_inventory_and_first_low_loot_opponent(self):
+    def test_two_edge_round_records_loss_but_rejects_unreconciled_inventory(self):
         frames = complete_frames()
         frames[3].observations["resources"] = {"gold": 0, "elixir": 0}
         frames[5].observations["settlement"].update(stars=0, percentage=20)
@@ -345,10 +363,12 @@ class CombatTests(unittest.TestCase):
         session = FakeSession(frames)
         session.config.battle = replace(session.config.battle, strategy="two_edge")
         result = battle(session)
-        self.assertEqual(result.status, "succeeded")
+        self.assertEqual(result.status, "failed")
         self.assertEqual(result.metrics["rounds_completed"], 1)
-        self.assertFalse(result.metrics["victory"])
+        self.assertEqual(result.metrics["settlement_observed"]["stars"], 0)
+        self.assertIsNone(result.metrics["victory"])
         self.assertFalse(result.metrics["inventory_reconciled"])
+        self.assertNotIn("loot_gold", result.metrics)
         self.assertTrue(result.metrics["searches"][0]["decision"]["should_attack"])
         self.assertEqual(session.last_snapshot.scene, "village")
 
@@ -383,6 +403,7 @@ class CombatTests(unittest.TestCase):
 
     def test_shared_filter_skips_low_resource_then_deploys_same_line_strategy(self):
         frames = complete_frames()
+        frames[-1].observations["resources"]["gold"] -= 10  # Two verified searches cost 20 in total.
         low = frame(30, "enemy_village", resources={"gold": 10, "elixir": 10, "dark_elixir": 0})
         frames.insert(3, low)
         session = FakeSession(frames)
@@ -407,6 +428,7 @@ class CombatTests(unittest.TestCase):
 
     def test_dark_elixir_only_filter_can_accept_next_target_with_unknown_gold_elixir(self):
         frames = complete_frames()
+        frames[-1].observations["resources"]["gold"] -= 10  # Two verified searches cost 20 in total.
         low = frame(30, "enemy_village", resources={"gold": None, "elixir": None, "dark_elixir": 8000})
         unchanged = frame(31, "enemy_village", resources={"gold": None, "elixir": None, "dark_elixir": 8000})
         high = frame(32, "enemy_village", resources={"gold": None, "elixir": None, "dark_elixir": 10000})
@@ -555,7 +577,7 @@ class CombatTests(unittest.TestCase):
                 self.assertIn("Unrecognized popup", result.reason)
                 self.assertFalse(any("Recognized confirm" in reason for _, reason in session.taps))
 
-    def test_edrag_round_returns_home_without_inventory_or_ability_requirements(self):
+    def test_edrag_round_returns_home_but_rejects_unreconciled_inventory(self):
         frames = complete_frames()
         frames[3].observations["resources"] = {"gold": 0, "elixir": 0}
         frames[5].observations["settlement"].update(stars=0, percentage=20)
@@ -565,8 +587,10 @@ class CombatTests(unittest.TestCase):
         session = FakeSession(frames)
         session.config.battle = replace(session.config.battle, strategy="edrag_line")
         result = battle(session)
-        self.assertEqual(result.status, "succeeded")
-        self.assertEqual(result.reason, "edrag_line_troops_settlement_and_return_verified")
+        self.assertEqual(result.status, "failed")
+        self.assertTrue(result.metrics["returned_home"])
+        self.assertEqual(result.metrics["settlement_observed"]["stars"], 0)
+        self.assertIsNone(result.metrics["victory"])
         self.assertEqual(session.last_snapshot.scene, "village")
 
     def test_line_result_waits_for_two_distinct_stable_frames_after_count_up(self):
@@ -673,9 +697,35 @@ class CombatTests(unittest.TestCase):
                 session = FakeSession(frames)
                 session.config.battle = replace(session.config.battle, strategy="edrag_line")
                 result = battle(session)
-                self.assertEqual(result.status, "succeeded", result.reason)
+                self.assertEqual(result.status, "failed", result.reason)
+                self.assertTrue(result.metrics["returned_home"])
+                self.assertIsNotNone(result.metrics["settlement_observed"])
                 self.assertFalse(result.metrics["inventory_reconciled"])
                 self.assertNotIn("inventory_delta", result.metrics)
+                self.assertIsNone(result.metrics.get("victory"))
+                self.assertIsNone(result.metrics.get("stars"))
+                self.assertNotIn("loot_gold", result.metrics)
+                self.assertNotIn("bonus_gold", result.metrics)
+                self.assertFalse(any(name == "battle_round_verified" for name, _ in session.events))
+
+    def test_line_mismatched_return_inventory_does_not_publish_win_or_rewards(self):
+        frames = complete_frames()
+        frames[6].observations["resources"]["gold"] += 1
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertTrue(result.metrics["returned_home"])
+        self.assertEqual(result.metrics["rounds_completed"], 1)
+        self.assertEqual(result.metrics["settlement_observed"]["stars"], 2)
+        self.assertFalse(result.metrics["inventory_reconciled"])
+        self.assertIsNone(result.metrics.get("victory"))
+        self.assertIsNone(result.metrics.get("stars"))
+        self.assertNotIn("loot_gold", result.metrics)
+        self.assertNotIn("bonus_gold", result.metrics)
+        self.assertFalse(any(name == "battle_round_verified" for name, _ in session.events))
+        ledger = resource_metrics(RunStats(task_results=[result]), elapsed_sec=60)
+        self.assertIsNone(ledger["resources"]["gold"]["battle_loot"])
 
     def test_settlement_wait_can_be_longer_without_relaxing_deployment_deadline(self):
         for configured, expected in ((None, 180), (1200, 1200)):

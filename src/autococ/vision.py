@@ -1640,7 +1640,7 @@ class ScreenshotRecognizer:
                     value = ratio[0] if ratio is not None else None
                 if value is not None and left >= width * 0.78 and top * height <= (y1 + y2) / 2 <= bottom * height:
                     candidates.append((item.confidence, value, item))
-            if not candidates or (new_home_hud and name == "gold"):
+            if not candidates or (new_home_hud and (name == "gold" or len(candidates) > 1)):
                 read_line = getattr(self.provider, "recognize_line", None)
                 if read_line is not None:
                     source_roi = scale_box(line_rois[name], from_resolution=(1280, 720), to_resolution=source_resolution)
@@ -1653,7 +1653,7 @@ class ScreenshotRecognizer:
                         if value is not None:
                             line_candidates.append((result.confidence, value, self._baseline_result(result, source_resolution)))
                     if line_candidates:
-                        if new_home_hud and name == "gold" and len(candidates) > 1:
+                        if new_home_hud and len(candidates) > 1:
                             fragments = "".join(
                                 re.sub(r"\D", "", item.text)
                                 for _, _, item in sorted(candidates, key=lambda candidate: candidate[2].bbox[0])
@@ -1666,7 +1666,7 @@ class ScreenshotRecognizer:
                         if line_candidates:
                             candidates = line_candidates
                             source = "line_roi"
-            if new_home_hud and name == "gold" and source != "line_roi" and len(candidates) != 1:
+            if new_home_hud and source != "line_roi" and len(candidates) != 1:
                 # The new wide balance can be split into overlapping OCR fragments.
                 candidates = []
             if candidates:

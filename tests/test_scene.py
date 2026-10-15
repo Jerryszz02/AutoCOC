@@ -387,6 +387,45 @@ class SceneTests(unittest.TestCase):
             self.assertEqual(missing_build.scene, SCENE_UNKNOWN)
             self.assertEqual(missing_build.observations["buttons"], [])
 
+    def test_current_split_inventory_requires_independent_line_agreement(self) -> None:
+        provider = Mock()
+        recognizer = ScreenshotRecognizer(provider=provider)
+        for name, y, fragments, total in (
+            ("gold", 38, ("9", "269566"), 9269566),
+            ("elixir", 87, ("9001", "667"), 9001667),
+            ("dark_elixir", 136, ("314", "453"), 314453),
+            ("gems", 185, ("2", "17"), 217),
+        ):
+            readings = [OCRText(fragments[0], .9999, (1106, y - 12, 1173, y + 12)),
+                        OCRText(fragments[1], .9998, (1169, y - 12, 1220, y + 12))]
+            for line, expected in ((str(total), total), (str(total + 1), None),
+                                   (fragments[0], None), ("", None)):
+                with self.subTest(resource=name, line=line):
+                    provider.recognize_line.return_value = [OCRText(line, .9935, (1008, y - 12, 1240, y + 12))]
+                    values, evidence = recognizer._village_resources(Path("current.png"), readings,
+                                                                    (1280, 720), new_home_hud=True)
+                    self.assertEqual(values[name], expected)
+                    if expected is not None:
+                        self.assertEqual(evidence[name]["source"], "line_roi")
+            provider.recognize_line.return_value = [OCRText(str(total), .89, None)]
+            self.assertIsNone(recognizer._village_resources(Path("current.png"), readings,
+                                                           (1280, 720), new_home_hud=True)[0][name])
+
+    def test_current_split_elixir_replays_anonymized_live_hud(self) -> None:
+        import hashlib
+        import json
+
+        fixture = Path(__file__).parent / "fixtures/home_inventory_split_elixir_18_647_2.png"
+        provenance = json.loads(fixture.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+        self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(), provenance["fixture_sha256"])
+        readings = [OCRText("9001", .99988, (1106, 74, 1173, 99)),
+                    OCRText("667", .99979, (1169, 74, 1220, 100))]
+        values, evidence = ScreenshotRecognizer()._village_resources(fixture, readings, (2560, 1440),
+                                                                     new_home_hud=True)
+        self.assertEqual(values["elixir"], 9001667)
+        self.assertEqual(evidence["elixir"]["source"], "line_roi")
+        self.assertGreaterEqual(evidence["elixir"]["confidence"], .9)
+
     def test_checklist_home_icon_requires_current_version_and_other_hud_anchors(self) -> None:
         import cv2
         import numpy as np

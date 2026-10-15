@@ -52,6 +52,8 @@ def test_review_queue_hashes_originals_and_never_fills_state_truth():
         assert report["collections"][0]["samples"][0]["scene_label"] is None
         assert report["collections"][0]["samples"][0]["review_status"] == "agent_visual_reviewed_prototype"
         assert report["collections"][0]["samples"][0]["human_review_status"] == "pending"
+        assert report["collections"][0]["samples"][0]["building_review"]["complete"] is True
+        assert report["collections"][0]["samples"][0]["building_review"]["building_scope"] is None
         sample.write_bytes(b"changed")
         with pytest.raises(ValueError, match="hash mismatch"):
             review_queue([live], [manifest], client_version="18.647.2", annotation_files=[annotation])
@@ -81,3 +83,43 @@ def test_review_queue_only_accepts_bound_capture_request_start_utc():
         observed["observations"]["capture_timestamp_basis"] = "capture_request_start"
         observed["observations"]["captured_at_utc"] = "not-a-time"
         assert read()["capture_started_utc"] is None
+
+
+def test_review_queue_preserves_explicit_partial_building_scope():
+    with TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        image = root / "one.png"
+        image.write_bytes(b"reviewed source")
+        manifest = root / "manifest.jsonl"
+        manifest.write_text(json.dumps({"sample_id": "C1", "client_version": "18.647.2",
+            "image_path": "one.png", "file_sha256": _hash(image)}) + "\n", encoding="utf-8")
+        annotation = root / "reviewed.jsonl"
+        row = {"sample_id": "C1", "client_version": "18.647.2", "prototype_only": True,
+               "source_sha256": _hash(image), "buildings": {
+                   "complete": False, "complete_classes": ["town_hall", "air_defense"],
+                   "review_status": "reviewed", "review_method": "agent_visual",
+                   "reviewer": "fixture", "review_evidence": "original inspected"}}
+
+        def read():
+            annotation.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            return review_queue([], [manifest], client_version="18.647.2",
+                                annotation_files=[annotation])["collections"][0]["samples"][0]
+
+        building = read()["building_review"]
+        assert building["complete"] is False
+        assert building["complete_classes"] == ["town_hall", "air_defense"]
+        assert building["building_scope"] == {"classes": ["town_hall", "air_defense"],
+                                              "stable_ids": {"town_hall": 1, "air_defense": 3},
+                                              "output_indices": {"town_hall": 0, "air_defense": 1}}
+        assert read()["human_review_status"] == "pending"
+        for invalid in ([], ["town_hall", "town_hall"], ["invented"], "town_hall"):
+            row["buildings"]["complete_classes"] = invalid
+            with pytest.raises(ValueError, match="scope"):
+                read()
+        row["buildings"].update(complete=False, complete_classes=None)
+        with pytest.raises(ValueError, match="scope"):
+            read()
+        row["buildings"].update(complete=False, complete_classes=["town_hall", "air_defense"])
+        row["source_sha256"] = "0" * 64
+        with pytest.raises(ValueError, match="source hash"):
+            read()

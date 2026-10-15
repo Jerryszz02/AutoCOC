@@ -188,7 +188,85 @@ def _post_troop_reading(session: Any, post_path: Any, source_path: str,
         return {}
     observer = BattleObserver(session.recognizer)
     observer.cards[round(point[0])] = (bbox, cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY).copy())
-    return observer.count(post_path, current, {"point": list(point), "bbox": list(bbox)}) or {}
+    reading = observer.count(post_path, current, {"point": list(point), "bbox": list(bbox)})
+    if reading:
+        return reading
+    # Full-frame OCR can locate a gray card's small x0 while the broad header
+    # crop is uncertain. Its low-confidence number is *only* a locator; truth
+    # still requires a new >=.9 line read and an independent current portrait.
+    snapshot = getattr(session, "last_snapshot", None)
+    if snapshot is None or str(snapshot.screenshot_path) != str(post_path):
+        return {}
+    left, top, right, bottom = bbox
+    candidates = []
+    for item in snapshot.observations.get("ocr", []):
+        if not isinstance(item, dict) or not isinstance(item.get("bbox"), (list, tuple)):
+            continue
+        box = item["bbox"]
+        if (len(box) == 4 and all(type(v) is int for v in box) and
+                left <= box[0] < box[2] <= right + 3 and
+                top - 5 <= box[1] < box[3] <= top + 38 and
+                _COUNT.fullmatch(str(item.get("text", "")).strip())):
+            candidates.append(item)
+    if len(candidates) > 1:
+        return {}
+    if candidates:
+        candidate = candidates[0]
+        locator_source = "current_frame_ocr_box"
+    else:
+        # A preceding post-burst frame may supply only *geometry*. Read the
+        # quantity afresh below; the previous frame's number is never reused.
+        hint = getattr(session, "_frozen_count_roi_hints", {}).get(tuple(bbox))
+        if not isinstance(hint, (list, tuple)) or len(hint) != 4:
+            return {}
+        candidate = {"bbox": list(hint), "text": None, "confidence": None}
+        locator_source = "prior_post_frame_roi_geometry"
+    region = cv2.cvtColor(current[max(0, top + 15):min(720, bottom - 20),
+                                      max(0, left - 12):min(1280, right + 12)], cv2.COLOR_BGR2GRAY)
+    portrait = cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY)
+    matches = []
+    for scale in (1., 1.05, 1.1):
+        template = cv2.resize(portrait, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        if template.shape[0] <= region.shape[0] and template.shape[1] <= region.shape[1]:
+            _, score, _, (x, y) = cv2.minMaxLoc(cv2.matchTemplate(region, template, cv2.TM_CCOEFF_NORMED))
+            if math.isfinite(score):
+                matches.append((score, scale, x, y))
+    if not matches:
+        return {}
+    score, scale, x, y = max(matches)
+    estimated_left = round(max(0, left - 12) + x - 20 * scale)
+    estimated_top = round(max(0, top + 15) + y - 38 * scale)
+    if score < .92 or abs(estimated_left - left) > 3 or abs(estimated_top - top) > 3:
+        return {}
+    from .locator import scale_box
+
+    original = read_frame(post_path)
+    native_box = scale_box(tuple(candidate["bbox"]), from_resolution=(1280, 720),
+                           to_resolution=(original.shape[1], original.shape[0]))
+    a, b, c, d = native_box
+    crop = original[b:d, a:c]
+    reader = getattr(session.recognizer.provider, "recognize_line_image", None)
+    if crop.size == 0 or not callable(reader):
+        return {}
+    binary = cv2.threshold(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), 120, 255, cv2.THRESH_BINARY)[1]
+    reads = reader(binary)
+    if len(reads) != 1:
+        return {}
+    narrow = reads[0]
+    count = _COUNT.fullmatch(str(narrow.text).strip())
+    locator_count = _COUNT.fullmatch(str(candidate["text"]).strip()) if candidate["text"] is not None else None
+    if (count is None or (locator_source == "current_frame_ocr_box" and
+                           (locator_count is None or count[1] != locator_count[1])) or
+            not math.isfinite(narrow.confidence) or narrow.confidence < .9):
+        return {}
+    return {"count": int(count[1]), "confidence": narrow.confidence,
+            "frame": str(post_path), "slot_bbox": list(bbox), "roi": list(candidate["bbox"]),
+            "readings": [{"text": narrow.text, "confidence": narrow.confidence,
+                          "bbox": list(candidate["bbox"]), "source": "current_ocr_box_threshold_line"}],
+            "portrait_score": score, "portrait_scale": scale,
+            "portrait_source": "current_frame_saved_battle_portrait",
+            "locator": {"source": locator_source, "text": candidate["text"], "bbox": candidate["bbox"],
+                        "confidence": candidate.get("confidence")}}
 
 
 def freeze_model_free_line(session: Any, selected: SceneSnapshot, *,
@@ -446,72 +524,106 @@ def execute_frozen_line(session: Any, plan: FrozenLinePlan, *,
     receipt["burst_elapsed_sec"] = clock() - start
     receipt["input_sent"] = len(receipts) == len(plan.actions) and receipt["burst_elapsed_sec"] <= plan.burst_limit_sec
     receipt["burst_pass"] = receipt["input_sent"]
+    session._frozen_count_roi_hints = {}
     try:
         post = session.observe("frozen-line-post")
     except Exception as exc:
         receipt["error"] = f"Post-burst observation failed: {exc}"
         raise DeploymentError(receipt["error"], partial_receipt=receipt) from exc
-    receipt["evidence"].append(str(post.screenshot_path))
-    observed_at = post.observations.get("observed_at_monotonic")
-    post_source = post.observations.get("source_resolution")
-    post_baseline = post.observations.get("baseline_resolution")
-    if (post.scene not in {"enemy_village", "battle"} or not math.isfinite(post.confidence) or post.confidence < .8 or
-            type(observed_at) not in (int, float) or not math.isfinite(observed_at) or
-            observed_at < receipts[-1]["done_at"] or
-            not isinstance(post_source, (list, tuple)) or tuple(post_source) != plan.frame.source_resolution or
-            not isinstance(post_baseline, (list, tuple)) or tuple(post_baseline) != plan.frame.resolution):
-        receipt["error"] = "Fresh post-burst battle frame unavailable"
-        raise DeploymentError(receipt["error"], partial_receipt=receipt)
-    battle = post.observations.get("battle")
-    slots = battle.get("slots") if isinstance(battle, dict) else []
-    if not isinstance(slots, list):
-        slots = []
-    troop_results = []
-    for unit_id, source, initial, point, bbox in plan.troop_cards:
-        # Full-frame recognition intentionally omits gray spent cards. Revisit the
-        # frozen original box with its pre-burst portrait, then read this frame's x0.
+    previous_path = None
+    after_time = receipts[-1]["done_at"]
+    for attempt in range(3):
+        receipt["evidence"].append(str(post.screenshot_path))
+        observed_at = post.observations.get("observed_at_monotonic")
+        post_source = post.observations.get("source_resolution")
+        post_baseline = post.observations.get("baseline_resolution")
+        if (post.scene not in {"enemy_village", "battle"} or
+                type(post.confidence) not in (int, float) or not math.isfinite(post.confidence) or
+                post.confidence < .8 or type(observed_at) not in (int, float) or
+                not math.isfinite(observed_at) or observed_at <= after_time or
+                str(post.screenshot_path) == previous_path or
+                not isinstance(post_source, (list, tuple)) or tuple(post_source) != plan.frame.source_resolution or
+                not isinstance(post_baseline, (list, tuple)) or tuple(post_baseline) != plan.frame.resolution):
+            receipt["error"] = "Fresh post-burst battle frame unavailable"
+            raise DeploymentError(receipt["error"], partial_receipt=receipt)
+        after_time, previous_path = observed_at, str(post.screenshot_path)
+        battle = post.observations.get("battle")
+        slots = battle.get("slots") if isinstance(battle, dict) else []
+        if not isinstance(slots, list):
+            slots = []
+        troop_results = []
+        for unit_id, source, initial, point, bbox in plan.troop_cards:
+            # Spent cards can disappear from full-frame slots. Rebind their
+            # saved portrait and read the quantity in this particular frame.
+            try:
+                reading = _post_troop_reading(session, post.screenshot_path, plan.toolbar_before_frame_id,
+                                              point, bbox)
+            except Exception as exc:
+                reading = {"error": str(exc)}
+            conflicting = [row for row in slots if isinstance(row, dict) and
+                           (row.get("unit_id") == unit_id or row.get("bbox") == list(bbox)) and
+                           type(row.get("count")) is int and row["count"] > 0]
+            score = reading.get("confidence")
+            portrait = reading.get("portrait_score")
+            reads = reading.get("readings")
+            explicit = [item for item in reads if isinstance(item, dict) and
+                        type(item.get("confidence")) in (int, float) and item["confidence"] >= .9 and
+                        (match := _COUNT.fullmatch(str(item.get("text", "")).strip())) is not None and int(match[1]) == 0] if isinstance(reads, list) else []
+            valid = (reading.get("count") == 0 and reading.get("frame") == str(post.screenshot_path) and
+                     reading.get("slot_bbox") == list(bbox) and not conflicting and
+                     type(score) in (int, float) and math.isfinite(score) and score >= .9 and
+                     type(portrait) in (int, float) and math.isfinite(portrait) and portrait >= .92 and
+                     reading.get("portrait_source") == "current_frame_saved_battle_portrait" and
+                     bool(explicit))
+            if valid and isinstance(reading.get("roi"), list):
+                session._frozen_count_roi_hints[tuple(bbox)] = reading["roi"]
+            troop_results.append({"unit_id": unit_id, "initial": initial, "post_count": 0 if valid else None,
+                                  "verified": valid, "reading": reading})
+        receipt["troops"] = troop_results
+        receipt["consumption_events"] = [
+            {"unit_id": item["unit_id"], "before_count": item["initial"],
+             "after_count": item["post_count"], "after_frame": str(post.screenshot_path),
+             "verified": item["verified"]} for item in troop_results]
+        hero_results = []
+        if plan.hero_ids:
+            from .hero_state import locate_current_deployed_hero_card, recognize_hero_state
+            used_boxes = set()
+            for hero_id, _prior_bbox in plan.hero_cards:
+                locator = locate_current_deployed_hero_card(post.screenshot_path, hero_id,
+                                                           client_version=plan.client_version)
+                state = {"deployed": None, "frame": str(post.screenshot_path),
+                         "evidence": {"reason": "current_hero_card_unlocated"}}
+                box = tuple(locator["bbox"]) if locator is not None else None
+                if box is not None and box not in used_boxes:
+                    used_boxes.add(box)
+                    state = recognize_hero_state(post.screenshot_path, box,
+                                                 baseline_resolution=(1280, 720),
+                                                 unit_id=hero_id, client_version=plan.client_version)
+                identity = (state.get("evidence") or {}).get("portrait_identity") or {}
+                verified = (locator is not None and box is not None and
+                            locator.get("frame") == str(post.screenshot_path) and
+                            locator.get("template_client_version") == plan.client_version and
+                            state.get("deployed") is True and state.get("frame") == str(post.screenshot_path) and
+                            identity.get("unit_id") == hero_id and identity.get("version_verified") is True and
+                            identity.get("template_client_version") == plan.client_version)
+                hero_results.append({"unit_id": hero_id, "verified": verified,
+                                     "card_locator": locator, "state": state})
+        receipt["heroes"] = hero_results
+        receipt["verified"] = receipt["completed"] = (receipt["input_sent"] and
+            all(item["verified"] for item in troop_results + hero_results))
+        receipt.setdefault("verification_frames", []).append(
+            {"frame": str(post.screenshot_path), "troops": [r["verified"] for r in troop_results],
+             "heroes": [r["verified"] for r in hero_results]})
+        if receipt["verified"] or attempt == 2 or not all(row["verified"] for row in troop_results):
+            break
         try:
-            reading = _post_troop_reading(session, post.screenshot_path, plan.toolbar_before_frame_id,
-                                          point, bbox)
+            session.check_deadline()
+            sleep(.5)  # only after the input batch; let selected-card animation settle
+            session.check_deadline()
+            post = session.observe("frozen-line-post-recheck")
         except Exception as exc:
-            reading = {"error": str(exc)}
-        conflicting = [row for row in slots if isinstance(row, dict) and
-                       (row.get("unit_id") == unit_id or row.get("bbox") == list(bbox)) and
-                       type(row.get("count")) is int and row["count"] > 0]
-        score = reading.get("confidence")
-        portrait = reading.get("portrait_score")
-        reads = reading.get("readings")
-        explicit = [item for item in reads if isinstance(item, dict) and
-                    type(item.get("confidence")) in (int, float) and item["confidence"] >= .9 and
-                    (match := _COUNT.fullmatch(str(item.get("text", "")).strip())) is not None and int(match[1]) == 0] if isinstance(reads, list) else []
-        valid = (reading.get("count") == 0 and reading.get("frame") == str(post.screenshot_path) and
-                 reading.get("slot_bbox") == list(bbox) and not conflicting and
-                 type(score) in (int, float) and math.isfinite(score) and score >= .9 and
-                 type(portrait) in (int, float) and math.isfinite(portrait) and portrait >= .92 and
-                 reading.get("portrait_source") == "current_frame_saved_battle_portrait" and
-                 bool(explicit))
-        troop_results.append({"unit_id": unit_id, "initial": initial, "post_count": 0 if valid else None,
-                              "verified": valid, "reading": reading})
-    receipt["troops"] = troop_results
-    receipt["consumption_events"] = [
-        {"unit_id": item["unit_id"], "before_count": item["initial"],
-         "after_count": item["post_count"], "after_frame": str(post.screenshot_path),
-         "verified": item["verified"]} for item in troop_results]
-    hero_results = []
-    if plan.hero_ids:
-        from .hero_state import recognize_hero_state
-        for hero_id, bbox in plan.hero_cards:
-            state = recognize_hero_state(post.screenshot_path, bbox,
-                                         baseline_resolution=plan.frame.resolution,
-                                         unit_id=hero_id, client_version=plan.client_version)
-            identity = (state.get("evidence") or {}).get("portrait_identity") or {}
-            verified = (state.get("deployed") is True and state.get("frame") == str(post.screenshot_path) and
-                        identity.get("unit_id") == hero_id and identity.get("version_verified") is True and
-                        identity.get("template_client_version") == plan.client_version)
-            hero_results.append({"unit_id": hero_id, "verified": verified, "state": state})
-    receipt["heroes"] = hero_results
-    receipt["verified"] = receipt["completed"] = (receipt["input_sent"] and
-        all(item["verified"] for item in troop_results + hero_results))
+            receipt["error"] = f"Post-burst reobservation failed: {exc}"
+            raise DeploymentError(receipt["error"], partial_receipt=receipt) from exc
     if receipt["verified"]:
         receipt["deployed_units"] = sum(initial for _unit_id, _source, initial in plan.troop_budgets)
     post.observations["deployment"] = receipt
