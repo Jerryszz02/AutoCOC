@@ -55,10 +55,10 @@ def find_line_deployment_edges(screenshot_path: str | Path, *, baseline_resoluti
     if lines is None:
         return []
     western_frontier = _western_line_frontier(red)
-    # Retry with two pixels of antialiasing tolerance only when the narrow
-    # boundary check cannot establish both flanks.
+    # Examine both support widths before choosing a flank: a weak outer red
+    # segment can become visible only at the wider antialiasing tolerance.
+    candidates = {0: [], 1: []}
     for tolerance in (3, 5):
-        candidates = {0: [], 1: []}
         support = cv2.dilate(red, np.ones((tolerance, tolerance), np.uint8))
         for x1, y1, x2, y2 in lines[:, 0]:
             if abs(int(x2) - int(x1)) < 25:
@@ -80,32 +80,30 @@ def find_line_deployment_edges(screenshot_path: str | Path, *, baseline_resoluti
             ys, xs = ys[valid], xs[valid]
             if len(ys) < 25 or (support[ys.astype(int), xs.round().astype(int)] > 0).mean() < .85:
                 continue
-            if edge == 1:
-                # Independently detected western red segments veto an inner
-                # line. Check the whole proposed sweep with a 13px horizontal
-                # margin rather than only the two endpoint taps.
-                blocked = any(
-                    x - 32 + 13 >= western_frontier[max(0, int(y) - 3):int(y) + 4].min()
-                    for y, x in zip(ys, xs)
-                )
-                if blocked:
-                    continue
+            # A Hough segment can lie inside the real perimeter. Check its
+            # entire supported sweep rather than just the endpoint taps; do
+            # not extrapolate through a different, folded part of the border.
+            blocked = any(
+                x - 32 + 13 >= western_frontier[max(0, int(y) - 3):int(y) + 4].min()
+                for y, x in zip(ys, xs)
+            )
+            if blocked:
+                continue
             frontier = (250 if edge == 0 else 430) - intercept
             candidates[edge].append((frontier / slope, slope, intercept,
                                      [(round(xs[0] - 32), int(ys[0])), (round(xs[-1] - 32), int(ys[-1]))]))
-        if not all(candidates.values()):
-            continue
-        upper, lower = (min(candidates[edge], key=lambda item: item[0]) for edge in (0, 1))
-        corner_x = (lower[2] - upper[2]) / (upper[1] - lower[1])
-        corner_y = upper[1] * corner_x + upper[2]
-        if not (80 <= corner_x <= 480 and 200 <= corner_y <= 480):
-            continue
-        return [{"edge": edge, "point": list(scale_point(point, from_resolution=(1280, 720),
-                                                           to_resolution=baseline_resolution)),
-                 "evidence": {"method": "current_red_boundary_offset", "frame": str(screenshot_path),
-                              "slope": line[1], "intercept": line[2], "horizontal_clearance": 32}}
-                for edge, line in enumerate((upper, lower)) for point in line[3]]
-    return []
+    if not all(candidates.values()):
+        return []
+    upper, lower = (min(candidates[edge], key=lambda item: item[0]) for edge in (0, 1))
+    corner_x = (lower[2] - upper[2]) / (upper[1] - lower[1])
+    corner_y = upper[1] * corner_x + upper[2]
+    if not (80 <= corner_x <= 480 and 200 <= corner_y <= 480):
+        return []
+    return [{"edge": edge, "point": list(scale_point(point, from_resolution=(1280, 720),
+                                                       to_resolution=baseline_resolution)),
+             "evidence": {"method": "current_red_boundary_offset", "frame": str(screenshot_path),
+                          "slope": line[1], "intercept": line[2], "horizontal_clearance": 32}}
+            for edge, line in enumerate((upper, lower)) for point in line[3]]
 
 
 def measure_camera_motion(before_path: str | Path, after_path: str | Path) -> dict:

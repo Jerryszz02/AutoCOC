@@ -42,6 +42,50 @@ class CloudCoverTests(unittest.TestCase):
 
 
 class TerrainTests(unittest.TestCase):
+    def test_actual_preview_does_not_use_an_inner_upper_red_line(self):
+        from autococ.terrain import find_line_deployment_edges
+
+        fixture = Path(__file__).parent / "fixtures/line-boundary-20261015-inner-redmask.png"
+        self.assertEqual(find_line_deployment_edges(fixture), [])
+
+    def test_prior_preview_keeps_geometry_with_consumed_upper_deployment(self):
+        from autococ.terrain import find_line_deployment_edges
+
+        fixture = Path(__file__).parent / "fixtures/line-boundary-20261015-deployed-redmask.png"
+        edges = find_line_deployment_edges(fixture)
+        self.assertEqual(len(edges), 4)
+        self.assertEqual([edge["point"] for edge in edges],
+                         [[287, 209], [235, 249], [311, 446], [360, 480]])
+
+    def test_wholly_occluded_upper_flank_has_no_line_candidate(self):
+        import cv2
+        from autococ.terrain import find_line_deployment_edges
+
+        fixture = Path(__file__).parent / "fixtures/line-boundary-20261015-inner-redmask.png"
+        image = cv2.imread(str(fixture))
+        image[100:301, 100:800] = (50, 115, 77)
+        with TemporaryDirectory() as temp:
+            path = Path(temp) / "upper-occluded.png"
+            cv2.imwrite(str(path), image)
+            self.assertEqual(find_line_deployment_edges(path), [])
+
+    def test_short_visible_outer_edge_vetoes_inner_upper_line(self):
+        import cv2
+        import numpy as np
+        from autococ.terrain import find_line_deployment_edges
+
+        image = np.full((720, 1280, 3), (50, 115, 77), dtype=np.uint8)
+        cv2.line(image, (300, 275), (500, 125), (25, 40, 180), 2)
+        cv2.line(image, (250, 368), (410, 488), (25, 40, 180), 2)
+        with TemporaryDirectory() as temp:
+            path = Path(temp) / "boundary.png"
+            cv2.imwrite(str(path), image)
+            self.assertEqual(len(find_line_deployment_edges(path)), 4)
+            # This disconnected segment cannot be a proposed long flank.
+            cv2.line(image, (190, 155), (220, 133), (25, 40, 180), 2)
+            cv2.imwrite(str(path), image)
+            self.assertEqual(find_line_deployment_edges(path), [])
+
     def test_thin_antialiased_boundary_can_use_two_pixel_support(self):
         from autococ.terrain import find_line_deployment_edges
 
@@ -60,16 +104,14 @@ class TerrainTests(unittest.TestCase):
             self.assertLess(edge["evidence"]["intercept"], 490 if edge["edge"] == 0 else 260)
             self.assertGreater(edge["evidence"]["intercept"], 455 if edge["edge"] == 0 else 220)
 
-    def test_shifted_live_boundary_moves_the_single_line_outside_red(self):
+    def test_shifted_crop_rejects_inner_upper_line_with_visible_outer_red(self):
         from autococ.terrain import find_line_deployment_edges
 
         path = Path(__file__).parent / "fixtures/line-boundary-shifted.png"
-        edges = find_line_deployment_edges(path)
-        self.assertEqual(len(edges), 4)
-        for item in edges[:2]:
-            x, y = item["point"]
-            self.assertLess(x, (445 - y) / .75 - 20)
-        self.assertLess(edges[0]["point"][0], 450)
+        # The old assertion compared only the fitted red line. At y=172 its
+        # fitted x=362, while another visible red segment is farther west at
+        # x=318; the proposed tap x=330 was still inside that outer segment.
+        self.assertEqual(find_line_deployment_edges(path), [])
 
     def test_short_sunlit_boundary_is_not_replaced_by_long_interior_roofs(self):
         from autococ.terrain import find_line_deployment_edges
@@ -79,18 +121,15 @@ class TerrainTests(unittest.TestCase):
         self.assertLess(edges[0]["evidence"]["intercept"], 505)
         self.assertGreater(edges[0]["evidence"]["intercept"], 470)
 
-    def test_lower_flank_stays_outside_short_western_boundary(self):
+    def test_lower_flank_fixture_does_not_authorize_inner_upper_line(self):
         from autococ.terrain import find_line_deployment_edges
 
-        # Redacted from the live battle in which the old lower-flank point
-        # landed inside the red deployment boundary and consumed no troop.
+        # This older crop proves a short outer boundary on the lower flank.
+        # Its former assertion checked only those lower taps. The old upper
+        # candidate at y=123 had fitted red x=450, while an independently
+        # visible western segment is at x=388, outside its proposed tap.
         path = Path(__file__).parent / "fixtures/line-boundary-western-outside.png"
-        edges = find_line_deployment_edges(path)
-        self.assertEqual(len(edges), 4)
-        for edge in edges[2:]:
-            x, y = edge["point"]
-            outer_x = 186 + (y - 390) * 54 / 40
-            self.assertLess(x + 13, outer_x)
+        self.assertEqual(find_line_deployment_edges(path), [])
 
     def test_short_visible_outer_edge_vetoes_inner_lower_line(self):
         import cv2

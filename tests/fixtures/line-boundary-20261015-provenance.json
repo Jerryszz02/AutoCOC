@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {
+      "fixture": "line-boundary-20261015-inner-redmask.png",
+      "fixture_sha256": "b7b10fa04e29fa01c7419fc27dec96740c25bffc6c025ccc516e8d90a06723be",
+      "source": "reports/completion-20261015/live/20261015-235131-370965-f8aa237e/frames/00014-line-boundary.png",
+      "source_sha256": "e3e14512283381c420fdb84b4b799964d3dbfbfa79d6a7a2e629d7db4adbc630",
+      "derivation": "Resize 2560x1440 BGR source to 1280x720 with cv2.INTER_AREA. Apply terrain.find_line_deployment_edges HSV red ranges [0,70,45]-[28,255,255] or [155,70,45]-[180,255,255], then retain pixels with 5x5 MORPH_TOPHAT redness >=8 inside x=[100,800), y=[100,495). Paint retained pixels BGR=(25,40,180), all others BGR=(50,115,77). Synthetic color rendering of the actual frame red mask; not an independent live screenshot.",
+      "observed_outcome": "No troop was consumed at the selected upper geometric anchors in the 235131 live battle; the proposed line lay inside the visibly farther-west red perimeter.",
+      "capture_code_commit": "4b83675"
+    },
+    {
+      "fixture": "line-boundary-20261015-deployed-redmask.png",
+      "fixture_sha256": "a48fb0517d535bffc455edf7e39fe689c936e6168aa96e678987c8110e7c997a",
+      "source": "reports/completion-20261015/live/20261015-215245-013077-d6fb30ed/frames/00014-line-boundary.png",
+      "source_sha256": "4c329ca49276320414b98d165a750dfa35281b7ae551ee9fd5e363b1bbb00d10",
+      "derivation": "Resize 2560x1440 BGR source to 1280x720 with cv2.INTER_AREA. Apply terrain.find_line_deployment_edges HSV red ranges [0,70,45]-[28,255,255] or [155,70,45]-[180,255,255], then retain pixels with 5x5 MORPH_TOPHAT redness >=8 inside x=[100,800), y=[100,495). Paint retained pixels BGR=(25,40,180), all others BGR=(50,115,77). Synthetic color rendering of the actual frame red mask; not an independent live screenshot.",
+      "observed_outcome": "Upper two geometric anchors had actual troop-consumption evidence in the 215245 live battle; lower two anchors are geometry-only and were not deployed.",
+      "capture_code_commit": "2d8688"
+    }
+  ],
+  "source_client_version": "18.647.2",
+  "derivation_code_commit": "4b83675"
+}
