@@ -14,7 +14,7 @@ from .images import read_frame, read_template
 from .errors import LocatorError, SceneError
 from .locator import find_template, scale_box
 from .ocr import OCRProvider, OCRText, create_ocr_provider, filter_ocr_results
-from .scene import SCENE_BATTLE, SCENE_CLAN_CHAT, SCENE_DISCONNECTED, SCENE_ENEMY_VILLAGE, SCENE_MAINTENANCE, SCENE_POPUP, SCENE_REQUEST, SCENE_SEARCH, SCENE_SETTLEMENT, SCENE_STARTING, SCENE_TRAINING, SCENE_UNKNOWN, SCENE_VILLAGE, SceneSnapshot, classify_scene_text, surrender_dialog_evidence
+from .scene import SCENE_ACCOUNT_IN_USE, SCENE_BATTLE, SCENE_CLAN_CHAT, SCENE_DISCONNECTED, SCENE_ENEMY_VILLAGE, SCENE_MAINTENANCE, SCENE_POPUP, SCENE_REQUEST, SCENE_SEARCH, SCENE_SETTLEMENT, SCENE_STARTING, SCENE_TRAINING, SCENE_UNKNOWN, SCENE_VILLAGE, SceneSnapshot, account_in_use_dialog_evidence, classify_scene_text, surrender_dialog_evidence
 from .model_vision import ModelUnavailable, SceneModel, BuildingModel
 
 
@@ -227,6 +227,17 @@ class ScreenshotRecognizer:
         ocr_finished = time.monotonic()
         texts = [self._baseline_result(result, resolution) for result in results]
         scene, confidence, reasons = classify_scene_text("\n".join(result.text for result in texts))
+        account_in_use = account_in_use_dialog_evidence([asdict(item) for item in texts])
+        account_claim_visible = any(
+            normalize_label(item.text) == normalize_label("另一个设备正在连接这个村庄。")
+            and math.isfinite(item.confidence) and item.confidence >= .95
+            and self._in_observed_roi(item, (310, 325, 680, 385)) for item in texts)
+        if account_in_use is not None:
+            scene, confidence, reasons = SCENE_ACCOUNT_IN_USE, .95, ["account_in_use_dialog_anchored"]
+        elif account_claim_visible:
+            # A partial account-ownership dialog must not inherit an ordinary
+            # disconnect's retry button or the village HUD behind the modal.
+            scene, confidence, reasons = SCENE_UNKNOWN, 0.0, ["account_in_use_dialog_incomplete"]
         event_panel = None
         if self.client_version == "18.647.2":
             anchors = {}
@@ -254,7 +265,7 @@ class ScreenshotRecognizer:
         elif unit_detail is not None:
             scene, confidence, reasons = SCENE_POPUP, .95, ["unit_detail_title_stats_and_close"]
         village_type_evidence = None
-        if scene == SCENE_UNKNOWN and all(
+        if scene == SCENE_UNKNOWN and not account_claim_visible and all(
             any(normalize_label(item.text) == label and self._in_observed_roi(item, roi)
                 for item in texts)
             for label, roi in (("商店", (1160, 340, 1255, 420)),
@@ -264,7 +275,7 @@ class ScreenshotRecognizer:
             if village_type_evidence["type"] == "home":
                 scene, confidence, reasons = SCENE_VILLAGE, .9, ["home_battle_icon", "shop_and_build_hud"]
         model_scene_evidence: dict[str, object] | None = None
-        if self.scene_model is not None:
+        if self.scene_model is not None and not account_claim_visible:
             if captured_at is None:
                 model_scene_evidence = {"status": "unavailable", "reason": "capture_time_missing"}
             else:
@@ -292,7 +303,7 @@ class ScreenshotRecognizer:
                 # The pale dialog is not cloud cover and its background HUD is
                 # not an active battle surface while confirmation is pending.
                 scene, confidence, reasons = SCENE_POPUP, .95, ["surrender_dialog_geometry_verified"]
-        startup_logo = self._startup_logo(path) if scene == SCENE_UNKNOWN else None
+        startup_logo = self._startup_logo(path) if scene == SCENE_UNKNOWN and not account_claim_visible else None
         if startup_logo is not None:
             scene, confidence, reasons = SCENE_STARTING, 0.65, ["supercell_startup_logo"]
         cloud_cover = None
@@ -341,7 +352,7 @@ class ScreenshotRecognizer:
                     list(result.bbox) != list(surrender_dialog[name]["bbox"])
                 ):
                     continue
-                if scene in {SCENE_UNKNOWN, SCENE_MAINTENANCE}:
+                if scene in {SCENE_UNKNOWN, SCENE_MAINTENANCE, SCENE_ACCOUNT_IN_USE}:
                     continue
                 if scene == SCENE_DISCONNECTED and not (
                     name == "retry" and self._in_observed_roi(result, (305, 380, 975, 460))
@@ -409,6 +420,7 @@ class ScreenshotRecognizer:
             "village_type": "unknown",
             "village_type_evidence": None,
             "event_panel": event_panel,
+            "account_in_use": account_in_use,
             "resource_evidence": {},
             "collectibles": [],
             "army": None,

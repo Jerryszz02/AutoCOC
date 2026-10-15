@@ -19,6 +19,7 @@ SCENE_ENEMY_VILLAGE = "enemy_village"
 SCENE_BATTLE = "battle"
 SCENE_SETTLEMENT = "settlement"
 SCENE_DISCONNECTED = "disconnected"
+SCENE_ACCOUNT_IN_USE = "account_in_use"
 SCENE_MAINTENANCE = "maintenance"
 SCENE_POPUP = "popup"
 SCENE_CLAN_CHAT = "clan_chat"
@@ -33,6 +34,43 @@ class SceneSnapshot:
     confidence: float
     screenshot_path: Path
     observations: dict[str, object] = field(default_factory=dict)
+
+
+def account_in_use_dialog_evidence(ocr: list[dict]) -> dict | None:
+    """Identify the observed account-ownership dialog, never its reload as retry.
+
+    All three exact labels must be unique within their own 1280 x 720 dialog
+    regions. The home HUD remains visible behind this modal and is inert.
+    """
+    anchors = {
+        "title": ("连接断开", (310, 275, 470, 330)),
+        "message": ("另一个设备正在连接这个村庄。", (310, 325, 680, 385)),
+        "reload": ("重新载入", (310, 390, 500, 455)),
+    }
+    found: dict[str, dict] = {}
+    for name, (expected, region) in anchors.items():
+        left, top, right, bottom = region
+        matches = []
+        for item in ocr:
+            if not isinstance(item, dict):
+                continue
+            box, confidence = item.get("bbox"), item.get("confidence")
+            if (type(confidence) not in (int, float) or not math.isfinite(confidence)
+                    or confidence < .95 or confidence > 1
+                    or not isinstance(box, (tuple, list)) or len(box) != 4
+                    or not all(type(value) in (int, float) and math.isfinite(value) for value in box)
+                    or not left <= box[0] < box[2] <= right
+                    or not top <= box[1] < box[3] <= bottom):
+                continue
+            if re.sub(r"\s+", "", str(item.get("text", ""))) == expected:
+                matches.append(item)
+        if len(matches) != 1:
+            return None
+        found[name] = matches[0]
+    if not (found["title"]["bbox"][3] < found["message"]["bbox"][1]
+            and found["message"]["bbox"][3] < found["reload"]["bbox"][1]):
+        return None
+    return found
 
 
 def surrender_dialog_evidence(ocr: list[dict]) -> dict | None:

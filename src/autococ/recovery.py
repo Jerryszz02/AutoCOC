@@ -77,6 +77,8 @@ def recover_connection(session: GameSession, *, initial_snapshot: SceneSnapshot 
         metrics.update(before_frame=str(before.screenshot_path), gems_before=_gems(before))
         if before is not session.last_snapshot:
             raise FlowError("Recovery refers to an obsolete observation")
+        if before.scene == "account_in_use":
+            raise FlowError("account_in_use: another device is connecting to this village")
         if before.scene != "disconnected" or not _confident(before.confidence):
             raise FlowError("Recovery requires a confirmed disconnected scene")
         _require_retry(before)
@@ -94,6 +96,8 @@ def recover_connection(session: GameSession, *, initial_snapshot: SceneSnapshot 
             evidence.append(after.screenshot_path)
             metrics.update(after_frame=str(after.screenshot_path), gems_after=_gems(after),
                            last_scene=after.scene)
+            if after.scene == "account_in_use":
+                raise FlowError("account_in_use: another device is connecting to this village")
             session.check_deadline()
             if time.monotonic() >= deadline:
                 raise FlowError("Connection recovery timed out before village verification")

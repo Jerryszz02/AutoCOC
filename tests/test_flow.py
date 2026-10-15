@@ -326,6 +326,33 @@ class FlowTests(unittest.TestCase):
         self.session.tap.assert_not_called()
         self.session.click.assert_not_called()
 
+    def test_account_in_use_launch_fails_immediately_without_reload_or_next_task(self) -> None:
+        runner = self.runner(("launch", "battle"))
+        occupied = self.snapshot("account_in_use")
+        occupied.observations["buttons"] = []
+        self.session.last_snapshot = occupied
+        self.session.observe.return_value = occupied
+        with patch("autococ.combat.run_battle") as battle:
+            stats = runner.run_profile("test")
+        self.assertEqual([(result.task, result.status) for result in stats.task_results],
+                         [("launch", "failed")])
+        self.assertIn("account_in_use", stats.task_results[0].reason)
+        self.assertEqual(stats.task_results[0].metrics["retry_actions"], 0)
+        self.assertEqual(stats.task_results[0].evidence, [occupied.screenshot_path])
+        self.session.click.assert_not_called()
+        self.session.tap.assert_not_called()
+        self.session.back.assert_not_called()
+        self.session.wait_for.assert_not_called()
+        battle.assert_not_called()
+
+    def test_account_in_use_return_to_village_never_waits_or_inputs(self) -> None:
+        occupied = self.snapshot("account_in_use")
+        with self.assertRaisesRegex(FlowError, "account_in_use"):
+            return_to_village(self.session, initial_snapshot=occupied)
+        self.session.wait_for.assert_not_called()
+        self.session.click.assert_not_called()
+        self.session.back.assert_not_called()
+
     def test_explicit_recover_uses_single_retry_and_requires_verified_village(self) -> None:
         runner = self.runner(("recover",))
         disconnected, village = self.recovery_frames()

@@ -90,12 +90,27 @@ class SessionTests(unittest.TestCase):
         self.assertTrue(self.session.last_snapshot.screenshot_path.exists())
         self.assertEqual(self.session.last_snapshot.observations["evidence_retention"], "retained")
 
+    def test_account_in_use_interrupts_both_wait_paths_without_input(self):
+        for bounded in (False, True):
+            with self.subTest(bounded=bounded):
+                self.session.evidence_budget = (EvidenceBudget(self.session.directory / "frames", 300)
+                                                if bounded else None)
+                self.recognizer.recognize.side_effect = lambda path: SceneSnapshot("account_in_use", .95, path)
+                before = self.capture.capture_screenshot_artifact.call_count
+                with self.assertRaisesRegex(FlowError, "account_in_use"):
+                    self.session.wait_for({"village"}, timeout_sec=20)
+                self.assertEqual(self.capture.capture_screenshot_artifact.call_count, before + 1)
+                self.assertEqual(self.session.last_snapshot.scene, "account_in_use")
+                self.assertTrue(self.session.last_snapshot.screenshot_path.exists())
+        self.adb.run.assert_not_called()
+        self.assertEqual(self.session.action_count, 0)
+
     def package_calls(self):
         return [call for call in self.adb.run.call_args_list
                 if call.args and call.args[0] == ["shell", "dumpsys", "package", self.config.game.package_name]]
 
     def test_unknown_or_low_confidence_observation_cannot_click(self) -> None:
-        for scene, confidence in (("unknown", 0.99), ("village", 0.79)):
+        for scene, confidence in (("unknown", 0.99), ("account_in_use", 0.99), ("village", 0.79)):
             with self.subTest(scene=scene, confidence=confidence):
                 self.recognizer.recognize.side_effect = lambda path: SceneSnapshot(scene, confidence, Path(path))
                 snapshot = self.session.observe()

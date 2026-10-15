@@ -25,6 +25,8 @@ FlowFunction = Callable[[AutomationContext], None]
 def return_to_village(session: GameSession, *, initial_snapshot: SceneSnapshot | None = None):
     exit_scenes = {"training", "request", "donation", "clan_chat", "search", "popup"}
     snapshot = initial_snapshot if initial_snapshot is not None else session.observe("home-check")
+    if snapshot.scene == "account_in_use":
+        raise FlowError("account_in_use: another device is connecting to this village")
     welcome_confirmed = False
     for exits in range(5):
         session.check_deadline()
@@ -74,7 +76,7 @@ def return_to_village(session: GameSession, *, initial_snapshot: SceneSnapshot |
 
 def verify_home(session: GameSession) -> TaskResult:
     initial = session.observe("launch-home-check")
-    if initial.scene == "disconnected":
+    if initial.scene in {"disconnected", "account_in_use"}:
         recovery = recover_connection(session, initial_snapshot=initial)
         return replace(recovery, task="launch", metrics={**recovery.metrics, "startup_recovery": True})
     snapshot = return_to_village(session, initial_snapshot=initial)

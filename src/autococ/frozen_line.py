@@ -342,6 +342,11 @@ def freeze_model_free_line(session: Any, selected: SceneSnapshot, *,
     troop_cards = tuple((card["unit_id"], card["source"], card["count"],
                          card["point"], card["bbox"]) for card in current_troops)
     hero_cards = tuple((card["unit_id"], card["bbox"]) for card in selected_heroes)
+    # Use the same complete-batch speed gate as the model-driven path. A
+    # caller's larger timeout must not silently relax the acceptance budget.
+    burst_limit_sec = min(burst_limit_sec, 15., 1. + .25 * len(actions))
+    if sum(action.delay_after_sec for action in actions) >= burst_limit_sec:
+        raise FlowError("Frozen line fixed delays exceed the complete-batch budget")
     plan = FrozenLinePlan(uuid4().hex, battle_id, frame,
                           _file_sha256(frame.screenshot_path), before.frame_id,
                           _file_sha256(before.screenshot_path),

@@ -120,6 +120,8 @@ def test_four_troops_burst_has_zero_midstream_observations_and_fresh_counts(monk
                               frame("post", 103, root=tmp_path, post=True))
     session = Session(selected, post)
     plan = freeze(session, selected, before)
+    assert len(plan.actions) == 17
+    assert plan.burst_limit_sec == 5.25
     assert not any(action.kind in {"spell", "siege", "skill"} for action in plan.actions)
     assert len([action for action in plan.actions if action.kind == "deploy"]) == 14
     assert execute_frozen_line(session, plan, clock=lambda: 102., sleep=lambda _seconds: None) is post
@@ -365,5 +367,6 @@ def test_saved_real_full_plan_freezes_without_any_input():
         battle_id="offline-replay", latest_start=now + 2, burst_limit_sec=15,
         hero_ids=hero_ids, hero_manifest=army["hero_evidence"], clock=lambda: now)
     assert len(plan.actions) == 25
+    assert plan.burst_limit_sec == 7.25
     assert len(plan.hero_cards) == 4
     assert plan.troop_budgets == tuple((unit_id, "army", count) for unit_id, count in TROOPS)

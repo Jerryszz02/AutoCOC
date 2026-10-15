@@ -33,6 +33,47 @@ class SceneTests(unittest.TestCase):
                 scene, _, _ = classify_scene_text(f"进攻！ 商店 还在吗？ {message}")
                 self.assertEqual(scene, "disconnected")
 
+    def test_current_account_in_use_dialog_replays_anonymized_live_pixels(self) -> None:
+        import hashlib
+        import json
+
+        fixture = Path(__file__).parent / "fixtures/account_in_use_dialog_18_647_2_20261015.png"
+        provenance = json.loads(fixture.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+        self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(), provenance["fixture_sha256"])
+        snapshot = ScreenshotRecognizer().recognize(fixture)
+        self.assertEqual(snapshot.scene, "account_in_use")
+        self.assertEqual(set(snapshot.observations["account_in_use"]), {"title", "message", "reload"})
+        self.assertEqual(snapshot.observations["buttons"], [])
+        self.assertIsNone(snapshot.observations["resource_source"])
+        self.assertEqual(snapshot.observations["resources"],
+                         {"gold": None, "elixir": None, "dark_elixir": None, "gems": None})
+
+    def test_account_in_use_requires_exact_unique_dialog_anchors(self) -> None:
+        fixture = Path(__file__).parent / "fixtures/account_in_use_dialog_18_647_2_20261015.png"
+        anchors = [OCRText("连接断开", .999, (660, 588, 852, 646)),
+                   OCRText("另一个设备正在连接这个村庄。", .999, (660, 668, 1152, 716)),
+                   OCRText("重新载入", .999, (660, 816, 798, 860))]
+        cases = {
+            "missing_title": anchors[1:],
+            "missing_message": [anchors[0], anchors[2]],
+            "missing_reload": anchors[:2],
+            "wrong_message": [anchors[0], OCRText("连接已经断开。", .999, anchors[1].bbox), anchors[2]],
+            "reload_in_other_place": [*anchors[:2], OCRText("重新载入", .999, (50, 816, 188, 860))],
+            "weak_title": [OCRText("连接断开", .94, anchors[0].bbox), *anchors[1:]],
+            "duplicate_message": [*anchors, anchors[1]],
+            "generic_reload_with_account_claim": [*anchors[:2], OCRText("重新载入游戏", .999, anchors[2].bbox)],
+        }
+        provider = Mock()
+        recognizer = ScreenshotRecognizer(provider=provider)
+        for name, readings in cases.items():
+            with self.subTest(name=name):
+                provider.recognize.return_value = readings
+                snapshot = recognizer.recognize(fixture)
+                self.assertNotEqual(snapshot.scene, "account_in_use")
+                self.assertIsNone(snapshot.observations["account_in_use"])
+                self.assertEqual(snapshot.observations["buttons"], [])
+                self.assertIsNone(snapshot.observations["resource_source"])
+
     def test_reload_button_requires_confident_text_in_central_dialog(self) -> None:
         import cv2
         import numpy as np

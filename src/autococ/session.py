@@ -262,7 +262,7 @@ class GameSession:
                 raise FlowError(f"Expected {sorted(scenes)} before deadline; frame={snapshot.screenshot_path}")
             if snapshot.scene in scenes and math.isfinite(snapshot.confidence) and snapshot.confidence >= 0.8:
                 return snapshot
-            if snapshot.scene in {"maintenance", "disconnected"}:
+            if snapshot.scene in {"maintenance", "disconnected", "account_in_use"}:
                 raise FlowError(f"Game interruption: {snapshot.scene}")
             interval = self.config.runtime.poll_interval_sec if poll_interval_sec is None else poll_interval_sec
             next_poll = min(time.monotonic() + interval, deadline)
@@ -281,7 +281,7 @@ class GameSession:
                 raise FlowError(f"Expected {sorted(scenes)} before deadline; frame={snapshot.screenshot_path}")
             if snapshot.scene in scenes and math.isfinite(snapshot.confidence) and snapshot.confidence >= .8:
                 return snapshot
-            if snapshot.scene in {"maintenance", "disconnected"}:
+            if snapshot.scene in {"maintenance", "disconnected", "account_in_use"}:
                 raise FlowError(f"Game interruption: {snapshot.scene}")
             interval = self.config.runtime.poll_interval_sec if poll_interval_sec is None else poll_interval_sec
             next_poll = min(time.monotonic() + interval, deadline)
@@ -294,7 +294,9 @@ class GameSession:
         if snapshot is not self.last_snapshot:
             raise FlowError("Action refers to an obsolete observation")
         age = time.monotonic() - float(snapshot.observations.get("observed_at_monotonic", 0))
-        if not math.isfinite(age) or age < 0 or age > 30 or snapshot.scene == "unknown" or not math.isfinite(snapshot.confidence) or snapshot.confidence < 0.8:
+        if (not math.isfinite(age) or age < 0 or age > 30
+                or snapshot.scene in {"unknown", "account_in_use"}
+                or not math.isfinite(snapshot.confidence) or snapshot.confidence < 0.8):
             raise FlowError("Cannot act on a stale or unrecognized screenshot")
 
     def tap(self, snapshot: SceneSnapshot, point: tuple[int, int] | list[int], *, reason: str) -> None:
