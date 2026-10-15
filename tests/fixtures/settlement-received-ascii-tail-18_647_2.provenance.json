@@ -1,0 +1,393 @@
+{
+  "client_version": "18.647.2",
+  "source_run": "20261016-001038-401680-d5107440",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "crop_xyxy_at_1280x720": [
+    325,
+    20,
+    1065,
+    665
+  ],
+  "purpose": "Real central settlement overlay pixels and original OCR rows; peripheral player/account identifiers excluded.",
+  "samples": [
+    {
+      "source_frame": "00052-battle-settlement.png",
+      "source_sha256": "61542dd51f6bd72c2766c2f2ef627891c231e3cf12bb493430e210f2a3b7e2aa",
+      "fixture": "settlement-received-ascii-tail-18_647_2-frame52.png",
+      "fixture_sha256": "a7bd4be16e91e785c6c957793c98f14daae9d105373d6f0cdd151d4303519ae6",
+      "ocr": [
+        {
+          "text": "摧毁率：",
+          "confidence": 0.892,
+          "bbox": [
+            606,
+            80,
+            664,
+            104
+          ]
+        },
+        {
+          "text": "69%",
+          "confidence": 0.99564,
+          "bbox": [
+            610,
+            102,
+            672,
+            132
+          ]
+        },
+        {
+          "text": "胜利",
+          "confidence": 0.9993,
+          "bbox": [
+            609,
+            195,
+            670,
+            236
+          ]
+        },
+        {
+          "text": "29",
+          "confidence": 0.99968,
+          "bbox": [
+            976,
+            272,
+            1017,
+            304
+          ]
+        },
+        {
+          "text": "您得到了d:",
+          "confidence": 0.88746,
+          "bbox": [
+            598,
+            286,
+            680,
+            312
+          ]
+        },
+        {
+          "text": "733740",
+          "confidence": 0.99998,
+          "bbox": [
+            535,
+            313,
+            670,
+            350
+          ]
+        },
+        {
+          "text": "99% 奖励：",
+          "confidence": 0.93161,
+          "bbox": [
+            912,
+            318,
+            1010,
+            344
+          ]
+        },
+        {
+          "text": "+371250",
+          "confidence": 0.99987,
+          "bbox": [
+            922,
+            352,
+            1006,
+            376
+          ]
+        },
+        {
+          "text": "743908",
+          "confidence": 0.99998,
+          "bbox": [
+            537,
+            359,
+            670,
+            397
+          ]
+        },
+        {
+          "text": "266",
+          "confidence": 0.99986,
+          "bbox": [
+            300,
+            387,
+            350,
+            413
+          ]
+        },
+        {
+          "text": "+371250",
+          "confidence": 0.99983,
+          "bbox": [
+            921,
+            387,
+            1005,
+            413
+          ]
+        },
+        {
+          "text": "6243",
+          "confidence": 0.9999,
+          "bbox": [
+            578,
+            408,
+            670,
+            443
+          ]
+        },
+        {
+          "text": "+2747",
+          "confidence": 0.99871,
+          "bbox": [
+            942,
+            422,
+            1005,
+            449
+          ]
+        },
+        {
+          "text": "损耗的部队",
+          "confidence": 0.99967,
+          "bbox": [
+            592,
+            464,
+            674,
+            484
+          ]
+        },
+        {
+          "text": "x2",
+          "confidence": 0.99609,
+          "bbox": [
+            444,
+            488,
+            468,
+            506
+          ]
+        },
+        {
+          "text": "x3",
+          "confidence": 0.99327,
+          "bbox": [
+            497,
+            491,
+            517,
+            504
+          ]
+        },
+        {
+          "text": "80",
+          "confidence": 0.99999,
+          "bbox": [
+            883,
+            532,
+            901,
+            544
+          ]
+        },
+        {
+          "text": "回营",
+          "confidence": 0.99924,
+          "bbox": [
+            623,
+            608,
+            660,
+            631
+          ]
+        }
+      ]
+    },
+    {
+      "source_frame": "00057-battle-settlement-reread.png",
+      "source_sha256": "09ea5dd96be247cb11cd9aca3c349555df18a33de05ccd47845bb5d5c71a948a",
+      "fixture": "settlement-received-ascii-tail-18_647_2-frame57.png",
+      "fixture_sha256": "39fa48b4a0328917507db6b38716582c374cb261ac3a0fac83b178722fcc8f9b",
+      "ocr": [
+        {
+          "text": "摧毁率",
+          "confidence": 0.98956,
+          "bbox": [
+            607,
+            82,
+            664,
+            102
+          ]
+        },
+        {
+          "text": "69%",
+          "confidence": 0.9955,
+          "bbox": [
+            610,
+            102,
+            672,
+            132
+          ]
+        },
+        {
+          "text": "胜利",
+          "confidence": 0.9993,
+          "bbox": [
+            609,
+            195,
+            670,
+            236
+          ]
+        },
+        {
+          "text": "29",
+          "confidence": 0.99972,
+          "bbox": [
+            976,
+            272,
+            1016,
+            304
+          ]
+        },
+        {
+          "text": "您得到了Nd:",
+          "confidence": 0.80629,
+          "bbox": [
+            599,
+            287,
+            680,
+            312
+          ]
+        },
+        {
+          "text": "733740",
+          "confidence": 0.99998,
+          "bbox": [
+            536,
+            313,
+            670,
+            350
+          ]
+        },
+        {
+          "text": "99% 奖励：",
+          "confidence": 0.92857,
+          "bbox": [
+            912,
+            318,
+            1010,
+            344
+          ]
+        },
+        {
+          "text": "+371250",
+          "confidence": 0.99987,
+          "bbox": [
+            922,
+            352,
+            1006,
+            376
+          ]
+        },
+        {
+          "text": "743908",
+          "confidence": 0.99998,
+          "bbox": [
+            537,
+            359,
+            670,
+            396
+          ]
+        },
+        {
+          "text": "266",
+          "confidence": 0.99986,
+          "bbox": [
+            300,
+            387,
+            350,
+            413
+          ]
+        },
+        {
+          "text": "+371250",
+          "confidence": 0.99983,
+          "bbox": [
+            921,
+            387,
+            1005,
+            413
+          ]
+        },
+        {
+          "text": "6243",
+          "confidence": 0.99989,
+          "bbox": [
+            578,
+            408,
+            670,
+            443
+          ]
+        },
+        {
+          "text": "+2747",
+          "confidence": 0.99971,
+          "bbox": [
+            942,
+            424,
+            1005,
+            449
+          ]
+        },
+        {
+          "text": "损耗的部队",
+          "confidence": 0.99962,
+          "bbox": [
+            592,
+            464,
+            674,
+            484
+          ]
+        },
+        {
+          "text": "x2",
+          "confidence": 0.99621,
+          "bbox": [
+            444,
+            488,
+            468,
+            506
+          ]
+        },
+        {
+          "text": "x3",
+          "confidence": 0.99327,
+          "bbox": [
+            497,
+            491,
+            517,
+            504
+          ]
+        },
+        {
+          "text": "80",
+          "confidence": 0.99999,
+          "bbox": [
+            883,
+            532,
+            901,
+            544
+          ]
+        },
+        {
+          "text": "回营",
+          "confidence": 0.99924,
+          "bbox": [
+            623,
+            608,
+            660,
+            631
+          ]
+        }
+      ]
+    }
+  ]
+}

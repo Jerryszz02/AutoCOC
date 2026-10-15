@@ -12,6 +12,7 @@ import pytest
 
 from autococ.frozen_line import _post_troop_reading
 from autococ.hero_state import locate_current_deployed_hero_card, recognize_hero_state
+from autococ.ocr import OCRText
 from autococ.unit_catalog import CATALOG_ROOT, template_manifest
 from autococ.vision import ScreenshotRecognizer
 
@@ -32,9 +33,181 @@ def test_real_toolbar_provenance_and_current_deployed_templates_are_hash_bound()
                if row.get("state") == "deployed" and row.get("surface") == "battle"]
     assert {row["unit_id"] for row in entries} == {
         "grand_warden", "dragon_duke", "minion_prince", "archer_queen"}
+    current = json.loads((FIXTURES / "frozen-line-001038.provenance.json").read_text(encoding="utf-8"))
+    for name, row in current.items():
+        if name.startswith("_"):
+            continue
+        assert sha256((FIXTURES / name).read_bytes()).hexdigest() == row["fixture_sha256"]
+        assert row["retained_roi_native"] == [0, 1090, 2560, 1440]
+    new_queen = current["_queen_template"]
     for row in entries:
-        assert row["source_sha256"] == evidence[toolbar(16).name]["source_sha256"]
+        expected_source = (new_queen["source_sha256"] if row["path"].endswith("001038_18_647_2.png")
+                           else evidence[toolbar(16).name]["source_sha256"])
+        assert row["source_sha256"] == expected_source
         assert sha256((CATALOG_ROOT / row["path"]).read_bytes()).hexdigest() == row["template_sha256"]
+    assert new_queen["template_sha256"] == next(row["template_sha256"] for row in entries
+        if row["path"].endswith("001038_18_647_2.png"))
+
+
+def current_toolbar(number: int) -> Path:
+    return FIXTURES / f"frozen-line-001038-{number:05d}-toolbar.png"
+
+
+def test_five_card_real_post_dragon_requires_padded_independent_x0_proof():
+    recognizer = ScreenshotRecognizer()
+    recognizer.client_version = "18.647.2"
+    first = current_toolbar(20)
+    weak = {"text": "x0", "confidence": .89086, "bbox": [187, 594, 226, 621]}
+    session = SimpleNamespace(recognizer=recognizer,
+        last_snapshot=SimpleNamespace(screenshot_path=first, observations={"ocr": [weak]}),
+        _frozen_count_roi_hints={})
+    before = str(current_toolbar(18))
+    args = (session, first, before, (185, 653), (141, 595, 230, 711))
+    reading = _post_troop_reading(*args)
+    assert reading["count"] == 0 and reading["confidence"] >= .9
+    assert reading["portrait_score"] >= .92 and reading["roi"] == [185, 592, 228, 623]
+    assert reading["locator"]["confidence"] < .9
+    for number in (21, 22):
+        post = current_toolbar(number)
+        session.last_snapshot = SimpleNamespace(screenshot_path=post, observations={"ocr": []})
+        session._frozen_count_roi_hints = {(141, 595, 230, 711): reading["roi"]}
+        reading = _post_troop_reading(session, post, before, (185, 653), (141, 595, 230, 711))
+        assert reading["count"] == 0 and reading["confidence"] >= .9
+        assert reading["frame"] == str(post)
+        assert reading["locator"]["source"] == "prior_post_frame_roi_geometry"
+    # An independently read x0 cannot override a contradictory same-frame x1.
+    session.last_snapshot = SimpleNamespace(screenshot_path=first, observations={"ocr": [
+        {"text": "x1", "confidence": .99, "bbox": [187, 594, 226, 621]}]})
+    assert _post_troop_reading(*args).get("conflict") is True
+
+
+def test_real_count_to_post_propagates_strong_crop_conflict_without_fallback(monkeypatch):
+    recognizer = ScreenshotRecognizer()
+    recognizer.client_version = "18.647.2"
+    post = current_toolbar(20)
+    session = SimpleNamespace(recognizer=recognizer,
+        last_snapshot=SimpleNamespace(screenshot_path=post, observations={"ocr": [
+            {"text": "x0", "confidence": .89, "bbox": [187, 594, 226, 621]}]}),
+        _frozen_count_roi_hints={})
+    args = (session, post, str(current_toolbar(18)), (185, 653), (141, 595, 230, 711))
+    for outputs in (
+        (("x0", "x1"),),  # raw crop disagrees internally
+        (("x1", "xO"), ("x0",)),  # threshold rendition disagrees with raw crop
+    ):
+        calls = []
+        responses = iter(outputs)
+        def read(_image):
+            calls.append(True)
+            return [OCRText(value, .98) for value in next(responses)]
+        monkeypatch.setattr(recognizer.provider, "recognize_line_image", read)
+        result = _post_troop_reading(*args)  # real BattleObserver.count, current portrait and card
+        assert result["reason"] == "strong_count_conflict"
+        assert result["conflict"] is True and result["counts"] == [0, 1]
+        assert result["frame"] == str(post)
+        assert len(calls) == len(outputs)  # no tight/padded override after conflict
+
+
+def test_current_header_strong_count_conflicts_with_independent_line_read(monkeypatch):
+    recognizer = ScreenshotRecognizer()
+    recognizer.client_version = "18.647.2"
+    post = current_toolbar(20)
+    header = {"text": "x1", "confidence": .99, "bbox": [187, 594, 226, 621]}
+    session = SimpleNamespace(recognizer=recognizer,
+        last_snapshot=SimpleNamespace(screenshot_path=post, observations={"ocr": [header]}),
+        _frozen_count_roi_hints={})
+    args = (session, post, str(current_toolbar(18)), (185, 653), (141, 595, 230, 711))
+    monkeypatch.setattr(recognizer.provider, "recognize_line_image",
+                        lambda _image: [OCRText("x0", .98)])
+    result = _post_troop_reading(*args)
+    assert result["conflict"] is True and result["counts"] == [0, 1]
+    # A weaker locator is not independent numerical proof of a conflict.
+    header["confidence"] = .85
+    responses = iter(([OCRText("xO", .6)], [OCRText("xO", .6)],
+                      [OCRText("x0", .98)], [OCRText("x0", .98)]))
+    monkeypatch.setattr(recognizer.provider, "recognize_line_image", lambda _image: next(responses))
+    assert _post_troop_reading(*args) == {}
+
+
+def test_padded_dragon_read_rejects_conflicting_or_missing_glyphs(monkeypatch, tmp_path):
+    recognizer = ScreenshotRecognizer()
+    recognizer.client_version = "18.647.2"
+    post = current_toolbar(20)
+    weak = {"text": "x0", "confidence": .89086, "bbox": [187, 594, 226, 621]}
+    session = SimpleNamespace(recognizer=recognizer,
+        last_snapshot=SimpleNamespace(screenshot_path=post, observations={"ocr": [weak]}),
+        _frozen_count_roi_hints={})
+    before = str(current_toolbar(18))
+    args = (session, post, before, (185, 653), (141, 595, 230, 711))
+    with monkeypatch.context() as patcher:
+        patcher.setattr("autococ.battle_vision.BattleObserver.count", lambda *_args: None)
+        for outputs in (
+            (("x0",), ("x1",)),
+            (("x0",), ("x0", "x1")),
+        ):
+            responses = iter(outputs)
+            patcher.setattr(recognizer.provider, "recognize_line_image",
+                            lambda _image: [SimpleNamespace(text=value, confidence=.98)
+                                            for value in next(responses)])
+            assert _post_troop_reading(*args).get("conflict") is True  # same-frame reads disagree
+
+    image = cv2.imread(str(post))
+    image[1184:1246, 370:456] = 25  # native glyph region, not the saved portrait
+    missing = tmp_path / "missing-numeral.png"
+    cv2.imwrite(str(missing), image)
+    session.last_snapshot = SimpleNamespace(screenshot_path=missing, observations={"ocr": [weak]})
+    assert _post_troop_reading(session, missing, before, (185, 653), (141, 595, 230, 711)) == {}
+
+
+def test_real_prior_unspent_dragon_cannot_be_counted_as_zero():
+    root = Path(r"E:\projects\AutoCOC\reports\completion-20261015\live") / \
+           "20261015-235131-370965-f8aa237e" / "frames"
+    before, post = root / "00014-line-boundary.png", root / "00015-frozen-line-post.png"
+    if not before.is_file() or not post.is_file():
+        pytest.skip("local 235131 battle evidence unavailable")
+    recognizer = ScreenshotRecognizer()
+    recognizer.client_version = "18.647.2"
+    session = SimpleNamespace(recognizer=recognizer, last_snapshot=SimpleNamespace(
+        screenshot_path=post, observations={"ocr": [{"text": "x1", "confidence": .99583,
+                                                  "bbox": [195, 594, 228, 621]}]}),
+        _frozen_count_roi_hints={})
+    reading = _post_troop_reading(session, post, str(before), (185, 653), (141, 595, 230, 711))
+    assert reading["count"] == 1 and reading["confidence"] >= .9
+
+
+def test_current_queen_new_deployed_template_uses_independent_stable_frame():
+    assert locate_current_deployed_hero_card(current_toolbar(20), "archer_queen",
+                                             client_version="18.647.2") is None
+    for number in (22, 23, 25):
+        path = current_toolbar(number)
+        locator = locate_current_deployed_hero_card(path, "archer_queen", client_version="18.647.2")
+        assert locator is not None and locator["portrait_score"] >= .94
+        state = recognize_hero_state(path, locator["bbox"], unit_id="archer_queen",
+                                     client_version="18.647.2")
+        if number in (22, 23):
+            assert state["deployed"] is True
+        assert state["ability_ready"] is None and state["ability_used"] is None
+        assert locate_current_deployed_hero_card(path, "archer_queen", client_version=None) is None
+
+
+def test_current_queen_face_without_hp_or_closed_card_cannot_prove_deployment(tmp_path):
+    image = cv2.imread(str(current_toolbar(23)))
+    image[1140:1180, 1870:2060] = 0  # native pixels: current card's enclosed HP
+    no_hp = tmp_path / "no-hp.png"
+    cv2.imwrite(str(no_hp), image)
+    locator = locate_current_deployed_hero_card(no_hp, "archer_queen", client_version="18.647.2")
+    assert locator is not None
+    assert recognize_hero_state(no_hp, locator["bbox"], unit_id="archer_queen",
+                                client_version="18.647.2")["deployed"] is None
+    image = cv2.imread(str(current_toolbar(23)))
+    image[1418:1426, 1876:2054] = 0  # remove closed bottom edge
+    no_bottom = tmp_path / "no-bottom.png"
+    cv2.imwrite(str(no_bottom), image)
+    assert locate_current_deployed_hero_card(no_bottom, "archer_queen", client_version="18.647.2") is None
+    image = cv2.imread(str(current_toolbar(23)))
+    image[1264:1348, 1930:2004] = 0  # remove the matched Queen face only
+    no_face = tmp_path / "no-queen-face.png"
+    cv2.imwrite(str(no_face), image)
+    assert locate_current_deployed_hero_card(no_face, "archer_queen", client_version="18.647.2") is None
 
 
 @pytest.mark.parametrize("hero_id", ["grand_warden", "dragon_duke", "minion_prince"])

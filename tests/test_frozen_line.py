@@ -315,24 +315,157 @@ def test_post_recheck_rejects_reused_frame_without_more_input(monkeypatch, tmp_p
     assert session.observes == ["frozen-line-post", "frozen-line-post-recheck"]
 
 
-def test_missing_post_count_evidence_fails_after_one_burst_without_retry(monkeypatch, tmp_path):
+def test_missing_post_count_evidence_uses_only_two_fresh_observations_without_replay(monkeypatch, tmp_path):
     monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_args: [100, 580, 180, 710])
-    before, selected, post = (frame("before", 99, root=tmp_path),
-                              frame("selected", 100, root=tmp_path),
-                              frame("post", 103, root=tmp_path, post=True))
+    before, selected = frame("before", 99, root=tmp_path), frame("selected", 100, root=tmp_path)
+    posts = [frame(f"post-{number}", 103 + number, root=tmp_path, post=True) for number in range(3)]
     monkeypatch.setattr("autococ.frozen_line._post_troop_reading",
                         lambda _session, post_path, _before, _point, bbox: {
                             "count": None, "confidence": .4, "frame": str(post_path),
                             "slot_bbox": list(bbox)})
-    session = Session(selected, post)
+    session = Session(selected, posts[0])
+    pending = iter(posts)
+    def observe(purpose):
+        session.observes.append(purpose)
+        session.last_snapshot = next(pending)
+        return session.last_snapshot
+    session.observe = observe
     plan = freeze(session, selected, before)
     with pytest.raises(DeploymentError, match="consumption is unverified") as error:
         execute_frozen_line(session, plan, clock=lambda: 102., sleep=lambda _seconds: None)
     assert len(session.inputs) == len(plan.actions)
-    assert session.observes == ["frozen-line-post"]
+    assert session.observes == ["frozen-line-post", "frozen-line-post-recheck",
+                                "frozen-line-post-recheck"]
+    assert len(error.value.partial_receipt["verification_frames"]) == 3
     assert error.value.partial_receipt["completed"] is False
     with pytest.raises(FlowError, match="permission expired or display/frame changed"):
         execute_frozen_line(session, plan, clock=lambda: 102.)
+
+
+def test_unknown_post_troop_recovers_only_from_fresh_same_frame_evidence(monkeypatch, tmp_path):
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_args: [100, 580, 180, 710])
+    before, selected = frame("before", 99, root=tmp_path), frame("selected", 100, root=tmp_path)
+    first, second = (frame("post-unclear", 103, root=tmp_path, post=True),
+                     frame("post-clear", 104, root=tmp_path, post=True))
+    session = Session(selected, first)
+    pending = iter((first, second))
+    def observe(purpose):
+        session.observes.append(purpose)
+        session.last_snapshot = next(pending)
+        return session.last_snapshot
+    session.observe = observe
+    def read(_session, post, _before, _point, bbox):
+        if str(post) == str(first.screenshot_path) and bbox[0] == 100:
+            return {}  # no guessed x0 from the prebattle army
+        return {"count": 0, "confidence": .99, "frame": str(post), "slot_bbox": list(bbox),
+                "portrait_score": .99, "portrait_source": "current_frame_saved_battle_portrait",
+                "readings": [{"text": "x0", "confidence": .99}]}
+    monkeypatch.setattr("autococ.frozen_line._post_troop_reading", read)
+    plan = freeze(session, selected, before)
+    assert execute_frozen_line(session, plan, clock=lambda: 102., sleep=lambda _seconds: None) is second
+    assert session.observes == ["frozen-line-post", "frozen-line-post-recheck"]
+    assert len(session.inputs) == len(plan.actions)
+    assert [row["troops"] for row in session.frozen_line_receipt["verification_frames"]] == [
+        [False, True, True, True], [True, True, True, True]]
+
+
+def test_positive_post_count_conflict_stops_without_rechecking_or_redeploying(monkeypatch, tmp_path):
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_args: [100, 580, 180, 710])
+    before, selected, post = (frame("before", 99, root=tmp_path),
+                              frame("selected", 100, root=tmp_path),
+                              frame("post", 103, root=tmp_path, post=True))
+    post.observations["battle"]["slots"][0]["count"] = 1
+    session = Session(selected, post)
+    plan = freeze(session, selected, before)
+    with pytest.raises(DeploymentError, match="consumption is unverified"):
+        execute_frozen_line(session, plan, clock=lambda: 102., sleep=lambda _seconds: None)
+    assert session.observes == ["frozen-line-post"]
+    assert len(session.inputs) == len(plan.actions)
+
+
+def test_strong_ocr_count_conflict_stops_without_recheck_or_redeployment(monkeypatch, tmp_path):
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_args: [100, 580, 180, 710])
+    before, selected, post = (frame("conflict-before", 99, root=tmp_path),
+                              frame("conflict-selected", 100, root=tmp_path),
+                              frame("conflict-post", 103, root=tmp_path, post=True))
+    session = Session(selected, post)
+    plan = freeze(session, selected, before)
+    def read(_session, path, _before, _point, bbox):
+        if bbox == plan.troop_cards[0][4]:
+            return {"conflict": True, "reason": "strong_count_conflict", "counts": [0, 1],
+                    "frame": str(path), "slot_bbox": list(bbox)}
+        return {"count": 0, "confidence": .99, "frame": str(path), "slot_bbox": list(bbox),
+                "portrait_score": .99, "portrait_source": "current_frame_saved_battle_portrait",
+                "readings": [{"text": "x0", "confidence": .99}]}
+    monkeypatch.setattr("autococ.frozen_line._post_troop_reading", read)
+    with pytest.raises(DeploymentError, match="consumption is unverified") as error:
+        execute_frozen_line(session, plan, clock=lambda: 102., sleep=lambda _seconds: None)
+    assert session.observes == ["frozen-line-post"]
+    assert len(session.inputs) == len(plan.actions)
+    receipt = error.value.partial_receipt
+    assert len(receipt["verification_frames"]) == 1
+    assert receipt["troops"][0]["reading"]["reason"] == "strong_count_conflict"
+    assert receipt["troops"][0]["verified"] is False
+
+
+def test_rechecks_never_combine_troops_and_hero_from_different_frames(monkeypatch, tmp_path):
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_args: [100, 580, 180, 710])
+    monkeypatch.setattr("autococ.unit_catalog.recognize_card_identity",
+                        lambda *_args, **_kwargs: {"unit_id": "grand_warden", "confidence": .99,
+                                                     "version_verified": True})
+    monkeypatch.setattr("autococ.images.read_frame", lambda *_args: __import__("numpy").zeros((720, 1280, 3), dtype="uint8"))
+    before, selected = frame("before", 99, root=tmp_path, heroes=True), frame("selected", 100, root=tmp_path, heroes=True)
+    posts = [frame(f"post-{index}", 103 + index, root=tmp_path, post=True)
+             for index in range(3)]
+    session = Session(selected, posts[0])
+    pending = iter(posts)
+    def observe(purpose):
+        session.observes.append(purpose)
+        session.last_snapshot = next(pending)
+        return session.last_snapshot
+    session.observe = observe
+    def read(_session, path, _before, _point, bbox):
+        if str(path) != str(posts[0].screenshot_path):
+            return {}
+        return {"count": 0, "confidence": .99, "frame": str(path), "slot_bbox": list(bbox),
+                "portrait_score": .99, "portrait_source": "current_frame_saved_battle_portrait",
+                "readings": [{"text": "x0", "confidence": .99}]}
+    monkeypatch.setattr("autococ.frozen_line._post_troop_reading", read)
+    monkeypatch.setattr("autococ.hero_state.locate_current_deployed_hero_card",
+                        lambda path, _hero, **_kwargs: None if str(path) == str(posts[0].screenshot_path) else {
+                            "bbox": [610, 595, 699, 711], "frame": str(path),
+                            "template_client_version": "18.647.2"})
+    monkeypatch.setattr("autococ.hero_state.recognize_hero_state",
+                        lambda path, _bbox, **_kwargs: {"deployed": True, "frame": str(path),
+                            "evidence": {"portrait_identity": {"unit_id": "grand_warden",
+                                "version_verified": True, "template_client_version": "18.647.2"}}})
+    plan = freeze(session, selected, before, heroes=("grand_warden",))
+    with pytest.raises(DeploymentError, match="consumption is unverified") as error:
+        execute_frozen_line(session, plan, clock=lambda: 102., sleep=lambda _seconds: None)
+    rows = error.value.partial_receipt["verification_frames"]
+    assert len(rows) == 3 and rows[0]["troops"] == [True] * 4 and rows[0]["heroes"] == [False]
+    assert all(row["troops"] == [False] * 4 and row["heroes"] == [True] for row in rows[1:])
+    assert len(session.inputs) == len(plan.actions)
+
+
+def test_recheck_unknown_scene_stops_without_any_new_game_input(monkeypatch, tmp_path):
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_args: [100, 580, 180, 710])
+    before, selected = frame("before", 99, root=tmp_path), frame("selected", 100, root=tmp_path)
+    first = frame("post-unclear", 103, root=tmp_path, post=True)
+    unknown = replace(frame("post-unknown", 104, root=tmp_path, post=True), scene="unknown")
+    session = Session(selected, first)
+    pending = iter((first, unknown))
+    def observe(purpose):
+        session.observes.append(purpose)
+        session.last_snapshot = next(pending)
+        return session.last_snapshot
+    session.observe = observe
+    monkeypatch.setattr("autococ.frozen_line._post_troop_reading", lambda *_args: {})
+    plan = freeze(session, selected, before)
+    with pytest.raises(DeploymentError, match="Fresh post-burst battle frame unavailable"):
+        execute_frozen_line(session, plan, clock=lambda: 102., sleep=lambda _seconds: None)
+    assert session.observes == ["frozen-line-post", "frozen-line-post-recheck"]
+    assert len(session.inputs) == len(plan.actions)
 
 
 def test_vision_mode_never_enters_model_free_executor(monkeypatch, tmp_path):

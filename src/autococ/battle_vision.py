@@ -218,6 +218,20 @@ class BattleObserver:
             return None
         crop = source[b:d, a:c]
         reads = reader(crop)
+        def strong_counts(items):
+            values = set()
+            for item in items:
+                match = re.fullmatch(r"[xX×]\s*(\d+)", str(item.text).strip())
+                confidence = item.confidence
+                if (match is not None and type(confidence) in (int, float) and
+                        math.isfinite(confidence) and confidence >= .9):
+                    values.add(int(match[1]))
+            return values
+
+        numeric_evidence = strong_counts(reads)
+        if len(numeric_evidence) > 1:
+            return {"reason": "strong_count_conflict", "counts": sorted(numeric_evidence),
+                    "frame": str(path), "slot_bbox": list(slot["bbox"])}
         def valid(items):
             return (len(items) == 1 and math.isfinite(items[0].confidence)
                     and max(.9, self.recognizer.ocr_config.confidence_threshold) <= items[0].confidence <= 1
@@ -228,6 +242,10 @@ class BattleObserver:
         if not match:
             binary = cv2.threshold(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), 120, 255, cv2.THRESH_BINARY)[1]
             reads = reader(binary)
+            numeric_evidence.update(strong_counts(reads))
+            if len(numeric_evidence) > 1:
+                return {"reason": "strong_count_conflict", "counts": sorted(numeric_evidence),
+                        "frame": str(path), "slot_bbox": list(slot["bbox"])}
             match = valid(reads)
             method = "fast_header_threshold_line"
         if not match:
@@ -268,6 +286,19 @@ class BattleObserver:
         count_at = time.monotonic()
         timings = {"prepare": decoded - started, "guard": guarded_at - decoded,
                    "count": count_at - guarded_at}
+        if isinstance(reading, dict) and reading.get("reason") == "strong_count_conflict":
+            # A second rendering of the same glyph may not erase a strong
+            # contradictory number. Keep this frame unusable for actions.
+            return SceneSnapshot("unknown", 0.0, path, {
+                "recognition_scope": purpose, "fast_fallback": False,
+                "recognition_seconds": time.monotonic() - started,
+                "recognition_timings_sec": timings,
+                "source_resolution": [width, height],
+                "baseline_resolution": list(self.recognizer.baseline_resolution),
+                "deployment_count_conflict": reading,
+                "deployment_count_reads": [reading], "buttons": [], "ocr": [],
+                "battle": {"slots": []}, "matched_reasons": ["strong_count_conflict"],
+            })
         if guarded is None or (purpose == "troop_count" and reading is None):
             snapshot = self.recognizer.recognize(path)
             if modal and snapshot.scene in {"battle", "enemy_village"}:

@@ -555,6 +555,18 @@
       "template_sha256": "e32b9c740d882e7e366181a60af4fbca4e958d5728d29d1d2cdee4759b60455c"
     },
     {
+      "unit_id": "archer_queen",
+      "surface": "battle",
+      "path": "units/archer_queen_battle_deployed_001038_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261016-001038-401680-d5107440/frames/00022-battle-settlement.png",
+      "source_bbox_1280": [965, 632, 1002, 674],
+      "source_card_bbox_1280": [938, 595, 1027, 711],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "0a210e5210468d59769f92bc756d9f4a1f46f185b90d4d9d46f9172474e2f5e0",
+      "template_sha256": "b438a2e901c05578130e3acd586414053916809629481b7eeafcd3ce8154f915"
+    },
+    {
       "unit_id": "archer",
       "surface": "current_picker",
       "path": "units/archer_picker_active_18_647_2.png",

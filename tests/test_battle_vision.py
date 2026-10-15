@@ -56,8 +56,18 @@ class BattleVisionTests(unittest.TestCase):
         self.assertEqual(snapshot.observations["deployment_count_reads"][0]["count"], 0)
         self.assertEqual(self.provider.recognize_line_image.call_count, 2)
 
+    def test_conflicting_strong_raw_numbers_cannot_be_hidden_by_threshold_retry(self):
+        self.provider.recognize_line_image.side_effect = [
+            [OCRText("x0", .97), OCRText("x1", .98)], [OCRText("x0", .99)]]
+        snapshot = self.observe()
+        self.assertEqual(snapshot.scene, "unknown")
+        self.assertEqual(snapshot.observations["deployment_count_conflict"]["counts"], [0, 1])
+        self.assertEqual(snapshot.observations["battle"]["slots"], [])
+        self.reader.recognize.assert_not_called()
+        self.assertEqual(self.provider.recognize_line_image.call_count, 1)
+
     def test_unknown_low_confidence_or_conflicting_count_falls_back(self):
-        for reads in ([], [OCRText("x0", .89)], [OCRText("x0", .99), OCRText("x1", .99)],
+        for reads in ([], [OCRText("x0", .89)],
                       [OCRText("xO", .99)], [OCRText("x0", float("nan"))]):
             with self.subTest(reads=reads):
                 self.provider.recognize_line_image.return_value = reads

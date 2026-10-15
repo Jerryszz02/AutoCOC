@@ -1,0 +1,97 @@
+{
+  "frozen-line-001038-00018-toolbar.png": {
+    "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-001038-401680-d5107440\\frames\\00018-line-boundary.png",
+    "source_sha256": "86d630091e308e3772aa7fe95f0fa1d7f08201834034d35abffddc43ad47900a",
+    "fixture_sha256": "498c7c9bcc69323d43dcb1d771c562f7798e8b7b30e225a8f19303336f9eb9c0",
+    "derivation": "retain original 2560x1440 pixels in rows 1090:1440; zero rows 0:1090; PNG encode",
+    "retained_roi_native": [
+      0,
+      1090,
+      2560,
+      1440
+    ]
+  },
+  "frozen-line-001038-00020-toolbar.png": {
+    "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-001038-401680-d5107440\\frames\\00020-frozen-line-post.png",
+    "source_sha256": "8a89850d1305c4cc38f32dad2ee8c7b8ff6f83b3365aaa87a4e5c424f9fbb4a4",
+    "fixture_sha256": "cb71ae2b6892866993e46770709ea2009167eb8c15b44305f9a48b8a3715c850",
+    "derivation": "retain original 2560x1440 pixels in rows 1090:1440; zero rows 0:1090; PNG encode",
+    "retained_roi_native": [
+      0,
+      1090,
+      2560,
+      1440
+    ]
+  },
+  "frozen-line-001038-00021-toolbar.png": {
+    "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-001038-401680-d5107440\\frames\\00021-battle-settlement.png",
+    "source_sha256": "63f220d4eb9c3f383f0ffc590b03274dc06b9264aa38b41d46b99f3bfeed85c1",
+    "fixture_sha256": "86dea46d8460c9cb51c5b0a3016b3d7f7013428f4524b629a9c4db234a9e1193",
+    "derivation": "retain original 2560x1440 pixels in rows 1090:1440; zero rows 0:1090; PNG encode",
+    "retained_roi_native": [
+      0,
+      1090,
+      2560,
+      1440
+    ]
+  },
+  "frozen-line-001038-00022-toolbar.png": {
+    "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-001038-401680-d5107440\\frames\\00022-battle-settlement.png",
+    "source_sha256": "0a210e5210468d59769f92bc756d9f4a1f46f185b90d4d9d46f9172474e2f5e0",
+    "fixture_sha256": "59769927599f860b1b5ff14f780ca8a068723e598c173bd643c0de0de1f9e4ce",
+    "derivation": "retain original 2560x1440 pixels in rows 1090:1440; zero rows 0:1090; PNG encode",
+    "retained_roi_native": [
+      0,
+      1090,
+      2560,
+      1440
+    ]
+  },
+  "frozen-line-001038-00023-toolbar.png": {
+    "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-001038-401680-d5107440\\frames\\00023-battle-settlement.png",
+    "source_sha256": "4c7e5adbe3f92d2b5ddbc35e410eb06e02a2828fd2feef0c055d463b3d072c62",
+    "fixture_sha256": "5f3fbcbe1722bcfe3cbec0ab811e771e9e857839a7df58c4b1075955f893a88e",
+    "derivation": "retain original 2560x1440 pixels in rows 1090:1440; zero rows 0:1090; PNG encode",
+    "retained_roi_native": [
+      0,
+      1090,
+      2560,
+      1440
+    ]
+  },
+  "frozen-line-001038-00025-toolbar.png": {
+    "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-001038-401680-d5107440\\frames\\00025-battle-settlement.png",
+    "source_sha256": "c8b209ce96eeff01b6b67211868ab4431cf63f8d6ca58b748bfeb432e21cefcd",
+    "fixture_sha256": "9bba7cecca15c0a29e0cec1bff208991f9c19740901efda3e16889b8fadb4998",
+    "derivation": "retain original 2560x1440 pixels in rows 1090:1440; zero rows 0:1090; PNG encode",
+    "retained_roi_native": [
+      0,
+      1090,
+      2560,
+      1440
+    ]
+  },
+  "_queen_template": {
+    "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-001038-401680-d5107440\\frames\\00022-battle-settlement.png",
+    "source_sha256": "0a210e5210468d59769f92bc756d9f4a1f46f185b90d4d9d46f9172474e2f5e0",
+    "template_sha256": "b438a2e901c05578130e3acd586414053916809629481b7eeafcd3ce8154f915",
+    "source_bbox_1280": [
+      965,
+      632,
+      1002,
+      674
+    ],
+    "source_card_bbox_1280": [
+      938,
+      595,
+      1027,
+      711
+    ],
+    "derivation": "resize original 2560x1440 to 1280x720 with cv2.INTER_AREA; crop source_bbox; PNG encode",
+    "independent_positive_frames": [
+      23,
+      25
+    ],
+    "transient_negative_frame": 20
+  }
+}

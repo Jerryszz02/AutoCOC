@@ -1036,7 +1036,14 @@ class ScreenshotRecognizer:
             ("losses", {"损耗的部队", "损耗部队"}, (550, 450, 735, 495)),
             ("return", {"回营", "returnhome"}, (520, 570, 760, 675)),
         ):
-            matches = [item for item in texts if normalize_label(item.text) in labels and self._in_observed_roi(item, roi)]
+            matches = []
+            for item in texts:
+                if not self._in_observed_roi(item, roi):
+                    continue
+                label = normalize_label(item.text)
+                # Current OCR appends d/nd to the Chinese received title in this ROI.
+                if label in labels or (name == "received" and re.fullmatch(r"您得到了?(?:d|nd)", label)):
+                    matches.append(item)
             if matches:
                 anchors[name] = asdict(max(matches, key=lambda item: item.confidence))
         stars = 0 if "defeat" in anchors and "victory" not in anchors and percentage is not None and percentage < 50 else None

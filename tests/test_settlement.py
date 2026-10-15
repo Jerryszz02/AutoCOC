@@ -1,4 +1,5 @@
 from dataclasses import replace
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -246,6 +247,97 @@ class SparseSettlementNumberTests(unittest.TestCase):
         changed = self.image.copy()
         cv2.rectangle(changed, (600, 331), (612, 345), (255, 255, 255), -1)
         self.assertIsNone(locate_number_line(changed, (479, 328, 672, 379)))
+
+
+class CurrentReceivedSettlementTests(unittest.TestCase):
+    root = Path(__file__).resolve().parents[1]
+    provenance = root / "tests/fixtures/settlement-received-ascii-tail-18_647_2.provenance.json"
+
+    def setUp(self):
+        self.metadata = json.loads(self.provenance.read_text(encoding="utf-8"))
+        self.assertEqual(self.metadata["client_version"], "18.647.2")
+
+    def replay(self, sample, *, texts=None, image=None):
+        left, top, right, bottom = self.metadata["crop_xyxy_at_1280x720"]
+        fixture = self.provenance.parent / sample["fixture"]
+        self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(), sample["fixture_sha256"])
+        crop = cv2.imdecode(np.fromfile(fixture, dtype=np.uint8), cv2.IMREAD_COLOR)
+        self.assertEqual(crop.shape[:2], (bottom - top, right - left))
+        if image is None:
+            image = np.zeros((720, 1280, 3), dtype=np.uint8)
+            image[top:bottom, left:right] = crop
+        readings = [OCRText(row["text"], row["confidence"], tuple(row["bbox"]))
+                    for row in sample["ocr"]] if texts is None else texts
+        provider = Mock()
+        provider.recognize_line = None
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "anonymous-settlement.png"
+            cv2.imencode(".png", image)[1].tofile(path)
+            return ScreenshotRecognizer(provider=provider)._settlement_observation(
+                path, readings, (1280, 720))
+
+    def test_two_real_frames_replay_original_ocr_and_verified_bonus(self):
+        for sample, received in zip(self.metadata["samples"], ("您得到了d:", "您得到了Nd:")):
+            with self.subTest(frame=sample["source_frame"]):
+                self.assertIn(received, [row["text"] for row in sample["ocr"]])
+                result = self.replay(sample)
+                self.assertEqual(result["percentage"], 69)
+                self.assertEqual(result["stars"], 1)
+                self.assertEqual(result["loot"], {"gold": 733740, "elixir": 743908, "dark_elixir": 6243})
+                self.assertEqual(result["bonus"], {"gold": 371250, "elixir": 371250, "dark_elixir": 2747})
+                self.assertEqual(result["evidence"]["layout"], "victory_with_bonus_three_rows_v1")
+                self.assertEqual(result["evidence"]["bonus"]["marker"]["text"], "99% 奖励：")
+                self.assertEqual(result["evidence"]["bonus"]["source"], "explicit_bonus_panel")
+
+    def test_wrong_received_roi_or_title_cannot_unlock_bonus(self):
+        sample = self.metadata["samples"][1]
+        readings = [OCRText(row["text"], row["confidence"], tuple(row["bbox"]))
+                    for row in sample["ocr"]]
+        received = next(item for item in readings if "得到了" in item.text)
+        variants = [replace(received, bbox=(300, 287, 380, 312))]
+        variants += [replace(received, text=text) for text in
+                     ("您没有得到Nd:", "您得到了额外Nd:", "您得到奖励Nd:",
+                      "您得到了x:", "您得到了nothing:")]
+        for variant in variants:
+            with self.subTest(received=variant):
+                result = self.replay(sample, texts=[variant if item is received else item for item in readings])
+                self.assertIsNone(result["evidence"]["layout"])
+                self.assertTrue(all(value is None for value in result["bonus"].values()))
+                self.assertEqual(result["loot"]["gold"], 733740)
+
+    def test_marker_signed_amount_conflict_and_other_anchors_still_gate_bonus(self):
+        sample = self.metadata["samples"][1]
+        readings = [OCRText(row["text"], row["confidence"], tuple(row["bbox"]))
+                    for row in sample["ocr"]]
+        gold = next(item for item in readings if item.text == "+371250" and item.bbox[1] == 352)
+        variants = {
+            "missing_marker": [item for item in readings if "奖励" not in item.text],
+            "unsigned_gold": [replace(item, text="371250") if item is gold else item for item in readings],
+            "weak_gold": [replace(item, confidence=.89) if item is gold else item for item in readings],
+            "conflicting_gold": readings + [replace(gold, text="+371251")],
+            "title_alone": [item for item in readings if "奖励" not in item.text and not item.text.startswith("+")],
+            "missing_return": [item for item in readings if item.text != "回营"],
+            "missing_losses": [item for item in readings if item.text != "损耗的部队"],
+        }
+        for name, texts in variants.items():
+            with self.subTest(negative=name):
+                result = self.replay(sample, texts=texts)
+                self.assertIsNone(result["evidence"]["layout"])
+                if name in {"unsigned_gold", "weak_gold", "conflicting_gold"}:
+                    self.assertIsNone(result["bonus"]["gold"])
+                else:
+                    self.assertTrue(all(value is None for value in result["bonus"].values()))
+        result = self.replay(sample, texts=variants["conflicting_gold"])
+        self.assertEqual(result["bonus"]["elixir"], 371250)
+        self.assertEqual(result["bonus"]["dark_elixir"], 2747)
+        left, top, right, bottom = self.metadata["crop_xyxy_at_1280x720"]
+        image = np.zeros((720, 1280, 3), dtype=np.uint8)
+        image[top:bottom, left:right] = cv2.imdecode(
+            np.fromfile(self.provenance.parent / sample["fixture"], dtype=np.uint8), cv2.IMREAD_COLOR)
+        image[20:175, 430:845] = 0
+        without_star = self.replay(sample, image=image)
+        self.assertIsNone(without_star["stars"])
+        self.assertIsNone(without_star["evidence"]["layout"])
 
 
 class VictorySettlementTests(unittest.TestCase):

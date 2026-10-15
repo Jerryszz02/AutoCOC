@@ -191,25 +191,40 @@ def _post_troop_reading(session: Any, post_path: Any, source_path: str,
     observer = BattleObserver(session.recognizer)
     observer.cards[round(point[0])] = (bbox, cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY).copy())
     reading = observer.count(post_path, current, {"point": list(point), "bbox": list(bbox)})
+    def conflict(values) -> dict:
+        return {"conflict": True, "reason": "strong_count_conflict",
+                "counts": sorted(set(values)), "frame": str(post_path), "slot_bbox": list(bbox)}
+
+    if isinstance(reading, dict) and reading.get("reason") == "strong_count_conflict":
+        return conflict(reading.get("counts", ()))
+    snapshot = getattr(session, "last_snapshot", None)
+    current_ocr = (snapshot.observations.get("ocr", []) if snapshot is not None and
+                   str(snapshot.screenshot_path) == str(post_path) else [])
+    candidates = []
+    strong_full_counts = set()
+    for item in current_ocr:
+        if not isinstance(item, dict) or not isinstance(item.get("bbox"), (list, tuple)):
+            continue
+        box = item["bbox"]
+        count = _COUNT.fullmatch(str(item.get("text", "")).strip())
+        if (len(box) == 4 and all(type(v) is int for v in box) and
+                left <= box[0] < box[2] <= right + 3 and
+                top - 5 <= box[1] < box[3] <= top + 38 and count is not None):
+            candidates.append(item)
+            confidence = item.get("confidence")
+            if (type(confidence) in (int, float) and math.isfinite(confidence) and confidence >= .9):
+                strong_full_counts.add(int(count[1]))
+    if len(strong_full_counts) > 1:
+        return conflict(strong_full_counts)
     if reading:
+        if strong_full_counts and strong_full_counts != {reading["count"]}:
+            return conflict(strong_full_counts | {reading["count"]})
         return reading
     # Full-frame OCR can locate a gray card's small x0 while the broad header
     # crop is uncertain. Its low-confidence number is *only* a locator; truth
     # still requires a new >=.9 line read and an independent current portrait.
-    snapshot = getattr(session, "last_snapshot", None)
     if snapshot is None or str(snapshot.screenshot_path) != str(post_path):
         return {}
-    left, top, right, bottom = bbox
-    candidates = []
-    for item in snapshot.observations.get("ocr", []):
-        if not isinstance(item, dict) or not isinstance(item.get("bbox"), (list, tuple)):
-            continue
-        box = item["bbox"]
-        if (len(box) == 4 and all(type(v) is int for v in box) and
-                left <= box[0] < box[2] <= right + 3 and
-                top - 5 <= box[1] < box[3] <= top + 38 and
-                _COUNT.fullmatch(str(item.get("text", "")).strip())):
-            candidates.append(item)
     if len(candidates) > 1:
         return {}
     if candidates:
@@ -243,28 +258,55 @@ def _post_troop_reading(session: Any, post_path: Any, source_path: str,
     from .locator import scale_box
 
     original = read_frame(post_path)
-    native_box = scale_box(tuple(candidate["bbox"]), from_resolution=(1280, 720),
-                           to_resolution=(original.shape[1], original.shape[0]))
-    a, b, c, d = native_box
-    crop = original[b:d, a:c]
     reader = getattr(session.recognizer.provider, "recognize_line_image", None)
-    if crop.size == 0 or not callable(reader):
+    if not callable(reader):
         return {}
-    binary = cv2.threshold(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), 120, 255, cv2.THRESH_BINARY)[1]
-    reads = reader(binary)
-    if len(reads) != 1:
-        return {}
-    narrow = reads[0]
-    count = _COUNT.fullmatch(str(narrow.text).strip())
     locator_count = _COUNT.fullmatch(str(candidate["text"]).strip()) if candidate["text"] is not None else None
-    if (count is None or (locator_source == "current_frame_ocr_box" and
-                           (locator_count is None or count[1] != locator_count[1])) or
-            not math.isfinite(narrow.confidence) or narrow.confidence < .9):
+    # The tight OCR box can trim the dark outline of a small gray x0. One
+    # fixed two-pixel extension stays inside the independently bound header;
+    # both reads use this frame and the same existing >=.9 proof threshold.
+    tight = tuple(candidate["bbox"])
+    padded = (max(left, tight[0] - 2), max(top - 5, tight[1] - 2),
+              min(right + 3, tight[2] + 2), min(top + 38, tight[3] + 2))
+    proofs = []
+    strong_counts = set()
+    for proof_box in (tight, padded):
+        a, b, c, d = scale_box(proof_box, from_resolution=(1280, 720),
+                              to_resolution=(original.shape[1], original.shape[0]))
+        crop = original[b:d, a:c]
+        if crop.size == 0:
+            continue
+        binary = cv2.threshold(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), 120, 255, cv2.THRESH_BINARY)[1]
+        reads = reader(binary)
+        for item in reads:
+            number = _COUNT.fullmatch(str(item.text).strip())
+            confidence = item.confidence
+            if (number is not None and type(confidence) in (int, float) and
+                    math.isfinite(confidence) and confidence >= .9):
+                strong_counts.add(int(number[1]))
+        if len(strong_counts) > 1:
+            return conflict(strong_counts)  # no crop may override a strong same-frame read
+        if len(reads) != 1:
+            continue
+        narrow = reads[0]
+        count = _COUNT.fullmatch(str(narrow.text).strip())
+        if (count is None or type(narrow.confidence) not in (int, float) or
+                not math.isfinite(narrow.confidence) or narrow.confidence < .9):
+            continue
+        proofs.append((proof_box, narrow, count))
+    if len({item[2][1] for item in proofs}) > 1:
+        return conflict(int(item[2][1]) for item in proofs)
+    if (not proofs or (locator_source == "current_frame_ocr_box" and
+                       (locator_count is None or proofs[0][2][1] != locator_count[1]))):
+        if (proofs and locator_count is not None and strong_full_counts and
+                int(proofs[0][2][1]) != int(locator_count[1])):
+            return conflict(strong_full_counts | {int(proofs[0][2][1])})
         return {}
+    proof_box, narrow, count = proofs[0]
     return {"count": int(count[1]), "confidence": narrow.confidence,
-            "frame": str(post_path), "slot_bbox": list(bbox), "roi": list(candidate["bbox"]),
+            "frame": str(post_path), "slot_bbox": list(bbox), "roi": list(proof_box),
             "readings": [{"text": narrow.text, "confidence": narrow.confidence,
-                          "bbox": list(candidate["bbox"]), "source": "current_ocr_box_threshold_line"}],
+                          "bbox": list(proof_box), "source": "current_ocr_box_threshold_line"}],
             "portrait_score": score, "portrait_scale": scale,
             "portrait_source": "current_frame_saved_battle_portrait",
             "locator": {"source": locator_source, "text": candidate["text"], "bbox": candidate["bbox"],
@@ -570,6 +612,7 @@ def execute_frozen_line(session: Any, plan: FrozenLinePlan, *,
         if not isinstance(slots, list):
             slots = []
         troop_results = []
+        count_conflict = False
         for unit_id, source, initial, point, bbox in plan.troop_cards:
             # Spent cards can disappear from full-frame slots. Rebind their
             # saved portrait and read the quantity in this particular frame.
@@ -581,9 +624,15 @@ def execute_frozen_line(session: Any, plan: FrozenLinePlan, *,
             conflicting = [row for row in slots if isinstance(row, dict) and
                            (row.get("unit_id") == unit_id or row.get("bbox") == list(bbox)) and
                            type(row.get("count")) is int and row["count"] > 0]
+            count_conflict |= bool(conflicting) or reading.get("conflict") is True
             score = reading.get("confidence")
             portrait = reading.get("portrait_score")
             reads = reading.get("readings")
+            count_conflict |= (type(reading.get("count")) is int and reading["count"] > 0 and
+                reading.get("frame") == str(post.screenshot_path) and reading.get("slot_bbox") == list(bbox) and
+                type(score) in (int, float) and math.isfinite(score) and score >= .9 and
+                type(portrait) in (int, float) and math.isfinite(portrait) and portrait >= .92 and
+                reading.get("portrait_source") == "current_frame_saved_battle_portrait")
             explicit = [item for item in reads if isinstance(item, dict) and
                         type(item.get("confidence")) in (int, float) and item["confidence"] >= .9 and
                         (match := _COUNT.fullmatch(str(item.get("text", "")).strip())) is not None and int(match[1]) == 0] if isinstance(reads, list) else []
@@ -632,7 +681,7 @@ def execute_frozen_line(session: Any, plan: FrozenLinePlan, *,
         receipt.setdefault("verification_frames", []).append(
             {"frame": str(post.screenshot_path), "troops": [r["verified"] for r in troop_results],
              "heroes": [r["verified"] for r in hero_results]})
-        if receipt["verified"] or attempt == 2 or not all(row["verified"] for row in troop_results):
+        if receipt["verified"] or attempt == 2 or count_conflict:
             break
         try:
             session.check_deadline()
