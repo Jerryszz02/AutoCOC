@@ -358,6 +358,17 @@
       "client_version": "18.647.2"
     },
     {
+      "unit_id": "archer",
+      "surface": "battle",
+      "path": "units/archer_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/collections/20261015-234304-archer-preview-session/frames/00013-scout-camera-ready.png",
+      "source_bbox_1280": [457, 634, 497, 674],
+      "state": "initial_scout",
+      "client_version": "18.647.2",
+      "source_sha256": "659813c3c684ebd4ffd48e095503b68bc529024e7faadf1137c29a78a3d11f5a",
+      "template_sha256": "2de11c7f6b43cd4fbbab5ae7da43f5dc3e87865e66263d88cf919200afb8a07d"
+    },
+    {
       "unit_id": "sky_wagon",
       "surface": "battle",
       "path": "units/sky_wagon_battle_18_647_2.png",

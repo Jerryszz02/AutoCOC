@@ -20,6 +20,88 @@ from autococ.vision import ScreenshotRecognizer, _colliding_card_groups
 class BattleCardTests(unittest.TestCase):
     root = Path(__file__).resolve().parents[1]
 
+    def test_current_archer_battle_template_is_bound_to_live_preview(self) -> None:
+        from autococ.unit_catalog import template_manifest
+
+        entry = next(item for item in template_manifest(client_version="18.647.2")["templates"]
+                     if item["unit_id"] == "archer" and item["surface"] == "battle")
+        template_path = self.root / "assets/catalogs" / entry["path"]
+        self.assertEqual(hashlib.sha256(template_path.read_bytes()).hexdigest(),
+                         entry["template_sha256"])
+        source = Path(r"E:\projects\AutoCOC") / entry["source_frame"]
+        if source.is_file():
+            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(),
+                             entry["source_sha256"])
+            image = cv2.imdecode(np.fromfile(source, dtype=np.uint8), cv2.IMREAD_COLOR)
+            image = cv2.resize(image, (1280, 720), interpolation=cv2.INTER_AREA)
+            left, top, right, bottom = entry["source_bbox_1280"]
+            template = cv2.imdecode(np.fromfile(template_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            self.assertTrue(np.array_equal(template, image[top:bottom, left:right]))
+
+    def test_current_archer_battle_replays_five_real_troops(self) -> None:
+        metadata = json.loads((self.root / "tests/fixtures/battle_toolbar_archer_18_647_2_20261015.json")
+                              .read_text(encoding="utf-8"))
+        expected = [("electro_dragon", 10), ("dragon", 1), ("baby_dragon", 1),
+                    ("balloon", 2), ("archer", 3)]
+        provider = RapidOCRProvider()
+        for entry in metadata["frames"]:
+            with self.subTest(frame=entry["fixture"]):
+                path = self.root / "tests/fixtures" / entry["fixture"]
+                self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),
+                                 entry["fixture_sha256"])
+                source = Path(r"E:\projects\AutoCOC") / entry["source_frame"]
+                if source.is_file():
+                    self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(),
+                                     entry["source_sha256"])
+                    original = cv2.imdecode(np.fromfile(source, dtype=np.uint8), cv2.IMREAD_COLOR)
+                    original = cv2.resize(original, (1280, 720), interpolation=cv2.INTER_AREA)
+                    fixture = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+                    left, top, right, bottom = entry["retained_roi_1280"]
+                    self.assertTrue(np.array_equal(fixture[top:bottom, left:right],
+                                                   original[top:bottom, left:right]))
+                texts = [OCRText(item["text"], item["confidence"], tuple(item["bbox"]))
+                         for item in entry["ocr"]]
+                vision = ScreenshotRecognizer(provider=provider)
+                vision.client_version = metadata["client_version"]
+                slots = vision._battle_observation(path, texts, "enemy_village")["slots"]
+                self.assert_independent(slots)
+                troops = [slot for slot in slots if slot["kind"] == "troop"]
+                self.assertEqual([(slot["unit_id"], slot["count"]) for slot in troops],
+                                 expected)
+                archer = troops[-1]
+                self.assertEqual(archer["bbox"], [432, 595, 520, 711])
+                self.assertTrue(archer["evidence"]["identity"]["version_verified"])
+                self.assertGreaterEqual(archer["evidence"]["identity"]["confidence"], .94)
+
+    def test_current_archer_battle_rejects_wrong_version_missing_face_or_count(self) -> None:
+        metadata = json.loads((self.root / "tests/fixtures/battle_toolbar_archer_18_647_2_20261015.json")
+                              .read_text(encoding="utf-8"))
+        entry = metadata["frames"][-1]
+        path = self.root / "tests/fixtures" / entry["fixture"]
+        image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        texts = [OCRText(item["text"], item["confidence"], tuple(item["bbox"]))
+                 for item in entry["ocr"]]
+        provider = RapidOCRProvider()
+        for case in ("wrong_version", "missing_face", "missing_count"):
+            with self.subTest(case=case), TemporaryDirectory() as folder:
+                changed = image.copy()
+                readings = list(texts)
+                if case == "missing_face":
+                    changed[634:674, 452:503] = 0
+                elif case == "missing_count":
+                    changed[590:625, 477:520] = 0
+                    readings = [item for item in readings if not (
+                        item.text == "x3" and item.bbox[0] > 450)]
+                replay = Path(folder) / "anonymous-toolbar.png"
+                cv2.imencode(".png", changed)[1].tofile(replay)
+                vision = ScreenshotRecognizer(provider=provider)
+                vision.client_version = ("18.647.3" if case == "wrong_version" else
+                                         "18.647.2")
+                slots = vision._battle_observation(replay, readings, "enemy_village")["slots"]
+                self.assertFalse(any(slot["unit_id"] == "archer" and
+                                     type(slot["count"]) is int and slot["count"] > 0
+                                     for slot in slots))
+
     def test_colliding_card_components_include_transitive_overlap_in_any_order(self) -> None:
         first = (10, 595, 100, 711)
         middle = (95, 595, 185, 711)

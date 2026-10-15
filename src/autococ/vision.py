@@ -1322,7 +1322,10 @@ class ScreenshotRecognizer:
 
         from .hero_state import _match
 
-        hero_templates = sorted((Path(__file__).resolve().parents[2] / "assets/templates").glob("battle_hero_pet_*.png"))
+        hero_templates = sorted(
+            path for path in (Path(__file__).resolve().parents[2] / "assets/templates").glob(
+                "battle_hero_pet_*.png")
+            if not path.name.endswith("_18_647_2.png") or self.client_version == "18.647.2")
 
         # A known pet icon can locate a header obscured by map colors, but the
         # card still needs its own two long side borders and a complete bottom.
