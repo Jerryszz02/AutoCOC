@@ -1,0 +1,18 @@
+{
+  "client_version": "18.647.2",
+  "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261015-195235-event-progress\\frames\\00003-goal-page-reread.png",
+  "source_sha256": "f8d02f52dc5482c59ad722ce06df7c3769b8372987d401bddb1c5e40fe7275fe",
+  "retained_xyxy_native": [
+    310,
+    30,
+    2180,
+    1120
+  ],
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "output_sha256": "0cc8e02318fb4d0d137da5e5416d727d09d5cb9da1da7269444eb594b3788eea",
+  "contents": "Only the current event foreground panel; player name, resource HUD, and village background outside it removed.",
+  "purpose": "Real event title, section, and stylized close glyph whose full OCR confidence was 0.922."
+}

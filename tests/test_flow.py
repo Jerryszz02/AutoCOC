@@ -17,6 +17,20 @@ from autococ.session import GameSession
 
 
 class FlowTests(unittest.TestCase):
+    def test_interrupted_model_free_line_retains_uncertain_input_without_vision_claim(self):
+        runner = self.runner(("battle",))
+        receipt = {"mode": "model_free_line_continuous", "attempted_placements": 1,
+                   "issued_placements": 0, "completed": False, "verified": False,
+                   "actions": [{"status": "uncertain"}]}
+        self.session.frozen_line_receipt = receipt
+        with patch("autococ.combat.run_battle", side_effect=KeyboardInterrupt):
+            stats = runner.run_profile("test")
+        result = stats.task_results[-1]
+        self.assertEqual(result.metrics["deployment"], receipt)
+        self.assertEqual(result.metrics["line_execution"]["status"], "cancelled")
+        self.assertNotIn("vision_agent", result.metrics)
+        self.assertEqual(stats.battles_completed, 0)
+
     def test_interrupted_continuous_battle_retains_partial_inputs_in_report(self):
         runner = self.runner(("battle",))
         receipt = {"plan_id": "frozen", "input_count": 5, "attempted_placements": 2,
@@ -422,6 +436,27 @@ class FlowTests(unittest.TestCase):
         self.assertNotIn("request", targets[0])
         self.assertIn("clan_chat", targets[0])
         self.assertNotIn("clan_chat", targets[1])
+
+    def test_return_home_waits_for_overlay_to_finish_without_more_input(self) -> None:
+        partial = self.snapshot()
+        partial.observations["buttons"] = [{"name": "shop"}]
+        home = self.snapshot()
+        self.session.observe.side_effect = [self.snapshot("popup"), home]
+        with patch("autococ.flow.time.sleep"):
+            self.assertIs(return_to_village(self.session, initial_snapshot=partial), home)
+        self.assertEqual(self.session.observe.call_count, 2)
+        self.session.back.assert_not_called()
+        self.session.click.assert_not_called()
+
+    def test_background_shop_never_counts_as_verified_home(self) -> None:
+        partial = self.snapshot()
+        partial.observations["buttons"] = [{"name": "shop"}]
+        self.session.observe.return_value = partial
+        with patch("autococ.flow.time.sleep"), self.assertRaisesRegex(FlowError, "both navigation"):
+            return_to_village(self.session, initial_snapshot=partial)
+        self.assertEqual(self.session.observe.call_count, 2)
+        self.session.back.assert_not_called()
+        self.session.click.assert_not_called()
 
     def test_recovery_does_not_repeat_back_without_scene_progress(self) -> None:
         self.session.observe.return_value = self.snapshot("request")

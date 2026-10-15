@@ -29,6 +29,20 @@ def return_to_village(session: GameSession, *, initial_snapshot: SceneSnapshot |
     for exits in range(5):
         session.check_deadline()
         if snapshot.scene == "village":
+            # Closing overlays can briefly expose only the background shop.
+            # Wait for both home controls without repeating the closing input.
+            for reread in range(3):
+                buttons = snapshot.observations.get("buttons", [])
+                if (snapshot.scene == "village" and math.isfinite(snapshot.confidence)
+                        and snapshot.confidence >= .8 and isinstance(buttons, list)
+                        and all(sum(button.get("name") == name for button in buttons
+                                    if isinstance(button, dict)) == 1 for name in ("attack", "shop"))):
+                    break
+                if reread == 2:
+                    raise FlowError("Village is not verified by confident scene and both navigation controls")
+                session.check_deadline()
+                time.sleep(.2)
+                snapshot = session.observe("home-controls-reread")
             break
         if exits == 4:
             raise FlowError("Village recovery exceeded four verified scene exits")

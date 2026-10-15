@@ -233,8 +233,13 @@ class ScreenshotRecognizer:
             for name, label, roi in (("title", "活动", (590, 25, 690, 90)),
                                      ("close", "X", (1010, 15, 1100, 100)),
                                      ("section", "今日活动", (195, 85, 310, 145))):
+                # The stylized red close glyph can score below the two crisp
+                # text headings (.922 on a held-out panel). It is still bound
+                # to its small top-right ROI and both headings remain required.
+                minimum = .9 if name == "close" else .95
                 matches = [item for item in texts if normalize_label(item.text) == normalize_label(label)
-                           and item.confidence >= .95 and self._in_observed_roi(item, roi)]
+                           and math.isfinite(item.confidence) and minimum <= item.confidence <= 1
+                           and self._in_observed_roi(item, roi)]
                 if len(matches) == 1:
                     anchors[name] = asdict(matches[0])
             if len(anchors) == 3:
@@ -673,6 +678,33 @@ class ScreenshotRecognizer:
                                   "bbox": list(line_roi), "source": "count_bbox_threshold_line" if count_bbox else "header_threshold_line",
                                   "threshold": 120})
 
+        # A current 18.647.2 exhausted card keeps its x0 header but dims the
+        # glyph. The already verified card geometry locates a narrow header
+        # without treating weak full-frame OCR (or an older x1 box) as proof.
+        # Only a high-confidence read from this frame and a gray portrait can
+        # confirm zero; conflicting confident reads are rejected below.
+        if self.client_version == "18.647.2":
+            narrow_reader = getattr(self.provider, "recognize_line_image", None)
+            if callable(narrow_reader):
+                color = cv2.resize(read_frame(path), self.baseline_resolution,
+                                   interpolation=cv2.INTER_AREA)
+                portrait = color[top + round(38 * height / 720):top + round(78 * height / 720),
+                                 left + round(20 * width / 1280):right - round(15 * width / 1280)]
+                if (portrait.size and float(np.mean(cv2.cvtColor(portrait, cv2.COLOR_BGR2HSV)[:, :, 1] < 24)) >= .9):
+                    narrow_roi = (max(roi[0], right - round(48 * width / 1280)),
+                                  max(roi[1], top - round(9 * height / 720)), right,
+                                  min(roi[3], top + round(30 * height / 720)))
+                    a, b, c, d = scale_box(narrow_roi, from_resolution=self.baseline_resolution,
+                                           to_resolution=resolution)
+                    gray = read_frame(path, cv2.IMREAD_GRAYSCALE)[b:d, a:c]
+                    refined = narrow_reader(cv2.threshold(gray, 95, 255, cv2.THRESH_BINARY)[1])
+                    if (len(refined) == 1 and refined[0].text.strip().lower() == "x0"
+                            and math.isfinite(refined[0].confidence)
+                            and max(.9, self.ocr_config.confidence_threshold) <= refined[0].confidence <= 1):
+                        reads.append({"text": refined[0].text, "confidence": refined[0].confidence,
+                                      "bbox": list(narrow_roi), "source": "gray_card_current_glyph_threshold_line",
+                                      "threshold": 95})
+
         confident = [item for item in reads if math.isfinite(item["confidence"])
                      and max(.9, self.ocr_config.confidence_threshold) <= item["confidence"] <= 1]
         matches = [re.fullmatch(r"[xX×]\s*([0-9]+)", item["text"].strip()) for item in confident]
@@ -993,7 +1025,10 @@ class ScreenshotRecognizer:
             line = gray[y:y + 2, 340:940].max(axis=0)
             above = gray[y - 4:y - 2, 340:940].mean(axis=0)
             below = gray[y + 3:y + 5, 340:940].mean(axis=0)
-            if float(((line - np.maximum(above, below)) > 40).mean()) >= .75:
+            # The current two-row defeat has a real gold divider whose ridge
+            # covers 72% of this span against a busy map; the old 75% gate
+            # discarded that row and invalidated the otherwise anchored layout.
+            if float(((line - np.maximum(above, below)) > 40).mean()) >= .7:
                 separator_rows.append(y)
         row_groups = []
         for y in sorted(set(separator_rows)):

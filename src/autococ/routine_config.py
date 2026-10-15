@@ -7,7 +7,7 @@ import re
 from .errors import ConfigError
 
 RESOURCES = ("gold", "elixir", "dark_elixir")
-TASK_KINDS = ("collect", "request", "donate", "resources", "event", "clan_games")
+TASK_KINDS = ("collect", "request", "donate", "train", "resources", "event", "clan_games")
 BATTLE_KINDS = frozenset(("resources", "event", "clan_games"))
 _DEFAULT_RESOURCE_FILTER = object()
 

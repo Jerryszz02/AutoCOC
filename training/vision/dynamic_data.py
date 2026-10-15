@@ -25,6 +25,8 @@ def verify_dynamic_windows(root: Path, windows: list[dict], *, kind: str,
     if kind not in (*EVENT_BY_KIND, "u_position") or not windows:
         raise DatasetError("Dynamic windows require a supported kind and nonempty data")
     ids, seen_frames = set(), {}
+    seen_r_supervision = {}
+    conflicting_r_supervision = set()
     linked: dict[tuple[str, str], set[int]] = defaultdict(set)
     counts = {"positive": 0, "negative": 0, "frames": 0, "groups": 0}
     now_utc = datetime.now(timezone.utc)
@@ -73,6 +75,8 @@ def verify_dynamic_windows(root: Path, windows: list[dict], *, kind: str,
             key = (frame.get("session_id"), frame.get("camera_epoch"), frame.get("frame_id"))
             if any(not isinstance(value, str) or not value for value in key):
                 raise DatasetError(f"{window_id}: frame identity missing")
+            if key[2] in frame_bounds:
+                raise DatasetError(f"{window_id}: repeated source frame_id in one window")
             battle = frame.get("battle_id")
             layout = frame.get("layout_id")
             parent_hash = frame.get("parent_image_sha256")
@@ -135,7 +139,7 @@ def verify_dynamic_windows(root: Path, windows: list[dict], *, kind: str,
                     not (0 <= box[0] < box[2] <= image.shape[1] and
                          0 <= box[1] < box[3] <= image.shape[0])):
                 raise DatasetError(f"{window_id}: ROI outside decoded source image")
-            frame_bounds[key[2]] = (image.shape[1], image.shape[0])
+            frame_bounds[key[2]] = (image.shape[1], image.shape[0], box)
             if kind != "u_position":
                 if not isinstance(frame.get("target_id"), str) or not frame["target_id"]:
                     raise DatasetError(f"{window_id}: R target identity missing")
@@ -149,6 +153,22 @@ def verify_dynamic_windows(root: Path, windows: list[dict], *, kind: str,
                         frame.get("state_source_frame_sha256") != parent_hash or
                         frame.get("state_roi_bbox") != box):
                     raise DatasetError(f"{window_id}: R frame lacks independently reviewed source-bound state")
+                supervision_key = (parent_hash, tuple(box), frame["state_target_id"])
+                prior = seen_r_supervision.get(supervision_key)
+                if prior is not None and prior != frame["state_label"]:
+                    conflicting_r_supervision.add(supervision_key)
+                else:
+                    seen_r_supervision[supervision_key] = frame["state_label"]
+            else:
+                methods = {"human", "agent_visual"} if prototype_only else {"human"}
+                if (frame.get("boxes_complete") is not True or
+                        frame.get("boxes_review_status") != "reviewed" or
+                        frame.get("boxes_review_method") not in methods or
+                        not isinstance(frame.get("boxes_reviewer"), str) or not frame["boxes_reviewer"] or
+                        not isinstance(frame.get("boxes_review_evidence"), str) or not frame["boxes_review_evidence"] or
+                        frame.get("boxes_source_frame_sha256") != parent_hash or
+                        frame.get("boxes_roi_bbox") != box):
+                    raise DatasetError(f"{window_id}: U frame lacks complete source-bound reviewed boxes")
             counts["frames"] += 1
         if kind in EVENT_BY_KIND and row["truth_event"] and not first_capture <= row["event_at_monotonic"] <= previous:
             raise DatasetError(f"{window_id}: event time is outside reviewed source frames")
@@ -157,12 +177,13 @@ def verify_dynamic_windows(root: Path, windows: list[dict], *, kind: str,
                 if not isinstance(truth_box, dict) or truth_box.get("frame_id") not in frame_bounds:
                     raise DatasetError(f"{window_id}: U truth box has no source frame")
                 label, box = truth_box.get("label"), truth_box.get("bbox")
-                width, height = frame_bounds[truth_box["frame_id"]]
+                width, height, frame_roi = frame_bounds[truth_box["frame_id"]]
                 if (not isinstance(label, str) or not (label == "troop_group" or label.startswith("hero:")) or
                         not isinstance(box, list) or len(box) != 4 or
                         any(type(v) not in (int, float) or not math.isfinite(v) for v in box) or
-                        not (0 <= box[0] < box[2] <= width and 0 <= box[1] < box[3] <= height)):
-                    raise DatasetError(f"{window_id}: U truth box is invalid/outside source")
+                        not (frame_roi[0] <= box[0] < box[2] <= frame_roi[2] <= width and
+                             frame_roi[1] <= box[1] < box[3] <= frame_roi[3] <= height)):
+                    raise DatasetError(f"{window_id}: U truth box is invalid/outside reviewed ROI")
     parent = list(range(len(windows)))
 
     def find(i: int) -> int:
@@ -180,6 +201,8 @@ def verify_dynamic_windows(root: Path, windows: list[dict], *, kind: str,
         splits_by_component[find(index)].add(row["split"])
     if any(len(values) != 1 for values in splits_by_component.values()):
         raise DatasetError("Dynamic source-linked component crosses train/val/test split")
+    if conflicting_r_supervision:
+        raise DatasetError("Conflicting R state labels for the same source frame, ROI and target")
     members: dict[int, list[str]] = defaultdict(list)
     for index, row in enumerate(windows):
         members[find(index)].append(row["window_id"])

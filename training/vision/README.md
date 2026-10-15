@@ -1,6 +1,6 @@
 # 本地视觉训练工具
 
-训练环境与日常助手 `.venv` 分开。先在隔离环境中安装相互兼容的 PyTorch、torchvision、Ultralytics、ONNX、ONNX Runtime、OpenCV、NumPy；程序不会下载预训练权重。实际已安装版本会写入每次运行的 `environment.json`，不要把未经冒烟的版本表当成锁定环境。
+训练环境与日常助手 `.venv` 分开。先在隔离环境中安装匹配的 PyTorch/torchvision CUDA wheel，再安装 `requirements-training.txt` 的其余顶层依赖；程序不会下载预训练权重。当前 Windows/Python 3.13.12/RTX 3070 Ti 实测 torch 2.13.0+cu126 与 torchvision 0.28.0+cu126，完整已安装版本写入每次运行的 `environment.json`。其他平台需重新核对兼容性与冒烟，不把这份记录当成通用锁定环境。
 
 Ultralytics 的设置在每次运行目录隔离；首次导入前即写入 `sync=false`、关闭集成日志，设置 `YOLO_OFFLINE`，并在本训练进程中阻断 socket 出站连接。离线依赖缺失时运行会失败，需先由操作者准备，不会边运行边安装。
 
@@ -31,3 +31,21 @@ python scripts/train_vision.py building --snapshot E:\projects\AutoCOC-training\
 ```
 
 YOLO11n 在第 31 epoch 早停，YOLO26n 在第 33 epoch 早停，均为 640 输入、AdamW、batch 2、workers 0、patience 20。两者最佳权重导出的 CPU FP32 ONNX 均通过真实 loader 和 8/8 验证图同输入 parity，保留 8400 原始候选，图内无 NMS/TopK。固定独立验证协议（8 图、6 组、未看 test）的 YOLO11n AP50/AP50–95 为 0.67186/0.23163，YOLO26n 为 0.60792/0.21426，结果在 `E:\projects\AutoCOC-training\reports\building-yolo{11,26}n-dev100-val.json`。YOLO26n 原始低分背景锚框有 23 个无效几何，最大分数 5.89e-5；导出报告明确记录，运行时和独立 AP 按无效框过滤。首次过严检查造成的导出失败目录保留，新包以 `-retry` 后缀输出。这些全部是 `prototype_only/unvalidated`：标注为 agent_visual，混有未知旧版本，验证集过小，测试集从未用于调参，也没有战斗可用性证据。
+
+R 的建筑状态和技能卡状态使用独立的四类空间与独立模型包，不能把 `truth_event` 当逐帧状态标签。`training.vision.dynamic_snapshot.freeze_dynamic_snapshot` 先把审核过的动态窗口冻结为带 `windows.jsonl`、`snapshot.json`、`split.json` 和 `SHA256SUMS` 的不可覆盖目录；训练只消费 `verify_dynamic_snapshot` 全面复核后的副本。每帧必须有 `state_label`、审核人与证据、目标身份、源图哈希和原图 ROI；同一事件/会话/阵型连通组不可跨 train/val/test。R 训练用 224×224 原图 ROI、ImageNet 预训练 MobileNetV3-Small、按类与事件连通组采样，最多 35 epoch、5 epoch 头部训练和 7 epoch 验证停滞早停，签名绑定快照、拆分、权重、种子与配置，可用同一运行目录 `last.pt` 恢复。CPU FP32 ONNX 导出通过真实 `DynamicModel` 加载与 ROI 推理，并比较最多 100 张验证帧的同输入 logits；报告仅证明导出兼容。
+
+```powershell
+python scripts/train_dynamic_state.py --snapshot C:\data\r-building-frozen --config C:\data\r-building-config.json --output C:\runs\r-building --device 0 --pretrained C:\weights\mobilenet_v3_small-047dcff4.pth --max-epochs 35 --deadline-hours 4
+python scripts/export_dynamic_state.py --training-dir C:\runs\r-building --snapshot C:\data\r-building-frozen --package C:\models\prototype\r-building
+```
+
+配置必须明确 `kind`（`r_building` 或 `r_card`）、与冻结快照一致的 `classes/client_versions/prototype_only`、`architecture=mobilenet_v3_small`、固定 `preprocess`、`applicability/output/event_rules/max_frame_age_seconds/code_version`；卡片状态使用单独配置与包。当前尚无已复核的真实 R 逐帧状态窗口，所以**没有真实 R 训练权重或事件准确率**；`tests/test_dynamic_train_export.py` 的合成窗口只验证接口、checkpoint、CPU loader 和 ONNX parity。动态包仍默认禁用，之后还需独立事件评估与实机响应证据。
+
+U 位置检测独立于 R 状态分类，只接收已冻结的 `u_position` 窗口。每帧须明确 `boxes_complete=true`，注明框审核人、方法、证据，并将审核绑定到原图 SHA 和 ROI；空 `truth_boxes` 才是已复核的负例。英雄类用 `hero:<identity>`，主力兵群用 `troop_group`，框必须全部在原图 ROI 内。训练器逐个验证冻结窗口，将原图 ROI 拉伸为 640×640，精确转换原图坐标框到 YOLO 标签，保留 train/val/test 连通组隔离；测试 split 不参与调参。U 仅支持本地 `yolo26n.pt`，固定 RGB `/255`、AdamW、workers 0、batch 1–8，最多 100 epoch，有限时长和签名绑定的 `resume.pt`。导出选择 [YOLO26 one-to-one `nms=False` 输出](https://docs.ultralytics.com/guides/end2end-detection) `[1,300,6]`（ROI 像素 `xyxy,confidence,class_id`），经真实 `DynamicModel` CPU loader 与最多 100 张验证帧同输入 parity 核对。兼容性校验不代表定位准确率或战斗响应通过。
+
+```powershell
+python scripts/train_u_position.py --snapshot C:\data\u-frozen --config C:\data\u-config.json --output C:\runs\u-position --device 0 --pretrained C:\weights\yolo26n.pt --max-epochs 35 --deadline-hours 4
+python scripts/export_u_position.py --training-dir C:\runs\u-position --snapshot C:\data\u-frozen --package C:\models\prototype\u-position
+```
+
+配置须声明 `kind=u_position`、冻结快照给出的有序 `classes/client_versions/prototype_only`、`architecture=yolo26n`、`code_version`、`batch`、`max_frame_age_seconds`、`event_rules` 与 `applicability`（`roi_kind=u_position`、分辨率范围、`requires_stable_camera=true`、明确 `requires_verified_zoom`）。`preprocess` 固定为 `{"width":640,"height":640,"color":"RGB","resize":"stretch","scale":0.00392156862745098,"mean":[0,0,0],"std":[1,1,1]}`；`output` 固定 `format=xyxy_score_class`、`max_detections=300`，另由验证集定稿 `min_confidence`。目前没有任何真实已复核 U 窗口或 U 权重；`tests/test_u_train_export.py` 的合成一轮 CPU 训练、导出与 loader 测试只证明工具链可运行，动态功能仍默认禁用。

@@ -129,17 +129,23 @@ class SessionTests(unittest.TestCase):
 
     def test_observation_records_capture_method_and_full_capture_elapsed_time(self) -> None:
         self.capture.capture_screenshot_artifact.side_effect = lambda path: ScreenshotCapture(
-            path, 2560, 1440, .91, capture_method="raw_rgba", capture_elapsed_sec=.91)
+            path, 2560, 1440, .91, capture_method="raw_rgba", capture_elapsed_sec=.91,
+            requested_at_utc="2026-10-15T18:00:00+00:00")
         snapshot = self.session.observe()
         self.assertEqual(snapshot.observations["capture_method"], "raw_rgba")
         self.assertEqual(snapshot.observations["capture_elapsed_sec"], .91)
         self.assertEqual(self.events()[0]["observations"]["capture_method"], "raw_rgba")
         self.assertEqual(self.events()[0]["observations"]["capture_elapsed_sec"], .91)
+        self.assertEqual(snapshot.observations["captured_at_utc"], "2026-10-15T18:00:00+00:00")
+        self.assertEqual(self.events()[0]["observations"]["captured_at_utc"], "2026-10-15T18:00:00+00:00")
+        self.assertEqual(snapshot.observations["capture_timestamp_basis"], "capture_request_start")
 
     def test_legacy_screenshot_artifact_keeps_elapsed_time_without_inventing_method(self) -> None:
         snapshot = self.session.observe()
         self.assertEqual(snapshot.observations["capture_method"], "unknown")
         self.assertEqual(snapshot.observations["capture_elapsed_sec"], .01)
+        self.assertNotIn("captured_at_utc", snapshot.observations)
+        self.assertNotIn("capture_timestamp_basis", snapshot.observations)
 
     def test_observation_times_capture_and_recognition_separately(self):
         def capture(path):

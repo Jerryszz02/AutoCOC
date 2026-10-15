@@ -52,13 +52,15 @@
     }
   ],
   "entry_template": "assets\\templates\\daily_event_calendar_18_647_2.png",
-  "entry_template_sha256": "f18e0149b9301c062b51c2b6d27a90651b776b425fb2805f3e2764b45966f901",
+  "entry_template_sha256": "19bc7060c9689d7e0b26d2c8cdd92e29019e3beec742a8d0887e3ca02f99238f",
+  "entry_template_derivation": "assets/templates/daily_event_calendar_18_647_2.provenance.json",
+  "prior_entry_template_sha256": "f18e0149b9301c062b51c2b6d27a90651b776b425fb2805f3e2764b45966f901",
   "entry_template_source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261015-190953-tap\\frames\\00001-before.png",
   "entry_template_bbox_at_1280x720": [
-    284,
-    631,
-    341,
-    696
+    292,
+    656,
+    334,
+    691
   ],
   "rule_evidence": "Calendar lists 裂隙之乱 with 8452/16000 and 9天13小时; detail says 在家乡村庄战斗中收集酸腐圣水. Only the calendar ratio is used for progress."
 }

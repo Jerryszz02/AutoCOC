@@ -129,6 +129,10 @@ def deploy_army(session: GameSession, scout: SceneSnapshot) -> SceneSnapshot:
         return _deploy_army(session, scout, receipt)
     except Exception as exc:
         # KeyboardInterrupt deliberately propagates to the runner unchanged.
+        if isinstance(exc, DeploymentError):
+            frames = receipt["evidence"]
+            receipt.update(exc.partial_receipt)
+            receipt["evidence"] = list(dict.fromkeys(frames + receipt.get("evidence", [])))
         last = session.last_snapshot
         if last is not None and str(last.screenshot_path) not in receipt["evidence"]:
             receipt["evidence"].append(str(last.screenshot_path))
@@ -217,8 +221,15 @@ def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, 
         check_deadline()
         return count
 
+    line_context = {}
+    continuous_line = getattr(session.config.battle, "line_execution_mode", "verified") == "continuous"
     if line_mode:
-        current, terrain = _prepare_two_edge_view(session, current, receipt)
+        if continuous_line:
+            if strategy != "edrag_line" or session.config.vision_agent.enabled:
+                raise FlowError("Continuous line requires model-free edrag_line")
+            current, terrain = _prepare_two_edge_view(session, current, receipt, capture_context=line_context)
+        else:
+            current, terrain = _prepare_two_edge_view(session, current, receipt)
     else:
         terrain = find_west_deployment_points(current.screenshot_path,
                                               baseline_resolution=session.config.game.baseline_resolution)
@@ -303,6 +314,9 @@ def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, 
          "bbox": list(slot["bbox"]), "before_count": slot["count"]}
         for slot in planned_cards]
     if line_mode:
+        if continuous_line:
+            return _deploy_continuous_line(session, current, receipt, line_context,
+                                           scout.observations.get("expected_hero_manifest"), deadline)
         planner = STRATEGIES[strategy].planner
         plan = planner.build_plan(BattleContext(tuple(planned_cards),
             tuple(slot for slot in slots if slot["kind"] == "hero"), tuple(terrain)))
@@ -507,7 +521,8 @@ def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, 
     return current
 
 
-def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt: dict) -> tuple[SceneSnapshot, list[dict]]:
+def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt: dict, *,
+                           capture_context: dict | None = None) -> tuple[SceneSnapshot, list[dict]]:
     from .battle_vision import selected_card_bbox
     from .terrain import find_line_deployment_edges, measure_camera_motion
 
@@ -534,6 +549,8 @@ def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt
     session.event("line_minimum_zoom", **receipt["minimum_zoom"])
     if motion["stationary"] is not True:
         raise FlowError("Minimum zoom did not stabilize before line deployment")
+    if capture_context is not None:
+        capture_context["toolbar_before"] = current
     # Minimum scale alone does not fix camera translation or the build boundary.
     # Selecting a troop reveals the current red border without placing anything.
     troops = [slot for slot in current.observations.get("battle", {}).get("slots", [])
@@ -596,6 +613,40 @@ def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt
             return current, terrain
         failure_reason = "Two current deployment boundaries could not be verified"
     raise FlowError(failure_reason)
+
+
+def _deploy_continuous_line(session, current, receipt, context, hero_manifest, deadline):
+    from uuid import uuid4
+    from .frozen_line import execute_frozen_line, freeze_model_free_line
+    from .prepared_battle import _remaining_seconds
+
+    # Starting the batch must remain inside the observed preview countdown.
+    # Its separate execution budget covers the resulting active battle.
+    if current.scene != "enemy_village":
+        raise FlowError("Continuous line preparation did not finish inside the preview")
+    captured_at = current.observations.get("observed_at_monotonic")
+    if type(captured_at) not in (int, float) or not math.isfinite(captured_at):
+        raise FlowError("Continuous line preview has no capture timestamp")
+    latest_start = min(deadline, captured_at + min(10, _remaining_seconds(current) - 1))
+    if not isinstance(hero_manifest, dict) or hero_manifest.get("complete") is not True:
+        raise FlowError("Continuous line needs the independently verified hero roster")
+    rows = hero_manifest.get("cards")
+    if not isinstance(rows, list) or not rows or any(not isinstance(row, dict) for row in rows):
+        raise FlowError("Continuous line hero roster is unavailable")
+    plan = freeze_model_free_line(session, current, toolbar_before=context["toolbar_before"],
+        terrain=receipt["terrain_evidence"], army_manifest=receipt["expected_army_manifest"],
+        minimum_zoom=receipt["minimum_zoom"], battle_id=uuid4().hex,
+        latest_start=latest_start, burst_limit_sec=10,
+        hero_ids=[row.get("unit_id") for row in rows], hero_manifest=hero_manifest)
+    session.event("model_free_line_plan", plan_id=plan.plan_id, plan_sha256=plan.plan_sha256,
+                  frame=str(current.screenshot_path), latest_start=latest_start,
+                  input_count=len(plan.actions), burst_limit_sec=plan.burst_limit_sec)
+    post = execute_frozen_line(session, plan)
+    frames = receipt["evidence"]
+    receipt.update(post.observations["deployment"])
+    receipt["evidence"] = list(dict.fromkeys(frames + receipt["evidence"]))
+    post.observations["deployment"] = receipt
+    return post
 
 
 def _verified_line_card_reading(session: GameSession, snapshot: SceneSnapshot, troop: dict) -> dict:
@@ -682,13 +733,17 @@ def _deploy_line_cards(session: GameSession, current: SceneSnapshot, receipt: di
         if time.monotonic() >= deadline:
             raise FlowError("Army deployment deadline exceeded")
 
+    def record_count_reads(frame: SceneSnapshot) -> None:
+        for reading in frame.observations.get("deployment_count_reads", []):
+            if reading not in receipt["count_reads"]:
+                receipt["count_reads"].append(reading)
+                session.event("deployment_count_read", **reading)
+
     def observe(label: str, *, purpose: str = "troop_count", slot: dict | None = None) -> SceneSnapshot:
         check()
         frame = session.observe(label, purpose=purpose, slot=slot)
         receipt["evidence"].append(str(frame.screenshot_path))
-        for reading in frame.observations.get("deployment_count_reads", []):
-            receipt["count_reads"].append(reading)
-            session.event("deployment_count_read", **reading)
+        record_count_reads(frame)
         check()
         _battle_frame(frame)
         return frame
@@ -697,12 +752,15 @@ def _deploy_line_cards(session: GameSession, current: SceneSnapshot, receipt: di
         slot = step.card
         check()
         old = _remaining(current, slot, recognizer=getattr(session, "recognizer", None))
+        record_count_reads(current)
         check()
         if old != slot["count"]:
             raise FlowError("Troop quantity changed before line deployment")
         session.tap(current, slot["point"], reason=f"Select troop stack for line: {old}")
         current = observe("line-selected", slot=slot)
-        if _remaining(current, slot, recognizer=getattr(session, "recognizer", None)) != old:
+        selected_count = _remaining(current, slot, recognizer=getattr(session, "recognizer", None))
+        record_count_reads(current)
+        if selected_count != old:
             raise FlowError("Troop quantity changed before line placement")
         planned = [list(point) for point in step.points]
         before = current
@@ -727,6 +785,7 @@ def _deploy_line_cards(session: GameSession, current: SceneSnapshot, receipt: di
                 time.sleep(min(session.config.runtime.poll_interval_sec, 1))
             current = observe("line-consumption", slot=slot)
             after = _remaining(current, slot, recognizer=getattr(session, "recognizer", None))
+            record_count_reads(current)
             check()
             if after is None:
                 continue
@@ -746,6 +805,11 @@ def _deploy_line_cards(session: GameSession, current: SceneSnapshot, receipt: di
         from .hero_state import recognize_hero_state
 
         slot = step.card
+        if current.observations.get("recognition_scope") != "full":
+            # Fast count and hero-state frames omit all battle slots. Refresh
+            # the full roster before each selection, binding that hero's
+            # identity to the same fresh frame used for the tap.
+            current = observe("line-hero-roster", purpose="full")
         visible_heroes = [item for item in current.observations.get("battle", {}).get("slots", [])
                           if item.get("kind") == "hero"
                           and abs(item["point"][0] - slot["point"][0]) < 25]

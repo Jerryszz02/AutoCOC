@@ -115,7 +115,8 @@ class GUITests(unittest.TestCase):
         self.app.task_fields["resources"]["filter"].set("1")
         self.app.full_flags["resources"]["gold"].set(True)
         self.app._sync_full_resources("resources")
-        self.assertEqual(self.app._options().routine.tasks[3].goal.full_resources, ("gold",))
+        tasks = {task.id: task for task in self.app._options().routine.tasks}
+        self.assertEqual(tasks["resources"].goal.full_resources, ("gold",))
         self.app.selected_task.set("clan_games")
         goal_children = [child for widget in self.app.task_config.winfo_children() for child in widget.winfo_children()]
         goal_labels = [child.cget("text") for child in goal_children if isinstance(child, ttk.Label)]
@@ -125,12 +126,17 @@ class GUITests(unittest.TestCase):
                         and "防空火箭" in child.cget("values"))
         building.set("法术工厂")
         building.event_generate("<<ComboboxSelected>>")
-        self.assertEqual(self.app._options().routine.tasks[-1].goal.building_type, "spell_factory")
+        tasks = {task.id: task for task in self.app._options().routine.tasks}
+        self.assertEqual(tasks["clan_games"].goal.building_type, "spell_factory")
 
     def test_task_order_and_battle_progress_are_separate_from_task_success(self):
         self.app.selected_task.set("resources")
+        original_order = self.app.task_order[:]
+        old_index = original_order.index("resources")
         self.app._move_task(-1)
-        self.assertEqual(self.app.task_order[2:4], ["resources", "donate"])
+        expected_order = original_order[:]
+        expected_order[old_index - 1:old_index + 1] = ["resources", original_order[old_index - 1]]
+        self.assertEqual(self.app.task_order, expected_order)
         self.app._event({"kind": "battle_progress", "task_id": "resources", "phase": "筛选对手",
                          "battle_number": 3, "battles_completed": 2, "battles_won": 1,
                          "resources": {"gold": 750000}, "goal_current": 2, "goal_target": 5})
@@ -151,13 +157,44 @@ class GUITests(unittest.TestCase):
         self.app.selected_task.set("resources")
         self.assertEqual(self.app.task_fields["resources"]["gold"].get(), "500000")
         self.assertEqual(self.app.strategy_text.get("1.0", "end-1c"), "# resources draft")
+        original_order = self.app.task_order[:]
+        old_index = original_order.index("resources")
         self.app._move_task(-1)
         self.app._save()
         loaded = load_options(settings_path(self.path), load_config(self.path))
-        self.assertEqual([task.id for task in loaded.routine.tasks][:4], ["collect", "request", "resources", "donate"])
+        expected_order = original_order[:]
+        expected_order[old_index - 1:old_index + 1] = ["resources", original_order[old_index - 1]]
+        self.assertEqual([task.id for task in loaded.routine.tasks], expected_order)
         values = {task.id: task for task in loaded.routine.tasks}
         self.assertEqual(values["resources"].resource_filter.min_gold, 500000)
         self.assertEqual(values["event"].goal.target, 250)
+
+    def test_train_task_label_selection_reorder_and_save_preserve_task_values(self):
+        self.assertIn("检查军队", self.app.task_choice.cget("values"))
+        self.app.selected_task_label.set("检查军队")
+        self.app._choose_task_label()
+        self.assertEqual(self.app.selected_task.get(), "train")
+        self.app.task_vars["train"].set(True)
+        self.app.task_fields["train"]["minutes"].set("17")
+        self.app.selected_task.set("resources")
+        self.app.task_fields["resources"]["gold"].set("510000")
+        self.app.selected_task.set("train")
+        original_order = self.app.task_order[:]
+        old_index = original_order.index("train")
+        self.app._move_task(-1)
+        options = self.app._options()
+        self.assertIn("train", options.tasks)
+        self.assertEqual([task.id for task in options.routine.tasks if task.enabled].count("train"), 1)
+        self.app._save()
+        loaded = load_options(settings_path(self.path), load_config(self.path))
+        expected_order = original_order[:]
+        expected_order[old_index - 1:old_index + 1] = ["train", original_order[old_index - 1]]
+        self.assertEqual([task.id for task in loaded.routine.tasks], expected_order)
+        values = {task.id: task for task in loaded.routine.tasks}
+        self.assertTrue(values["train"].enabled)
+        self.assertEqual(values["train"].max_duration_sec, 17 * 60)
+        self.assertEqual(values["resources"].resource_filter.min_gold, 510000)
+        self.assertIn("train", loaded.tasks)
 
     def test_custom_task_ids_survive_gui_round_trip(self):
         routine = RoutineConfig((TaskSpec("gold_run", "resources", goal=GoalConfig(resource_targets={"gold": 1000000})),

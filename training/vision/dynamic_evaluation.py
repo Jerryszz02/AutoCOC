@@ -30,6 +30,8 @@ def evaluate_dynamic(model: DynamicModel, root: Path, windows: list[dict], *,
         raise DatasetError("Invalid dynamic evaluation split")
     inventory = verify_dynamic_windows(root, windows, kind=model.kind, prototype_only=prototype_only)
     selected = [window for window in windows if window["split"] == split]
+    if not selected:
+        raise DatasetError(f"Dynamic evaluation split {split!r} has no reviewed windows")
     counts = Counter({"tp": 0, "fp": 0, "fn": 0, "early": 0,
                       "inference_failures": 0, "unknown_frames": 0})
     delays, attempts = [], []

@@ -1,0 +1,18 @@
+{
+  "client_version": "18.647.2",
+  "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261015-193505-038604-84c40a8d\\frames\\00017-line-consumption.png",
+  "source_sha256": "f3fb59f966660c3da9e5fcd66e3b3505c75f43b57d14e4ef06652866142804a1",
+  "crop_xyxy_native": [
+    360,
+    1140,
+    590,
+    1440
+  ],
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "output_sha256": "9a107897722c4014680c9ae50af721b939205acf1955d509870ab01501c01d6e",
+  "contents": "Only battle HUD dragon card and adjacent card edges; no player name or village background.",
+  "purpose": "Current selected x1 bbox remains supplied during subsequent gray x0 read."
+}

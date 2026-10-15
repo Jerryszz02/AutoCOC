@@ -46,6 +46,13 @@
           "state_target_id": {"type": "string", "minLength": 1},
           "state_source_frame_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
           "state_roi_bbox": {"type": "array", "prefixItems": [{"type": "integer"}, {"type": "integer"}, {"type": "integer"}, {"type": "integer"}], "minItems": 4, "maxItems": 4},
+          "boxes_complete": {"const": true},
+          "boxes_review_status": {"const": "reviewed"},
+          "boxes_review_method": {"enum": ["human", "agent_visual"]},
+          "boxes_reviewer": {"type": "string", "minLength": 1},
+          "boxes_review_evidence": {"type": "string", "minLength": 1},
+          "boxes_source_frame_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "boxes_roi_bbox": {"type": "array", "prefixItems": [{"type": "integer"}, {"type": "integer"}, {"type": "integer"}, {"type": "integer"}], "minItems": 4, "maxItems": 4},
           "camera_stable": {"type": "boolean"},
           "zoom_verified": {"type": "boolean"}
         }

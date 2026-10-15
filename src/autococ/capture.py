@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 import struct
 from tempfile import TemporaryDirectory
@@ -45,6 +46,7 @@ class ScreenshotCapture:
     encode_elapsed_sec: float | None = None
     handoff_elapsed_sec: float | None = None
     frame_id: str | None = None
+    requested_at_utc: str | None = None
 
 
 def _validated_png_compression_level(level: int) -> int:
@@ -118,6 +120,7 @@ class CaptureClient:
         if self.png_compression_level != 1 and not self.prefer_raw:
             raise CaptureError("PNG compression level requires raw or native screenshot transport")
         started = time.monotonic()
+        requested_at_utc = datetime.now(timezone.utc).isoformat()
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         command = ["exec-out", "screencap"]
@@ -183,6 +186,7 @@ class CaptureClient:
             encode_elapsed_sec=encode_elapsed,
             handoff_elapsed_sec=max(0.0, published_at - payload_ready),
             frame_id=uuid4().hex,
+            requested_at_utc=requested_at_utc,
         )
 
 

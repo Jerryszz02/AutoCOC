@@ -1,0 +1,18 @@
+{
+  "client_version": "18.647.2",
+  "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261015-194523-915723-bff2f65f\\frames\\00053-battle-settlement-reread.png",
+  "source_sha256": "00be7d6e9dea2941dc0b575c0e96543775bac49dec21ced96b1f3dd53b33de40",
+  "retained_xyxy_native": [
+    650,
+    180,
+    1880,
+    1300
+  ],
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "output_sha256": "e345a7199c5064fd310f9497c4668ce7828a873778bde5d7486e77b8fa112d6c",
+  "contents": "Current two-row defeat result overlay only; player names and peripheral village background removed.",
+  "purpose": "Verify gold/elixir-only zero-reward layout and anchored return evidence without inventing absent dark elixir."
+}

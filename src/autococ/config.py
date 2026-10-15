@@ -123,10 +123,14 @@ class BattleConfig:
     strategy_file: str = ""
     target_building: str = ""
     settlement_timeout_sec: int | None = None
+    line_execution_mode: str = "verified"
 
     def __post_init__(self) -> None:
         if self.strategy not in STRATEGIES:
             raise ConfigError(f"battle.strategy must be one of {tuple(STRATEGIES)}")
+        if (self.line_execution_mode not in {"verified", "continuous"}
+                or self.line_execution_mode == "continuous" and self.strategy != "edrag_line"):
+            raise ConfigError("battle.line_execution_mode continuous requires edrag_line")
         if self.objective not in {"resources", "event", "clan_games"}:
             raise ConfigError("battle.objective must be resources, event or clan_games")
         if self.resource_filter is not None:
@@ -346,6 +350,7 @@ def _load_battle(section: dict[str, Any]) -> BattleConfig:
         max_searches=_positive_int(section, "max_searches", 30),
         deploy_timeout_sec=_positive_int(section, "deploy_timeout_sec", 180),
         strategy=_string(section, "strategy", "verified"),
+        line_execution_mode=_string(section, "line_execution_mode", "verified"),
         resource_filter=resource_filter,
         strategy_file=_string(section, "strategy_file", ""),
         target_building=_string(section, "target_building", ""),

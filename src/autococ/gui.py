@@ -585,7 +585,7 @@ class AutoCOCApp:
         if not any(task.enabled for task in routine.tasks):
             raise ValueError("请至少勾选一项本次任务")
         tasks = ("launch",) + tuple(dict.fromkeys(self.task_kinds[task_id] for task_id in self.task_order
-                                                    if self.task_kinds[task_id] in ("collect", "request", "donate")
+                                                    if self.task_kinds[task_id] in ("collect", "request", "donate", "train")
                                                     and self.task_vars[task_id].get()))
         if any(self.task_vars[task_id].get() and self.task_kinds[task_id] in BATTLE_KINDS for task_id in self.task_order):
             tasks += ("battle",)

@@ -1,0 +1,41 @@
+{
+  "client_version": "18.647.2",
+  "original_template_sha256": "f18e0149b9301c062b51c2b6d27a90651b776b425fb2805f3e2764b45966f901",
+  "crop_inside_original_template": [
+    8,
+    25,
+    50,
+    60
+  ],
+  "reason": "Exclude the notification badge and animated surroundings; keep the calendar body and exclamation glyph.",
+  "template_sha256": "19bc7060c9689d7e0b26d2c8cdd92e29019e3beec742a8d0887e3ca02f99238f",
+  "threshold_unchanged": 0.88,
+  "sources": [
+    {
+      "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261015-191843-event-progress\\frames\\00001-home-check.png",
+      "source_sha256": "2e7f9a42379077f19033b49ca5004578c27f23e579efc27160195c9aa0ac4c59",
+      "fixture": "event_calendar_plain_18_647_2.png",
+      "fixture_sha256": "331f5684b95fc5a66d542bb037c67527baa40d8d84dad461d0c9eeeef7a858d2",
+      "retained_original_roi": [
+        540,
+        1220,
+        1100,
+        1420
+      ],
+      "other_pixels": "black privacy mask"
+    },
+    {
+      "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261015-195052-event-progress\\frames\\00001-home-check.png",
+      "source_sha256": "c36ecb4f28ffb768708494c872800a363659aa0e085f5104bbaf73e2d846569c",
+      "fixture": "event_calendar_badge_18_647_2.png",
+      "fixture_sha256": "3491589d140ad44604be51194701534edd8a1f7d0eb2b2b6256c7aed3f7bbc6e",
+      "retained_original_roi": [
+        540,
+        1220,
+        1100,
+        1420
+      ],
+      "other_pixels": "black privacy mask"
+    }
+  ]
+}

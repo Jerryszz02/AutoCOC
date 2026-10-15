@@ -406,6 +406,35 @@ class SceneTests(unittest.TestCase):
                          {"gold": None, "elixir": None, "dark_elixir": None, "gems": None})
         self.assertIsNone(snapshot.observations["resource_source"])
 
+    def test_current_event_panel_accepts_real_weak_close_only_with_both_headings(self) -> None:
+        path = Path(__file__).parent / "fixtures/event_panel_weak_close_18_647_2_20261015.png"
+        recognizer = ScreenshotRecognizer()
+        recognizer.client_version = "18.647.2"
+        snapshot = recognizer.recognize(path)
+        self.assertEqual(snapshot.scene, "popup")
+        self.assertEqual(set(snapshot.observations["event_panel"]), {"title", "close", "section"})
+        self.assertGreaterEqual(snapshot.observations["event_panel"]["close"]["confidence"], .9)
+        self.assertLess(snapshot.observations["event_panel"]["close"]["confidence"], .95)
+        self.assertEqual(snapshot.observations["buttons"], [])
+        self.assertIsNone(snapshot.observations["resource_source"])
+
+        provider = Mock()
+        provider.recognize.return_value = [
+            OCRText("活动", 1.0, (1218, 72, 1344, 152)),
+            OCRText("X", .899, (2068, 64, 2152, 148)),
+            OCRText("今日活动", 1.0, (428, 200, 562, 248)),
+            OCRText("商店", 1.0, (2380, 750, 2468, 808)),
+        ]
+        weak = ScreenshotRecognizer(provider=provider)
+        weak.client_version = "18.647.2"
+        self.assertIsNone(weak.recognize(path).observations["event_panel"])
+        provider.recognize.return_value[1] = OCRText("X", .922, (2068, 64, 2152, 148))
+        provider.recognize.return_value = [item for item in provider.recognize.return_value
+                                            if item.text != "今日活动"]
+        self.assertIsNone(weak.recognize(path).observations["event_panel"])
+        recognizer.client_version = "unknown"
+        self.assertIsNone(recognizer.recognize(path).observations["event_panel"])
+
     def test_battle_word_and_background_hud_during_popup_do_not_enable_village(self) -> None:
         import cv2
         import numpy as np
@@ -980,6 +1009,30 @@ class SceneTests(unittest.TestCase):
         self.assertEqual(incomplete["loot"]["elixir"], 396241)
         self.assertIsNone(incomplete["loot"]["dark_elixir"])
         self.assertIsNone(incomplete["evidence"]["layout"])
+
+    def test_current_two_row_defeat_requires_both_real_dividers(self) -> None:
+        import cv2
+
+        path = Path(__file__).parent / "fixtures/settlement_defeat_two_rows_18_647_2_20261015.png"
+        recognizer = ScreenshotRecognizer()
+        recognizer.client_version = "18.647.2"
+        snapshot = recognizer.recognize(path)
+        self.assertEqual(snapshot.scene, "settlement")
+        result = snapshot.observations["settlement"]
+        self.assertEqual(result["loot"], {"gold": 42703, "elixir": 0, "dark_elixir": 0})
+        self.assertEqual(result["bonus"], {"gold": 0, "elixir": 0, "dark_elixir": 0})
+        self.assertEqual(result["evidence"]["layout"], "regular_defeat_gold_elixir_only_v1")
+        self.assertTrue(result["evidence"]["loot"]["dark_elixir"]["requires_inventory_reconciliation"])
+        self.assertTrue(result["evidence"]["bonus"]["requires_inventory_reconciliation"])
+        with TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing-gold-divider.png"
+            image = cv2.imread(str(path))
+            image[748:765, 680:1880] = 0
+            cv2.imwrite(str(missing), image)
+            incomplete = recognizer.recognize(missing).observations["settlement"]
+        self.assertIsNone(incomplete["evidence"]["layout"])
+        self.assertIsNone(incomplete["loot"]["dark_elixir"])
+        self.assertTrue(all(value is None for value in incomplete["bonus"].values()))
 
     def test_missing_icon_does_not_relabel_a_number_from_its_vertical_position(self) -> None:
         import cv2

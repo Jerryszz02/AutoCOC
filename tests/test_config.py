@@ -109,6 +109,18 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaises(ConfigError):
                 load_config(path)
 
+    def test_continuous_line_is_explicit_and_scoped_to_edrag_line(self):
+        self.assertEqual(BattleConfig().line_execution_mode, "verified")
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text('[battle]\nstrategy = "edrag_line"\nline_execution_mode = "continuous"\n', encoding="utf-8")
+            self.assertEqual(load_config(path).battle.line_execution_mode, "continuous")
+        for kwargs in ({"line_execution_mode": "continuous"},
+                       {"strategy": "two_edge", "line_execution_mode": "continuous"},
+                       {"strategy": "edrag_line", "line_execution_mode": "guess"}):
+            with self.subTest(kwargs=kwargs), self.assertRaises(ConfigError):
+                BattleConfig(**kwargs)
+
     def test_legacy_weights_are_explicitly_ignored_for_existing_local_configs(self) -> None:
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.toml"

@@ -441,6 +441,10 @@ def summarize_run(stats: RunStats, *, save_decision_trace: bool = True) -> dict[
 
 def interrupted_battle_metrics(session) -> dict[str, object]:
     """Preserve issued inputs when cooperative stop prevents further observation."""
+    line_receipt = getattr(session, "frozen_line_receipt", None)
+    if isinstance(line_receipt, dict) and line_receipt.get("mode") == "model_free_line_continuous":
+        return {"deployment": line_receipt,
+                "line_execution": {"mode": "continuous", "status": "cancelled"}}
     receipt = getattr(session, "prepared_battle_receipt", None)
     if not isinstance(receipt, dict):
         return {}

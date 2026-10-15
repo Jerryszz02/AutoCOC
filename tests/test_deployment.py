@@ -178,6 +178,96 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(reading["frame"], str(path))
         self.assertGreaterEqual(reading["confidence"], .9)
 
+    def test_current_dragon_gray_zero_uses_current_glyph_and_gray_card(self) -> None:
+        import cv2
+        import numpy as np
+
+        fixtures = Path(__file__).parent / "fixtures"
+        box = (360, 1140, 590, 1440)
+        cases = (("selected_x1", 1), ("gray_x0", 0),
+                 ("gray_x0_heldout", 0), ("gray_x0_anchored", 0),
+                 ("gray_x0_weak_header", 0))
+        with TemporaryDirectory() as directory:
+            for state, expected in cases:
+                with self.subTest(state=state):
+                    crop = cv2.imread(str(fixtures / f"battle_dragon_{state}_18_647_2_20261015.png"))
+                    self.assertIsNotNone(crop)
+                    image = np.zeros((1440, 2560, 3), dtype=np.uint8)
+                    image[box[1]:box[3], box[0]:box[2]] = crop
+                    path = Path(directory) / f"{state}.png"
+                    ok, encoded = cv2.imencode(".png", image)
+                    self.assertTrue(ok)
+                    encoded.tofile(path)
+                    recognizer = ScreenshotRecognizer()
+                    recognizer.client_version = "18.647.2"
+                    for count_bbox in (None, (245, 595, 276, 620)):
+                        with self.subTest(state=state, count_bbox=count_bbox):
+                            slot = {"kind": "troop", "unit_id": "dragon", "count": 1,
+                                    "bbox": [190, 595, 278, 711], "point": [234, 653]}
+                            if count_bbox is not None:
+                                slot["evidence"] = {"count": {"text": "x1", "confidence": .99,
+                                                               "bbox": list(count_bbox)}}
+                            kwargs = {"count_bbox": count_bbox} if count_bbox is not None else {}
+                            reading = recognizer.recognize_slot_count(path, tuple(slot["bbox"]), **kwargs)
+                            self.assertEqual(reading["count"], expected)
+                            self.assertGreaterEqual(reading["confidence"], .9)
+                            if expected == 0:
+                                self.assertIn("gray_card_current_glyph_threshold_line",
+                                              [item["source"] for item in reading["readings"]])
+                            frame = SceneSnapshot("battle", .95, path, {"ocr": []})
+                            self.assertEqual(_remaining(frame, slot, recognizer=recognizer), expected)
+                            if expected == 0:
+                                recognizer.client_version = "unknown"
+                                self.assertIsNone(recognizer.recognize_slot_count(
+                                    path, tuple(slot["bbox"]), **kwargs)["count"])
+                                recognizer.client_version = "18.647.2"
+
+    def test_current_gray_zero_rejects_conflicting_count(self) -> None:
+        import cv2
+        import numpy as np
+        from autococ.ocr import OCRText
+
+        crop = cv2.imread(str(Path(__file__).parent /
+                              "fixtures/battle_dragon_gray_x0_18_647_2_20261015.png"))
+        image = np.zeros((1440, 2560, 3), dtype=np.uint8)
+        image[1140:1440, 360:590] = crop
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "conflicting.png"
+            ok, encoded = cv2.imencode(".png", image)
+            self.assertTrue(ok)
+            encoded.tofile(path)
+            provider = Mock()
+            provider.recognize.return_value = [OCRText("x0", .85, (466, 1176, 556, 1240))]
+            provider.recognize_line.return_value = [OCRText("x1", .99)]
+            provider.recognize_line_image.return_value = [OCRText("x0", .96)]
+            recognizer = ScreenshotRecognizer(provider=provider)
+            recognizer.client_version = "18.647.2"
+            reading = recognizer.recognize_slot_count(path, (190, 595, 278, 711))
+            self.assertIsNone(reading["count"])
+            self.assertEqual(reading["reason"], "header_count_unverified")
+
+    def test_current_gray_card_without_header_glyph_does_not_invent_zero(self) -> None:
+        import cv2
+        import numpy as np
+
+        crop = cv2.imread(str(Path(__file__).parent /
+                              "fixtures/battle_dragon_gray_x0_weak_header_18_647_2_20261015.png"))
+        image = np.zeros((1440, 2560, 3), dtype=np.uint8)
+        image[1140:1440, 360:590] = crop
+        image[1172:1250, 460:556] = 0
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "blank-header.png"
+            ok, encoded = cv2.imencode(".png", image)
+            self.assertTrue(ok)
+            encoded.tofile(path)
+            recognizer = ScreenshotRecognizer()
+            recognizer.client_version = "18.647.2"
+            for count_bbox in (None, (245, 595, 276, 620)):
+                with self.subTest(count_bbox=count_bbox):
+                    reading = recognizer.recognize_slot_count(path, (190, 595, 278, 711),
+                                                              count_bbox=count_bbox)
+                    self.assertIsNone(reading["count"])
+
     def test_roi_anchor_rejects_changed_identity_count_and_geometry(self) -> None:
         slot = {"kind": "troop", "unit_id": "electro_dragon", "count": 10,
                 "bbox": [90, 589, 184, 709], "point": [137, 649],
@@ -252,6 +342,23 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(result["deployed_units"], 40)
         self.assertEqual(result["consumption_events"][0]["consumed"], 40)
 
+    def test_line_receipt_keeps_local_gray_zero_read_after_observation(self):
+        session, _ = self.line_session([card(count=1)])
+        def hide_gray_ocr(label, frame):
+            if label == "line-consumption":
+                frame.observations["ocr"] = []
+            return frame
+        session.observe_hook = hide_gray_ocr
+        session.recognizer = Mock()
+        session.recognizer.recognize_slot_count.side_effect = lambda path, bbox: {
+            "count": 0, "confidence": .96, "frame": str(path), "slot_bbox": list(bbox),
+            "readings": [{"text": "x0", "confidence": .96, "source": "gray_card_current_glyph_threshold_line"}]}
+        receipt = deploy_army(session, session.scout).observations["deployment"]
+        self.assertEqual(receipt["deployed_units"], 1)
+        self.assertEqual(len(receipt["count_reads"]), 1)
+        self.assertEqual(receipt["count_reads"][0]["frame"], receipt["consumption_events"][0]["after_frame"])
+        self.assertEqual(sum(kind == "deployment_count_read" for kind, _ in session.events), 1)
+
     def test_line_partial_consumption_retains_failure_without_replaying(self):
         session, terrain = self.line_session()
         session.blocked_points = {tuple(point) for point in spread_along_edges(terrain, 40)[20:]}
@@ -289,6 +396,70 @@ class DeploymentTests(unittest.TestCase):
         self.assertFalse(any("ability" in tap[2].lower() for tap in session.taps))
         self.assertEqual(session.counts[415], 2)
         self.assertFalse(any(tap[1] == [515, 645] for tap in session.taps))
+
+    def test_line_reacquires_full_hero_roster_after_count_only_troop_frame(self):
+        session, _ = self.line_session([card(count=1), card("hero", None, 280)])
+        session.client_version = "18.647.2"
+        session.config.battle.strategy = "edrag_line"
+        labels = []
+        def scoped(label, snapshot):
+            labels.append(label)
+            if label == "line-consumption":
+                snapshot.observations["recognition_scope"] = "troop_count"
+                snapshot.observations["battle"]["slots"] = []
+            elif label == "line-hero-roster":
+                snapshot.observations["recognition_scope"] = "full"
+            return snapshot
+        session.observe_hook = scoped
+        self.hero_state.side_effect = [
+            {"selected": True, "deployed": None}, {"selected": False, "deployed": True}]
+        receipt = deploy_army(session, session.scout).observations["deployment"]
+        self.assertTrue(receipt["completed"])
+        self.assertLess(labels.index("line-consumption"), labels.index("line-hero-roster"))
+        self.assertLess(labels.index("line-hero-roster"), labels.index("line-hero-selected"))
+        self.assertEqual(receipt["support_attempts"][0]["selection_frame"],
+                         str(session.frames[labels.index("line-hero-roster") + 1].screenshot_path))
+
+    def test_line_missing_hero_in_fresh_full_roster_never_selects_hero(self):
+        session, _ = self.line_session([card(count=1), card("hero", None, 280)])
+        session.client_version = "18.647.2"
+        session.config.battle.strategy = "edrag_line"
+        def scoped(label, snapshot):
+            if label == "line-consumption":
+                snapshot.observations["recognition_scope"] = "troop_count"
+                snapshot.observations["battle"]["slots"] = []
+            elif label == "line-hero-roster":
+                snapshot.observations["recognition_scope"] = "full"
+                snapshot.observations["battle"]["slots"] = []
+            return snapshot
+        session.observe_hook = scoped
+        with self.assertRaisesRegex(DeploymentError, "Hero identity is unverified"):
+            deploy_army(session, session.scout)
+        self.assertFalse(any("Select hero" in reason for _, _, reason, _ in session.taps))
+
+    def test_line_refreshes_identity_again_after_first_hero_fast_state(self):
+        session, _ = self.line_session([card(count=1), card("hero", None, 280),
+                                        card("hero", None, 380)])
+        session.client_version = "18.647.2"
+        session.config.battle.strategy = "edrag_line"
+        labels = []
+        def scoped(label, snapshot):
+            labels.append(label)
+            if label in {"line-consumption", "line-hero-selected", "line-hero-deployed"}:
+                snapshot.observations["recognition_scope"] = "hero" if label.startswith("line-hero") else "troop_count"
+                snapshot.observations["battle"]["slots"] = []
+            elif label == "line-hero-roster":
+                snapshot.observations["recognition_scope"] = "full"
+            return snapshot
+        session.observe_hook = scoped
+        self.hero_state.side_effect = [
+            {"selected": True, "deployed": None}, {"selected": False, "deployed": True},
+            {"selected": True, "deployed": None}, {"selected": False, "deployed": True}]
+        receipt = deploy_army(session, session.scout).observations["deployment"]
+        self.assertTrue(receipt["completed"])
+        self.assertEqual(labels.count("line-hero-roster"), 2)
+        self.assertEqual(len(receipt["support_attempts"]), 2)
+        self.assertTrue(all(item["verified"] for item in receipt["support_attempts"]))
 
     def test_edrag_unverified_hero_is_not_replayed_or_marked_complete(self):
         session, _ = self.line_session([card(count=1), card("hero", None, 280)])

@@ -217,6 +217,11 @@ class GameSession:
         snapshot.observations["recognition_elapsed_sec"] = time.monotonic() - recognition_started
         snapshot.observations["observation_elapsed_sec"] = time.monotonic() - captured_at
         snapshot.observations["observed_at_monotonic"] = captured_at
+        requested_at_utc = getattr(artifact, "requested_at_utc", None)
+        if requested_at_utc is not None:
+            # This is transport request start, not pixel rendering or log time.
+            snapshot.observations["captured_at_utc"] = requested_at_utc
+            snapshot.observations["capture_timestamp_basis"] = "capture_request_start"
         snapshot.observations["frame_id"] = getattr(artifact, "frame_id", None) or str(path)
         for name in ("requested_at_monotonic", "pixels_ready_at_monotonic",
                      "payload_ready_at_monotonic", "published_at_monotonic",

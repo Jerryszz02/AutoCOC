@@ -13,6 +13,7 @@ from training.vision.data import DatasetError, sha256
 from training.vision.dynamic_data import verify_dynamic_windows
 from training.vision.dynamic_evaluation import evaluate_dynamic
 from training.vision.dynamic_snapshot import freeze_dynamic_snapshot, verify_dynamic_snapshot
+from scripts.evaluate_dynamic_vision import main as evaluate_dynamic_cli
 
 
 class FakeModel:
@@ -66,11 +67,79 @@ def window(root, name, truth, *, group=None, split="test"):
             "event_at_monotonic": 2.0 if truth else None, "frames": frames}
 
 
+def u_window(root, name="position", *, boxes=None):
+    row = window(root, name, False)
+    row["kind"] = "u_position"
+    row["truth_boxes"] = [] if boxes is None else boxes
+    for frame in row["frames"]:
+        frame.update({"boxes_complete": True, "boxes_review_status": "reviewed",
+                      "boxes_review_method": "agent_visual", "boxes_reviewer": "fixture",
+                      "boxes_review_evidence": "reviewed every target in source ROI",
+                      "boxes_source_frame_sha256": frame["parent_image_sha256"],
+                      "boxes_roi_bbox": frame["roi_bbox"][:]})
+    return row
+
+
+def test_u_reviewed_empty_boxes_and_source_bound_positive_freeze():
+    with TemporaryDirectory() as temp:
+        root = Path(temp)
+        source = root / "source"
+        source.mkdir()
+        reviewed = u_window(source, boxes=[{"frame_id": "f2", "label": "hero:king",
+                                            "bbox": [3, 3, 12, 12]}])
+        frozen = root / "frozen"
+        result = freeze_dynamic_snapshot(source, [reviewed], frozen,
+                                         kind="u_position", prototype_only=True)
+        assert result["metadata"]["classes"] == ["hero:king"]
+        assert verify_dynamic_snapshot(frozen, kind="u_position")["snapshot_sha256"] == result["snapshot_sha256"]
+        negative = u_window(source, "negative")
+        assert verify_dynamic_windows(source, [negative], kind="u_position",
+                                      prototype_only=True)["frames"] == 3
+
+
+def test_u_rejects_incomplete_unbound_or_outside_roi_boxes():
+    with TemporaryDirectory() as temp:
+        root = Path(temp)
+        good = u_window(root, boxes=[{"frame_id": "f2", "label": "troop_group",
+                                      "bbox": [3, 3, 12, 12]}])
+        for field, value in (("boxes_complete", False), ("boxes_review_status", None),
+                             ("boxes_review_method", None), ("boxes_reviewer", ""),
+                             ("boxes_review_evidence", ""),
+                             ("boxes_source_frame_sha256", "0" * 64),
+                             ("boxes_roi_bbox", [0, 0, 20, 20])):
+            bad = copy.deepcopy(good)
+            bad["frames"][1][field] = value
+            with pytest.raises(DatasetError, match="complete source-bound reviewed boxes"):
+                verify_dynamic_windows(root, [bad], kind="u_position", prototype_only=True)
+        bad = copy.deepcopy(good)
+        bad["truth_boxes"][0]["bbox"] = [0, 0, 12, 12]  # inside pixels, outside reviewed ROI
+        with pytest.raises(DatasetError, match="outside reviewed ROI"):
+            verify_dynamic_windows(root, [bad], kind="u_position", prototype_only=True)
+        bad = copy.deepcopy(good)
+        bad["frames"][1]["frame_id"] = "f1"
+        with pytest.raises(DatasetError, match="repeated source frame_id"):
+            verify_dynamic_windows(root, [bad], kind="u_position", prototype_only=True)
+        formal = copy.deepcopy(good)
+        formal["prototype_only"] = False
+        formal["review_method"] = "human"
+        with pytest.raises(DatasetError, match="complete source-bound reviewed boxes"):
+            verify_dynamic_windows(root, [formal], kind="u_position", prototype_only=False)
+
+
 def test_event_recall_false_trigger_and_failure_remain_in_denominator():
     with TemporaryDirectory() as temp:
         root = Path(temp)
         windows = [window(root, "positive", True), window(root, "negative", False),
                    window(root, "failure", True)]
+        # Distinct battle fixtures must not reuse byte-identical source frames
+        # while claiming different reviewed states for the same ROI and target.
+        for offset, reviewed in enumerate(windows):
+            for index, frame in enumerate(reviewed["frames"], 1):
+                source = root / frame["image"]
+                source.write_bytes(cv2.imencode(".png", np.full((20, 20, 3),
+                                   index + offset * 20, np.uint8))[1].tobytes())
+                frame["sha256"] = frame["parent_image_sha256"] = sha256(source)
+                frame["state_source_frame_sha256"] = frame["sha256"]
         labels = {("positive", "f1"): "intact", ("positive", "f2"): "rubble",
                   ("positive", "f3"): "rubble", ("negative", "f1"): "intact",
                   ("negative", "f2"): "rubble", ("negative", "f3"): "rubble",
@@ -84,6 +153,31 @@ def test_event_recall_false_trigger_and_failure_remain_in_denominator():
         assert report["metrics"]["event_recall"] == .5
         assert report["metrics"]["inference_failures"] == 1
         assert "No capture-to-input" in report["limits"][1]
+
+
+def test_empty_selected_split_fails_api_and_cli_without_writing_report(monkeypatch, capsys):
+    with TemporaryDirectory() as temp:
+        root = Path(temp)
+        train = window(root, "train", False, split="train")
+        validation = window(root, "validation", False, split="val")
+        for index, frame in enumerate(validation["frames"], 1):
+            source = root / frame["image"]
+            source.write_bytes(cv2.imencode(".png", np.full((20, 20, 3), index + 20,
+                               np.uint8))[1].tobytes())
+            frame["sha256"] = frame["parent_image_sha256"] = sha256(source)
+            frame["state_source_frame_sha256"] = frame["sha256"]
+        windows = [train, validation]
+        with pytest.raises(DatasetError, match="split 'test' has no reviewed windows"):
+            evaluate_dynamic(FakeModel({}), root, windows, prototype_only=True)
+        windows_path = root / "windows.jsonl"
+        windows_path.write_text("\n".join(json.dumps(row) for row in windows) + "\n", encoding="utf-8")
+        monkeypatch.setattr("scripts.evaluate_dynamic_vision.DynamicModel", lambda *_args, **_kwargs: FakeModel({}))
+        output = root / "report.json"
+        assert evaluate_dynamic_cli([str(root / "package"), "--client-version", "18.647.2",
+                                     "--source-root", str(root), "--windows", str(windows_path),
+                                     "--prototype-only", "--output", str(output)]) == 2
+        assert "no reviewed windows" in capsys.readouterr().err
+        assert not output.exists()
 
 
 def test_group_leakage_and_agent_review_cannot_be_formal():
@@ -116,6 +210,26 @@ def test_source_graph_blocks_new_group_id_and_window_id_leakage():
         # The fixture's equal pixels have the same source SHA, also linking splits.
         with pytest.raises(DatasetError, match="source-linked"):
             verify_dynamic_windows(root, [first, second], kind="r_building", prototype_only=True)
+
+
+def test_r_conflicting_state_on_same_source_roi_target_rejected_across_windows():
+    with TemporaryDirectory() as temp:
+        root = Path(temp)
+        first = window(root, "first", False, split="train")
+        second = window(root, "second", True, split="train")
+        # IDs and capture times may differ, while identical source pixels/ROI/target
+        # are still one supervised state and cannot have contradictory labels.
+        with pytest.raises(DatasetError, match="Conflicting R state labels"):
+            verify_dynamic_windows(root, [first, second], kind="r_building", prototype_only=True)
+        second = window(root, "second", False, split="train")
+        assert verify_dynamic_windows(root, [first, second], kind="r_building",
+                                      prototype_only=True)["frames"] == 6
+        for frame in second["frames"]:
+            frame["roi_bbox"] = [3, 3, 18, 18]
+            frame["state_roi_bbox"] = [3, 3, 18, 18]
+            frame["state_label"] = "damaged"
+        assert verify_dynamic_windows(root, [first, second], kind="r_building",
+                                      prototype_only=True)["frames"] == 6
 
 
 def test_evaluated_groups_count_source_components_not_event_group_labels():

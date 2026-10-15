@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 
-from autococ.combat import _candidate_changed, _next_candidate, _wait_for_clear_scout, inspect_army, run_battle
+from autococ.combat import _candidate_changed, _next_candidate, _read_army, _wait_for_clear_scout, inspect_army, run_battle
 from autococ.config import BattleConfig, VisionAgentConfig
 from autococ.errors import CaptureError, DeploymentError, FlowError, StopRequested
 from autococ.reporting import RunStats, resource_metrics
@@ -61,7 +61,9 @@ class FakeSession:
     click = GameSession.click
 
     def __init__(self, frames: list[SceneSnapshot], *, max_searches: int = 2) -> None:
-        self.frames = iter(frames)
+        self.frames = frames
+        self.frame_index = 0
+        self.synthetic_settlement_read = False
         self.config = SimpleNamespace(battle=BattleConfig(min_expected_resources=100, max_searches=max_searches),
                                       game=SimpleNamespace(startup_timeout_sec=10),
                                       runtime=SimpleNamespace(poll_interval_sec=0))
@@ -77,10 +79,24 @@ class FakeSession:
 
     def observe(self, label: str = "observe", **options) -> SceneSnapshot:
         self.observe_labels.append(label)
-        try:
-            self.last_snapshot = next(self.frames)
-        except StopIteration:
+        # Existing line fixtures describe one steady result screen. A reread
+        # captures a distinct screenshot before returning home; dedicated
+        # animation tests below supply their own sequence instead.
+        line_mode = (self.config.battle.strategy in {"edrag_line", "two_edge"}
+                     or bool(self.config.battle.strategy_file)
+                     or bool(getattr(getattr(self.config, "vision_agent", None), "enabled", False)))
+        if (line_mode and label == "battle-settlement-reread" and not self.synthetic_settlement_read
+                and self.last_snapshot is not None and self.last_snapshot.scene == "settlement"
+                and self.frame_index < len(self.frames)
+                and self.frames[self.frame_index].scene in {"village", "popup"}):
+            self.synthetic_settlement_read = True
+            self.last_snapshot = replace(deepcopy(self.last_snapshot),
+                                         screenshot_path=Path("combat-stable-settlement.png"))
+            return self.last_snapshot
+        if self.frame_index >= len(self.frames):
             raise FlowError("Observation deadline exceeded")
+        self.last_snapshot = self.frames[self.frame_index]
+        self.frame_index += 1
         return self.last_snapshot
 
     def wait_for(self, scenes: set[str], *, timeout_sec: float = 30, label: str = "wait", **options) -> SceneSnapshot:
@@ -342,11 +358,9 @@ class CombatTests(unittest.TestCase):
         session = FakeSession(frames)
         session.config.battle = replace(session.config.battle, strategy="two_edge")
         result = battle(session)
-        self.assertEqual(result.status, "succeeded")
-        self.assertEqual(result.metrics["rounds_completed"], 1)
-        self.assertIsNone(result.metrics["victory"])
-        self.assertIsNone(result.metrics["stars"])
-        self.assertIsNone(result.metrics["loot_gold"])
+        self.assertEqual(result.status, "failed")
+        self.assertIsNone(result.metrics.get("victory"))
+        self.assertFalse(any("return_home" in reason for _, reason in session.taps))
 
     def test_unverified_star_shapes_never_claim_victory(self):
         frames = complete_frames()
@@ -354,7 +368,9 @@ class CombatTests(unittest.TestCase):
         session = FakeSession(frames)
         session.config.battle = replace(session.config.battle, strategy="two_edge")
         result = battle(session)
-        self.assertIsNone(result.metrics["victory"])
+        self.assertEqual(result.status, "failed")
+        self.assertIsNone(result.metrics.get("victory"))
+        self.assertFalse(any("return_home" in reason for _, reason in session.taps))
 
     def test_two_edge_requires_native_zoom_before_any_game_input(self):
         session = FakeSession(complete_frames())
@@ -553,6 +569,114 @@ class CombatTests(unittest.TestCase):
         self.assertEqual(result.reason, "edrag_line_troops_settlement_and_return_verified")
         self.assertEqual(session.last_snapshot.scene, "village")
 
+    def test_line_result_waits_for_two_distinct_stable_frames_after_count_up(self):
+        frames = complete_frames()
+        frames[5].observations["settlement"]["bonus"]["gold"] = None
+        final = frame(50, "settlement", settlement=deepcopy(SETTLEMENT))
+        repeated = frame(51, "settlement", settlement=deepcopy(SETTLEMENT))
+        session = FakeSession(frames[:6] + [final, repeated] + frames[6:])
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        result = battle(session)
+        self.assertEqual(result.status, "succeeded", result.reason)
+        self.assertEqual([read["valid"] for read in result.metrics["settlement_reads"]], [False, True, True])
+        self.assertEqual([read["frame"] for read in result.metrics["settlement_reads"]],
+                         ["combat-5.png", "combat-50.png", "combat-51.png"])
+        self.assertEqual([path for path, reason in session.taps if "return_home" in reason],
+                         [repeated.screenshot_path])
+        self.assertTrue(all(path in result.evidence for path in
+                            (frames[5].screenshot_path, final.screenshot_path, repeated.screenshot_path)))
+
+    def test_line_result_does_not_click_while_valid_values_keep_changing(self):
+        frames = complete_frames()
+        changing = []
+        for index in range(6):
+            result = deepcopy(SETTLEMENT)
+            result["loot"]["gold"] += index
+            changing.append(frame(50 + index, "settlement", settlement=result))
+        session = FakeSession(frames[:5] + changing + frames[6:])
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertIn("not stabilized", result.reason)
+        self.assertEqual(len(result.metrics["settlement_reads"]), 6)
+        self.assertTrue(result.metrics["returned_home"])
+        self.assertNotIn("loot_gold", result.metrics)
+        self.assertEqual([path for path, reason in session.taps if "return_home" in reason],
+                         [changing[-1].screenshot_path])
+
+    def test_line_result_same_frame_replay_cannot_prove_stability(self):
+        frames = complete_frames()
+        repeated = [frame(50, "settlement", settlement=deepcopy(SETTLEMENT)) for _ in range(6)]
+        session = FakeSession(frames[:5] + repeated + frames[6:])
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertIn("not stabilized", result.reason)
+        self.assertTrue(result.metrics["returned_home"])
+        self.assertNotIn("loot_gold", result.metrics)
+
+    def test_line_incomplete_result_can_exit_only_from_latest_settlement(self):
+        frames = complete_frames()
+        partial = deepcopy(SETTLEMENT)
+        partial["loot"]["dark_elixir"] = None
+        readings = [frame(50 + index, "settlement", settlement=deepcopy(partial)) for index in range(6)]
+        session = FakeSession(frames[:5] + readings + frames[6:])
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertTrue(result.metrics["returned_home"])
+        self.assertEqual(len(result.metrics["settlement_reads"]), 6)
+        self.assertIsNone(result.metrics.get("victory"))
+        self.assertNotIn("loot_gold", result.metrics)
+        self.assertFalse(result.metrics["inventory_reconciled"])
+        self.assertEqual([path for path, reason in session.taps if "return_home" in reason],
+                         [readings[-1].screenshot_path])
+
+    def test_line_unknown_latest_frame_never_uses_older_return_button(self):
+        frames = complete_frames()
+        partial = deepcopy(SETTLEMENT)
+        partial["loot"]["dark_elixir"] = None
+        readings = [frame(50 + index, "settlement", settlement=deepcopy(partial)) for index in range(5)]
+        session = FakeSession(frames[:5] + readings + [frame(55, "unknown")])
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertFalse(result.metrics.get("returned_home", False))
+        self.assertFalse(any("return_home" in reason for _, reason in session.taps))
+
+    def test_failed_line_reconciles_exact_settlement_and_home_without_claiming_success(self):
+        frames = complete_frames()
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        def fail_deployment(session, scout):
+            session.observe("partially-deployed")
+            raise DeploymentError("Troop quantity unverified", partial_receipt={
+                "completed": False, "verified": True, "deployed_units": 1,
+                "issued_placements": 1, "evidence": ["combat-4.png"]})
+        session.deploy = fail_deployment
+        result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "Troop quantity unverified")
+        self.assertTrue(result.metrics["returned_home"])
+        self.assertTrue(result.metrics["inventory_reconciled"])
+        self.assertEqual(result.metrics["inventory_delta"],
+                         {"gold": 110, "elixir": 55, "dark_elixir": 10, "gems": 0})
+
+    def test_line_never_reconciles_unverified_start_inventory(self):
+        for source, resources in (("village_inventory", {**BEFORE, "dark_elixir": None}),
+                                  ("enemy_available", deepcopy(BEFORE)),
+                                  ("village_inventory", None)):
+            with self.subTest(source=source, resources=resources):
+                frames = complete_frames()
+                frames[0].observations["resource_source"] = source
+                frames[0].observations["resources"] = resources
+                session = FakeSession(frames)
+                session.config.battle = replace(session.config.battle, strategy="edrag_line")
+                result = battle(session)
+                self.assertEqual(result.status, "succeeded", result.reason)
+                self.assertFalse(result.metrics["inventory_reconciled"])
+                self.assertNotIn("inventory_delta", result.metrics)
+
     def test_settlement_wait_can_be_longer_without_relaxing_deployment_deadline(self):
         for configured, expected in ((None, 180), (1200, 1200)):
             with self.subTest(configured=configured):
@@ -607,6 +731,32 @@ class CombatTests(unittest.TestCase):
         self.assertEqual(len(result.metrics["home_resource_reads"]), 2)
         self.assertEqual(session.taps[-1][1], "Recognized return_home: return_home")
 
+    def test_line_ledger_uses_fresh_home_after_navigation_controls_settle(self):
+        frames = complete_frames()
+        frames[5].observations["settlement"]["evidence"]["bonus"] = {
+            "requires_inventory_reconciliation": True}
+        frames[6].observations["buttons"] = [
+            button for button in frames[6].observations["buttons"] if button["name"] == "shop"]
+        frames[6].observations["resources"]["gold"] = 0
+        fresh = frame(7, "village", resources=deepcopy(AFTER))
+        session = FakeSession(frames + [fresh])
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        result = battle(session)
+        self.assertEqual(result.status, "succeeded", result.reason)
+        self.assertTrue(result.metrics["inventory_reconciled"])
+        self.assertEqual(result.metrics["resources_after"], AFTER)
+        self.assertIn(fresh.screenshot_path, result.evidence)
+        self.assertIn("home-controls-reread", session.observe_labels)
+
+    def test_new_battle_clears_old_frozen_line_receipt_before_preflight(self):
+        session = FakeSession(complete_frames())
+        session.frozen_line_receipt = {"old_battle": True}
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        session.native = None
+        result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertIsNone(session.frozen_line_receipt)
+
     def test_line_persistent_or_unreadable_gem_change_is_not_accepted(self):
         for gems in (49, None):
             with self.subTest(gems=gems):
@@ -656,6 +806,92 @@ class CombatTests(unittest.TestCase):
         self.assertEqual(result.metrics["deployment"]["issued_placements"], 0)
         self.assertEqual(session.taps[-1][1], "Recognized return_home: return_home")
 
+    def _continuous_preparation_failure(self, frames, *, attempted=0, issued=0,
+                                        failure=None, continuous=True):
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle, strategy="edrag_line",
+                                        line_execution_mode="continuous" if continuous else "verified")
+        partial = {"completed": False, "verified": False, "deployed_units": 0,
+                   "attempted_placements": attempted, "issued_placements": issued,
+                   "evidence": [str(frames[3].screenshot_path)]}
+
+        def fail_before_placement(active, scout):
+            active.deploy_calls += 1
+            if failure is not None:
+                raise failure
+            raise DeploymentError("Continuous plan could not be frozen", partial_receipt=partial)
+
+        session.deploy = fail_before_placement
+        # This unit test exercises failure cleanup after the separate army
+        # identity gate; no model-free plan or game input is constructed.
+        with patch("autococ.combat._read_continuous_line_army",
+                   side_effect=lambda active, current, evidence: (current, _read_army(current))):
+            return session, battle(session)
+
+    def test_unstarted_continuous_line_exits_only_from_fresh_enemy_preview(self):
+        frames = complete_frames()[:4] + [frame(7, "enemy_village"),
+                 frame(8, "village"), frame(9, "village", resources=deepcopy(BEFORE))]
+        session, result = self._continuous_preparation_failure(frames)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "Continuous plan could not be frozen")
+        self.assertEqual(result.metrics["deployment"]["attempted_placements"], 0)
+        self.assertTrue(result.metrics["returned_home"])
+        self.assertNotIn("rounds_completed", result.metrics)
+        self.assertEqual(session.deploy_calls, 1)
+        self.assertIn("continuous-line-failure-check", session.observe_labels)
+        exits = [(path, reason) for path, reason in session.taps if "end_battle" in reason]
+        self.assertEqual(len(exits), 1)
+        self.assertEqual(exits[0][0], frames[4].screenshot_path)
+        self.assertIn(frames[4].screenshot_path, result.evidence)
+        self.assertIn(frames[-1].screenshot_path, result.evidence)
+
+    def test_unstarted_continuous_line_expired_preview_waits_for_settlement(self):
+        settled = frame(8, "settlement", settlement=deepcopy(SETTLEMENT))
+        home = frame(9, "village", resources=deepcopy(AFTER))
+        session, result = self._continuous_preparation_failure(
+            complete_frames()[:4] + [frame(7, "battle"), settled, home])
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "Continuous plan could not be frozen")
+        self.assertTrue(result.metrics["returned_home"])
+        self.assertEqual(result.metrics["rounds_completed"], 1)
+        self.assertEqual(result.metrics["deployment"]["deployed_units"], 0)
+        self.assertIn("battle-settlement", session.observe_labels)
+        self.assertFalse(any("end_battle" in reason for _, reason in session.taps))
+
+    def test_unstarted_continuous_line_unknown_or_weak_scene_cannot_authorize_input(self):
+        for current in (frame(7, "unknown"), frame(7, "settlement"),
+                        replace(frame(7, "enemy_village"), confidence=.7),
+                        replace(frame(7, "battle"), confidence=.7)):
+            with self.subTest(scene=current.scene, confidence=current.confidence):
+                session, result = self._continuous_preparation_failure(
+                    complete_frames()[:4] + [current])
+                self.assertEqual(result.status, "failed")
+                self.assertEqual(result.reason, "Continuous plan could not be frozen")
+                self.assertFalse(result.metrics.get("returned_home", False))
+                self.assertIn("deployment_recovery_error", result.metrics)
+                self.assertEqual(session.deploy_calls, 1)
+                self.assertEqual([reason for _, reason in session.taps], [
+                    "Recognized attack: attack",
+                    "Recognized find_match_regular: find_match_regular",
+                    "Recognized attack: attack"])
+                self.assertFalse(any("end_battle" in reason or "return_home" in reason
+                                     for _, reason in session.taps))
+
+    def test_continuous_line_attempted_placement_does_not_use_unstarted_exit(self):
+        for attempted, issued, continuous in ((1, 0, True), (0, 1, True), (0, 0, False)):
+            with self.subTest(attempted=attempted, issued=issued, continuous=continuous):
+                session, result = self._continuous_preparation_failure(
+                    complete_frames()[:4] + [frame(7, "enemy_village")],
+                    attempted=attempted, issued=issued, continuous=continuous)
+                self.assertEqual(result.status, "failed")
+                self.assertNotIn("continuous-line-failure-check", session.observe_labels)
+                self.assertFalse(any("end_battle" in reason for _, reason in session.taps))
+
+    def test_continuous_line_stop_bypasses_failure_cleanup(self):
+        frames = complete_frames()[:4] + [frame(7, "enemy_village")]
+        with self.assertRaises(StopRequested):
+            self._continuous_preparation_failure(frames, failure=StopRequested("stop"))
+
     def test_unrecognized_expired_preview_does_not_authorize_recovery_input(self):
         frames = complete_frames()
         frames[4] = frame(4, "unknown")
@@ -679,18 +915,53 @@ class CombatTests(unittest.TestCase):
         session.config.battle = replace(session.config.battle, strategy="two_edge")
         result = battle(session)
         self.assertEqual(result.status, "succeeded")
-        self.assertIsNone(result.metrics["bonus_gold"])
+        self.assertTrue(result.metrics["inventory_reconciled"])
+        self.assertEqual(result.metrics["bonus_gold"], 20)
+        self.assertTrue(result.metrics["victory"])
+        self.assertEqual(result.metrics["stars"], 2)
 
-    def test_two_edge_result_keeps_unknown_loot_unknown_without_blocking_return(self):
+    def test_provisional_two_row_result_is_not_published_without_exact_ledger(self):
+        for before, source, after in (
+            (deepcopy(BEFORE), "village_inventory", {**AFTER, "gold": AFTER["gold"] + 1}),
+            ({**BEFORE, "dark_elixir": None}, "village_inventory", deepcopy(AFTER)),
+            (deepcopy(BEFORE), "enemy_available", deepcopy(AFTER)),
+        ):
+            with self.subTest(before=before, source=source, after=after):
+                frames = complete_frames()
+                frames[0].observations.update(resources=before, resource_source=source)
+                frames[5].observations["settlement"]["evidence"].setdefault("loot", {})["dark_elixir"] = {
+                    "source": "verified_absent_resource_row_layout",
+                    "requires_inventory_reconciliation": True}
+                frames[5].observations["settlement"]["evidence"]["bonus"] = {
+                    "source": "verified_no_bonus_layout",
+                    "requires_inventory_reconciliation": True}
+                frames[6].observations["resources"] = after
+                session = FakeSession(frames)
+                session.config.battle = replace(session.config.battle, strategy="edrag_line")
+                result = battle(session)
+                self.assertEqual(result.status, "failed")
+                self.assertTrue(result.metrics["returned_home"])
+                self.assertFalse(result.metrics["inventory_reconciled"])
+                self.assertIsNone(result.metrics.get("victory"))
+                self.assertIsNone(result.metrics.get("stars"))
+                self.assertNotIn("loot_gold", result.metrics)
+                self.assertNotIn("bonus_gold", result.metrics)
+                self.assertIn("exact inventory reconciliation", result.reason)
+                ledger = resource_metrics(RunStats(task_results=[result]), elapsed_sec=60)
+                for resource in ("gold", "elixir", "dark_elixir"):
+                    self.assertIsNone(ledger["resources"][resource]["battle_loot"])
+                    self.assertIsNone(ledger["resources"][resource]["battle_bonus"])
+
+    def test_two_edge_unknown_loot_prevents_unverified_return(self):
         frames = complete_frames()
         frames[5].observations["settlement"]["loot"]["gold"] = None
         session = FakeSession(frames)
         session.config.battle = replace(session.config.battle, strategy="two_edge")
         result = battle(session)
-        self.assertEqual(result.status, "succeeded")
-        self.assertIsNone(result.metrics["loot_gold"])
+        self.assertEqual(result.status, "failed")
+        self.assertIsNone(result.metrics.get("loot_gold"))
         self.assertIsNotNone(result.metrics["settlement_validation_error"])
-        self.assertEqual(session.last_snapshot.scene, "village")
+        self.assertFalse(any("return_home" in reason for _, reason in session.taps))
 
     def test_natural_countdown_without_deployment_cannot_count_as_success(self) -> None:
         for receipt in (None, {"verified": False, "deployed_units": 10, "evidence": ["frame.png"]},
