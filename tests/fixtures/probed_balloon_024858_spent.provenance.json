@@ -1,0 +1,19 @@
+{
+  "client_version": "18.647.2",
+  "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-024858-453163-d946a9d8\\frames\\00024-probed-anchor-1-post-1.png",
+  "source_sha256": "2d39842eb37f6875096180fa2d847e2a39b887b68fb139ffc3e20d111260b91e",
+  "fixture_sha256": "fdc98ca71255a18a3ac62a0b7e1f658e55b8294a5de70984d9bdc05c7a95cf0b",
+  "transform": "Decode BGR with OpenCV IMREAD_COLOR; overwrite native rows y=0..1089 inclusive with BGR (50,115,77); retain x=0..2559,y=1090..1439; encode PNG with cv2.imwrite.",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "retained_native_xyxy": [
+    0,
+    1090,
+    2560,
+    1440
+  ],
+  "purpose": "Current-version lower battle toolbar evidence only; upper game/player scene deliberately anonymized, not a full-scene fixture.",
+  "card_states": "second probe post, balloon gray x0, other troops and heroes unspent"
+}

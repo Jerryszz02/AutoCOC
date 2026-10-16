@@ -97,6 +97,22 @@ class BattleVisionTests(unittest.TestCase):
         self.assertEqual(result.scene, "settlement")
         self.assertTrue(result.observations["fast_fallback"])
 
+    def test_battle_hud_uses_current_two_anchor_scene_without_count_or_full_ocr(self):
+        snapshot = self.observe(purpose="battle_hud")
+        self.assertEqual(snapshot.scene, "battle")
+        self.assertEqual(snapshot.observations["recognition_scope"], "battle_hud")
+        self.assertFalse(snapshot.observations["fast_fallback"])
+        self.assertEqual(snapshot.observations["matched_reasons"], ["two_current_hud_anchors"])
+        self.assertNotIn("deployment_count_reads", snapshot.observations)
+        self.assertEqual(snapshot.observations["ocr"], [])
+        self.provider.recognize_line_image.assert_not_called()
+        self.reader.recognize.assert_not_called()
+
+        self.reader.recognize.side_effect = lambda path: SceneSnapshot("unknown", 0, path)
+        missing_hud = self.observe(np.zeros_like(self.image), purpose="battle_hud")
+        self.assertTrue(missing_hud.observations["fast_fallback"])
+        self.assertEqual(missing_hud.observations["recognition_requested"], "battle_hud")
+
     def test_same_path_overwrite_invalidates_frame_and_template_cache(self):
         path = self.write("cache", self.image)
         self.assertGreater(read_frame(path).max(), 0)

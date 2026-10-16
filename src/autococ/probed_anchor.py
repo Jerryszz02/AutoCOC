@@ -312,6 +312,63 @@ def _remaining_roster_checkpoint(session: Any, plan: ProbedAnchorPlan, snapshot:
             "troops": positive, "heroes": heroes}
 
 
+def _spent_balloon_dark_border(current: Any, bbox: tuple[int, int, int, int]) -> dict | None:
+    """A narrow 18.647.2 gray-card alternative with two sides and one closed dark bottom."""
+    import cv2
+    import numpy as np
+
+    left, top, right, bottom = bbox
+    if (current.shape[:2] != (720, 1280) or not 3 <= left < right <= 1277 or
+            not 590 <= top <= 605 or bottom != 711 or not 80 <= right - left <= 96):
+        return None
+    gray = cv2.cvtColor(current, cv2.COLOR_BGR2GRAY)
+    horizontal_edges = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    direction = np.median(horizontal_edges[625:695], axis=0)
+    left_edge, right_edge = float(direction[left]), float(direction[right - 1])
+    # Retain the stronger opposite-side requirements of _closed_card_border.
+    if left_edge < 250 or right_edge > -150:
+        return None
+    # The straight sides must reach the rounded lower corners. A detached
+    # horizontal dark stripe is not a closed card, even if both upper sides
+    # and the stripe independently look strong.
+    for row in range(696, 704):
+        if horizontal_edges[row, left] < 150 or horizontal_edges[row, right - 1] > -150:
+            return None
+    left_position, right_position = left, right - 1
+    for row in range(704, 711):
+        left_band = horizontal_edges[row, left:left + 9]
+        right_band = horizontal_edges[row, right - 9:right]
+        next_left = left + int(np.argmax(left_band))
+        next_right = right - 9 + int(np.argmin(right_band))
+        if (float(left_band.max()) < 40 or float(right_band.min()) > -40 or
+                not left_position <= next_left <= left_position + 2 or
+                not right_position - 2 <= next_right <= right_position):
+            return None
+        left_position, right_position = next_left, next_right
+    if left_position < left + 5 or right_position > right - 6:
+        return None
+    interior = slice(left + 8, right - 8)
+    candidates = []
+    for row in range(bottom - 1, bottom + 2):
+        above = gray[row - 3:row, interior].mean(axis=0)
+        trough = gray[row:row + 2, interior].mean(axis=0)
+        below = gray[row + 2:row + 5, interior].mean(axis=0)
+        # Split the existing 40-level bottom contrast across both sides of
+        # one dark stroke. Every interior column, including both rounded
+        # corner bands, must show the same closed outline.
+        if np.all((above - trough >= 20) & (below - trough >= 20) & (trough <= 16)):
+            candidates.append((row, float(np.median(above - trough)),
+                               float(np.median(below - trough))))
+    if len(candidates) != 1:
+        return None
+    row, upper_contrast, lower_contrast = candidates[0]
+    return {"method": "spent_balloon_dark_outline", "left_edge": left_edge,
+            "right_edge": right_edge, "dark_row": row,
+            "corner_endpoints": [left_position, right_position],
+            "upper_contrast": upper_contrast, "lower_contrast": lower_contrast,
+            "continuous_columns": right - left - 16}
+
+
 def _balloon_count(session: Any, plan: ProbedAnchorPlan, snapshot: Any, expected: int, *,
                    source_bound: bool = False, selected: bool = False,
                    pending: int | None = None) -> dict:
@@ -409,7 +466,28 @@ def _balloon_count(session: Any, plan: ProbedAnchorPlan, snapshot: Any, expected
         current = cv2.resize(read_frame(snapshot.screenshot_path), (1280, 720), interpolation=cv2.INTER_AREA)
         border = _closed_card_border(current, plan.balloon_bbox)
         if border is None:
-            raise FlowError("Probe spent balloon lacks the independent closed-card border")
+            # This fallback is specific to the observed current-version gray
+            # x0 card. It does not change the legacy border contract.
+            if base.client_version != "18.647.2":
+                raise FlowError("Probe spent balloon lacks the independent closed-card border")
+            from .unit_catalog import recognize_card_identity
+            if _file_sha256(base.frame.screenshot_path) != base.frame_sha256:
+                raise FlowError("Probe versioned balloon source pixels changed")
+            source = cv2.resize(read_frame(base.frame.screenshot_path), (1280, 720),
+                                interpolation=cv2.INTER_AREA)
+            identity = recognize_card_identity(source, plan.balloon_bbox, "troop",
+                                               surface="battle", client_version=base.client_version)
+            if (identity.get("unit_id") != "balloon" or
+                    identity.get("version_verified") is not True or
+                    identity.get("template_client_version") != base.client_version or
+                    type(identity.get("confidence")) not in (int, float) or
+                    not math.isfinite(identity["confidence"]) or identity["confidence"] < .94):
+                raise FlowError("Probe source balloon versioned identity is unverified")
+            border = _spent_balloon_dark_border(current, plan.balloon_bbox)
+            if border is None:
+                raise FlowError("Probe spent balloon lacks the independent closed-card border")
+            reading["source_portrait_identity"] = identity
+            reading["source_identity_frame"] = base.frame.frame_id
         reading["current_card_border"] = border
     return reading
 
@@ -559,22 +637,22 @@ def execute_probed_anchor_line(session: Any, plan: ProbedAnchorPlan, *,
             for observation in range(2):
                 if clock() >= stage_deadline:
                     break
+                # The two HUD anchors establish this frame's scene quickly;
+                # _balloon_count independently binds portrait and number below.
                 current = session.observe(f"probed-anchor-{index}-post-{observation}",
-                                          purpose="troop_count",
-                                          slot={"point": list(plan.balloon_point),
-                                                "bbox": list(plan.balloon_bbox)})
+                                          purpose="battle_hud")
                 receipt["evidence"].append(str(current.screenshot_path))
                 if current.scene == "account_in_use":
                     raise FlowError("Game interruption: account_in_use")
                 if current.observations.get("deployment_count_conflict") is not None:
                     raise FlowError("Probe strong_count_conflict in the post-input frame")
                 scope = current.observations.get("recognition_scope")
-                if scope == "troop_count":
+                if scope == "battle_hud":
                     if (current.observations.get("fast_fallback") is not False or
                             current.observations.get("matched_reasons") != ["two_current_hud_anchors"]):
                         raise FlowError("Probe fast post frame lacks independent HUD scene proof")
                 elif not (scope == "full" and current.observations.get("fast_fallback") is True and
-                          current.observations.get("recognition_requested") == "troop_count"):
+                          current.observations.get("recognition_requested") == "battle_hud"):
                     raise FlowError("Probe post frame lacks a fresh full or guarded fast recognition")
                 if current.scene not in {"enemy_village", "battle"}:
                     continue

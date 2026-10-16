@@ -1,0 +1,19 @@
+{
+  "client_version": "18.647.2",
+  "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-024858-453163-d946a9d8\\frames\\00016-line-zoom-verified.png",
+  "source_sha256": "6bd89caa6786b43a1c2137592a71d51e822025ecbb1332584411018539106d78",
+  "fixture_sha256": "4095841576df718bc7c115f9ec840f222d420f2db369d270040765a6dffcf451",
+  "transform": "Decode BGR with OpenCV IMREAD_COLOR; overwrite native rows y=0..1089 inclusive with BGR (50,115,77); retain x=0..2559,y=1090..1439; encode PNG with cv2.imwrite.",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "retained_native_xyxy": [
+    0,
+    1090,
+    2560,
+    1440
+  ],
+  "purpose": "Current-version lower battle toolbar evidence only; upper game/player scene deliberately anonymized, not a full-scene fixture.",
+  "card_states": "five ordinary army troop cards including balloon x2"
+}

@@ -35,7 +35,7 @@ def image_frame(tmp_path, name, scene, observed, *, fast=False):
     path.write_bytes(f"frame {name}".encode())
     return SceneSnapshot(scene, .99, path, {"observed_at_monotonic": observed,
         "source_resolution": (2560, 1440), "baseline_resolution": (1280, 720),
-        **({"recognition_scope": "troop_count", "fast_fallback": False,
+        **({"recognition_scope": ("battle_hud" if fast == "battle_hud" else "troop_count"), "fast_fallback": False,
             "matched_reasons": ["two_current_hud_anchors"]} if fast else {}),
         "battle": {"slots": []}})
 
@@ -118,9 +118,9 @@ class Session:
         next_frame = next(self.observations)
         if isinstance(next_frame, BaseException):
             raise next_frame
-        if _kwargs.get("purpose") == "troop_count" and "recognition_scope" not in next_frame.observations:
+        if _kwargs.get("purpose") in {"troop_count", "battle_hud"} and "recognition_scope" not in next_frame.observations:
             next_frame.observations.update(recognition_scope="full", fast_fallback=True,
-                                           recognition_requested="troop_count")
+                                           recognition_requested=_kwargs["purpose"])
         self.last_snapshot = next_frame
         return next_frame
 
@@ -297,9 +297,9 @@ def test_first_probe_pending_count_uses_second_frame_without_replaying(monkeypat
 def test_post_fast_preview_waits_then_full_battle_fallback_and_independent_final_full(monkeypatch, tmp_path):
     plan, source = make_plan(monkeypatch, tmp_path)
     selected = image_frame(tmp_path, "selected", "enemy_village", 10.1, fast=True)
-    preview = image_frame(tmp_path, "preview", "enemy_village", 10.2, fast=True)
+    preview = image_frame(tmp_path, "preview", "enemy_village", 10.2, fast="battle_hud")
     consumed = image_frame(tmp_path, "consumed", "battle", 10.3)
-    second = image_frame(tmp_path, "second", "battle", 10.4, fast=True)
+    second = image_frame(tmp_path, "second", "battle", 10.4, fast="battle_hud")
     final = image_frame(tmp_path, "final", "battle", 10.5)
     session = Session(source, [selected, preview, consumed, second, final])
     monkeypatch.setattr("autococ.probed_anchor._current_frame",
@@ -319,9 +319,9 @@ def test_post_fast_preview_waits_then_full_battle_fallback_and_independent_final
     assert receipt["checkpoint"]["sha256"] == _file_sha256(final.screenshot_path)
     assert session.observe_calls == [
         ("probed-anchor-balloon-selected", "troop_count"),
-        ("probed-anchor-0-post-0", "troop_count"),
-        ("probed-anchor-0-post-1", "troop_count"),
-        ("probed-anchor-1-post-0", "troop_count"),
+        ("probed-anchor-0-post-0", "battle_hud"),
+        ("probed-anchor-0-post-1", "battle_hud"),
+        ("probed-anchor-1-post-0", "battle_hud"),
         ("probed-anchor-final-checkpoint", None)]
     assert [point for kind, point in session.inputs if kind == "tap" and point in plan.anchors] == list(plan.anchors)
 
@@ -330,8 +330,8 @@ def test_post_fast_preview_waits_then_full_battle_fallback_and_independent_final
 def test_post_fast_scene_or_strong_conflict_never_replays_or_sends_second_probe(monkeypatch, tmp_path, failure):
     plan, source = make_plan(monkeypatch, tmp_path)
     selected = image_frame(tmp_path, "selected", "enemy_village", 10.1, fast=True)
-    first = image_frame(tmp_path, "first", "battle", 10.2, fast=True)
-    later = image_frame(tmp_path, "later", "battle", 10.3, fast=True)
+    first = image_frame(tmp_path, "first", "battle", 10.2, fast="battle_hud")
+    later = image_frame(tmp_path, "later", "battle", 10.3, fast="battle_hud")
     if failure == "fast_guard":
         first.observations["matched_reasons"] = ["cached_preview"]
     elif failure == "strong_conflict":
@@ -741,6 +741,124 @@ def test_real_current_balloon_selected_fixture_binds_source_and_ordinary_ed_geom
         assert reading["portrait_score"] >= .92
         assert reading["source_portrait_identity"]["unit_id"] == "balloon"
         assert ("selected_card_border" in reading) is expected_selected
+
+
+def test_real_024858_spent_balloon_requires_independent_gray_border(tmp_path):
+    """Real x0 toolbar pixels; full battle scene and tactical success are not fixture claims."""
+    from autococ.images import read_frame
+    from autococ.vision import ScreenshotRecognizer
+    from autococ.frozen_line import _closed_card_border
+
+    paths = {name: FIXTURES / f"probed_balloon_024858_{name}.png"
+             for name in ("before", "source", "spent")}
+    for path in paths.values():
+        provenance = json.loads(path.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+        assert provenance["client_version"] == "18.647.2"
+        assert provenance["retained_native_xyxy"] == [0, 1090, 2560, 1440]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == provenance["fixture_sha256"]
+    bbox = (335, 595, 423, 711)
+    image = cv2.resize(read_frame(paths["spent"]), (1280, 720), interpolation=cv2.INTER_AREA)
+    assert _closed_card_border(image, bbox) is None  # Reproduce the live gate.
+    base, _ = frozen_base(tmp_path)
+    frame = replace(base.frame, frame_id=str(paths["source"]), screenshot_path=paths["source"])
+    base = replace(base, frame=frame, frame_sha256=_file_sha256(paths["source"]),
+                   toolbar_before_frame_id=str(paths["before"]),
+                   toolbar_before_sha256=_file_sha256(paths["before"]))
+    plan = SimpleNamespace(base=base, balloon_point=(379, 653), balloon_bbox=bbox)
+    recognizer = ScreenshotRecognizer()
+    recognizer.client_version = "18.647.2"
+    # A battle_hud snapshot supplies only a current two-HUD scene proof;
+    # its empty OCR/slots cannot supply the quantity for this assertion.
+    snapshot = SceneSnapshot("battle", .99, paths["spent"], {
+        "recognition_scope": "battle_hud", "fast_fallback": False,
+        "matched_reasons": ["two_current_hud_anchors"],
+        "ocr": [], "battle": {"slots": []}})
+    session = SimpleNamespace(last_snapshot=snapshot, recognizer=recognizer,
+                              client_version="18.647.2")
+    reading = _balloon_count(session, plan, snapshot, 0)
+    assert reading["count"] == 0 and reading["confidence"] >= .9
+    assert reading["portrait_score"] >= .92
+    assert reading["source_portrait_identity"]["unit_id"] == "balloon"
+    assert reading["current_card_border"]["method"] == "spent_balloon_dark_outline"
+
+
+@pytest.mark.parametrize("damage", ("bottom", "left_corner", "right_corner",
+                                     "left_turn", "right_turn", "left_side",
+                                     "shifted_bbox", "adjacent_card",
+                                     "wrong_version", "changed_source", "wrong_identity"))
+def test_gray_balloon_fallback_rejects_missing_outline_or_source_binding(monkeypatch, tmp_path, damage):
+    from autococ.images import read_frame
+    from autococ.vision import ScreenshotRecognizer
+
+    fixture = lambda name: FIXTURES / f"probed_balloon_024858_{name}.png"
+    source = fixture("source")
+    before = fixture("before")
+    spent = fixture("spent")
+    bbox = (335, 595, 423, 711)
+    point = (379, 653)
+    base, _ = frozen_base(tmp_path)
+    frame = replace(base.frame, frame_id=str(source), screenshot_path=source)
+    base = replace(base, frame=frame, frame_sha256=_file_sha256(source),
+                   toolbar_before_frame_id=str(before), toolbar_before_sha256=_file_sha256(before))
+    if damage == "wrong_version":
+        base = replace(base, client_version="18.600.7")
+    elif damage == "changed_source":
+        base = replace(base, frame_sha256="0" * 64)
+    elif damage == "wrong_identity":
+        monkeypatch.setattr("autococ.unit_catalog.recognize_card_identity",
+                            lambda *_a, **_kw: {"unit_id": "archer", "confidence": .99,
+                                                  "version_verified": True,
+                                                  "template_client_version": "18.647.2"})
+    elif damage in ("shifted_bbox", "adjacent_card"):
+        bbox = ((336, 595, 424, 711) if damage == "shifted_bbox"
+                else (432, 595, 520, 711))
+        point = ((380, 653) if damage == "shifted_bbox" else (476, 653))
+    else:
+        image = read_frame(spent).copy()
+        if damage == "bottom":
+            image[1414:1432, 686:830] = (40, 40, 40)
+        elif damage == "left_corner":
+            image[1416:1432, 686:702] = (40, 40, 40)
+        elif damage == "right_corner":
+            image[1416:1432, 814:830] = (40, 40, 40)
+        elif damage == "left_turn":
+            image[1392:1422, 670:686] = (40, 40, 40)
+        elif damage == "right_turn":
+            image[1392:1422, 830:846] = (40, 40, 40)
+        else:
+            image[1250:1390, 666:676] = (40, 40, 40)
+        spent = tmp_path / f"{damage}.png"
+        assert cv2.imwrite(str(spent), image)
+    plan = SimpleNamespace(base=base, balloon_point=point, balloon_bbox=bbox)
+    snapshot = SceneSnapshot("battle", .99, spent, {"ocr": [], "battle": {"slots": []}})
+    recognizer = ScreenshotRecognizer()
+    recognizer.client_version = "18.647.2"
+    session = SimpleNamespace(last_snapshot=snapshot, recognizer=recognizer,
+                              client_version="18.647.2")
+    with pytest.raises(FlowError):
+        _balloon_count(session, plan, snapshot, 0)
+
+
+def test_old_real_spent_balloon_keeps_original_border_path(tmp_path):
+    from autococ.vision import ScreenshotRecognizer
+
+    source = FIXTURES / "frozen-line-001038-00018-toolbar.png"
+    spent = FIXTURES / "frozen-line-001038-00020-toolbar.png"
+    base, _ = frozen_base(tmp_path)
+    frame = replace(base.frame, frame_id=str(source), screenshot_path=source)
+    base = replace(base, frame=frame, frame_sha256=_file_sha256(source),
+                   toolbar_before_frame_id=str(source),
+                   toolbar_before_sha256=_file_sha256(source))
+    plan = SimpleNamespace(base=base, balloon_point=(379, 653),
+                           balloon_bbox=(335, 595, 423, 711))
+    snapshot = SceneSnapshot("battle", .99, spent, {"ocr": [], "battle": {"slots": []}})
+    recognizer = ScreenshotRecognizer()
+    recognizer.client_version = "18.647.2"
+    session = SimpleNamespace(last_snapshot=snapshot, recognizer=recognizer,
+                              client_version="18.647.2")
+    reading = _balloon_count(session, plan, snapshot, 0)
+    assert reading["count"] == 0
+    assert "method" not in reading["current_card_border"]
 
 
 def test_exact_camera_rejects_shift_and_occlusion(tmp_path):
