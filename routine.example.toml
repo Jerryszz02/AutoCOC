@@ -54,6 +54,12 @@ enabled = false
 adapter_path = "docs/examples/event.adapter.toml"
 
 [[routine.tasks]]
+id = "event_reward"
+kind = "event_reward"
+enabled = false # Enable only after confirming the current 18.647.2 free reward track.
+free_reward_target = "shiny" # shiny: 1250; glowy: 115. One explicitly selected target per task.
+
+[[routine.tasks]]
 id = "clan_games"
 kind = "clan_games"
 enabled = false

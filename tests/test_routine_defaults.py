@@ -3,10 +3,27 @@
 import unittest
 
 from autococ.errors import ConfigError
-from autococ.routine_config import ResourceFilter, TaskSpec, routine_from_dict
+from autococ.routine_config import ResourceFilter, TaskSpec, routine_from_dict, routine_to_dict
 
 
 class RoutineFilterDefaultsTests(unittest.TestCase):
+    def test_free_event_reward_requires_explicit_known_target_only_when_enabled(self):
+        for payload in ({"id": "reward", "kind": "event_reward"},
+                        {"id": "reward", "kind": "event_reward", "free_reward_target": "paid"},
+                        {"id": "reward", "kind": "event_reward", "free_reward_target": ""}):
+            with self.assertRaises(ConfigError):
+                routine_from_dict({"tasks": [payload]})
+        disabled = routine_from_dict({"tasks": [{"id": "reward", "kind": "event_reward",
+                                                "enabled": False}]})
+        self.assertEqual(disabled.tasks[0].free_reward_target, "")
+        for target in ("shiny", "glowy"):
+            routine = routine_from_dict({"tasks": [{"id": "reward", "kind": "event_reward",
+                                                    "free_reward_target": target}]})
+            self.assertEqual(routine_from_dict(routine_to_dict(routine)), routine)
+        with self.assertRaises(ConfigError):
+            routine_from_dict({"tasks": [{"id": "battle", "kind": "event",
+                                          "free_reward_target": "shiny"}]})
+
     def test_battle_task_defaults_match_direct_and_parsed_construction(self):
         expected = {
             "resources": ResourceFilter(min_total=300000),

@@ -2,6 +2,7 @@ from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -143,6 +144,8 @@ class DailyRunnerTests(unittest.TestCase):
         self.session.config=self.config
         self.session.observe.return_value=self.frame
         self.session.last_snapshot=self.frame
+        self.session.deadline=time.monotonic()+300
+        self.session.task_deadline=self.session.deadline
         self.session.events_path=root/"events.jsonl"
         self.factory=Mock(return_value=self.session)
         self.events=[]
@@ -154,6 +157,89 @@ class DailyRunnerTests(unittest.TestCase):
     def success(self):
         return TaskResult("battle","succeeded","verified",evidence=[self.frame.screenshot_path],
                           metrics={"returned_home":True,"rounds_completed":1,"victory":False})
+
+    def test_disabled_event_reward_does_not_open_or_claim(self):
+        routine = RoutineConfig((TaskSpec("reward", "event_reward", enabled=False),
+                                 TaskSpec("collect", "collect")))
+        runner = self.runner()
+        collected = TaskResult("collect", "succeeded", "verified", evidence=[self.frame.screenshot_path])
+        with patch.object(runner, "_handler", return_value=Mock(return_value=collected)), \
+             patch("autococ.event_rewards.open_reward_track") as opened, \
+             patch("autococ.event_rewards.claim_one_free_reward") as claimed:
+            stats = runner.run_routine(routine)
+        opened.assert_not_called()
+        claimed.assert_not_called()
+        self.assertFalse(any(item.task == "reward" for item in stats.task_results))
+
+    def test_event_reward_claims_once_and_keeps_ui_ack_separate_from_inventory(self):
+        routine = RoutineConfig((TaskSpec("reward", "event_reward", free_reward_target="shiny"),))
+        receipt = {"status": "ui_acknowledged", "ui_claim_acknowledged": True,
+                   "reward_inventory_verified": False,
+                   "frames": [{"path": str(self.frame.screenshot_path)}]}
+        with patch("autococ.event_rewards.open_reward_track", return_value={"status": "opened", "frame": str(self.frame.screenshot_path)}) as opened, \
+             patch("autococ.event_rewards.claim_one_free_reward", return_value=receipt) as claimed, \
+             patch("autococ.event_rewards.close_reward_track", return_value={"status": "home", "frame": str(self.frame.screenshot_path)}) as closed:
+            stats = self.runner().run_routine(routine)
+        reward = next(item for item in stats.task_results if item.task == "reward")
+        opened.assert_called_once()
+        claimed.assert_called_once()
+        closed.assert_called_once()
+        self.assertEqual(claimed.call_args.kwargs["enabled"], True)
+        self.assertEqual(claimed.call_args.args[1], "shiny")
+        self.assertEqual(reward.status, "limited")
+        self.assertTrue(reward.metrics["ui_claim_acknowledged"])
+        self.assertFalse(reward.metrics["reward_inventory_verified"])
+        self.assertFalse(reward.metrics["formal_success"])
+        self.assertEqual(stats.successes, 1)  # Verified launch only.
+
+    def test_event_reward_no_opportunity_skips_without_claim_success(self):
+        routine = RoutineConfig((TaskSpec("reward", "event_reward", free_reward_target="glowy"),))
+        receipt = {"status": "no_opportunity", "ui_claim_acknowledged": False,
+                   "frames": [{"path": str(self.frame.screenshot_path)}]}
+        with patch("autococ.event_rewards.open_reward_track", return_value={"status": "opened"}), \
+             patch("autococ.event_rewards.claim_one_free_reward", return_value=receipt), \
+             patch("autococ.event_rewards.close_reward_track", return_value={"status": "home", "frame": str(self.frame.screenshot_path)}):
+            stats = self.runner().run_routine(routine)
+        reward = next(item for item in stats.task_results if item.task == "reward")
+        self.assertEqual(reward.status, "skipped")
+        self.assertFalse(reward.metrics["reward_inventory_verified"])
+
+    def test_event_reward_unknown_closes_known_track_and_stops_queue(self):
+        routine = RoutineConfig((TaskSpec("reward", "event_reward", free_reward_target="shiny"),
+                                 TaskSpec("collect", "collect")))
+        runner = self.runner()
+        receipt = {"status": "unknown", "ui_claim_acknowledged": False,
+                   "input_attempted": True, "input_sent": False,
+                   "frames": [{"path": str(self.frame.screenshot_path)}],
+                   "reasons": ["transport result uncertain"]}
+        with patch("autococ.event_rewards.open_reward_track", return_value={"status": "opened"}), \
+             patch("autococ.event_rewards.claim_one_free_reward", return_value=receipt) as claimed, \
+             patch("autococ.event_rewards.close_reward_track", return_value={"status": "home", "frame": str(self.frame.screenshot_path)}) as closed, \
+             patch.object(runner, "_handler") as handler:
+            stats = runner.run_routine(routine)
+        claimed.assert_called_once()
+        closed.assert_called_once()
+        handler.assert_not_called()
+        reward = next(item for item in stats.task_results if item.task == "reward")
+        self.assertEqual(reward.status, "failed")
+        self.assertIs(reward.metrics["claim"], receipt)
+        self.assertTrue(reward.metrics["returned_home"])
+
+    def test_event_reward_close_failure_keeps_receipt_and_never_blind_recovers(self):
+        routine = RoutineConfig((TaskSpec("reward", "event_reward", free_reward_target="shiny"),))
+        receipt = {"status": "unknown", "ui_claim_acknowledged": False,
+                   "frames": [{"path": str(self.frame.screenshot_path)}]}
+        with patch("autococ.flow.return_to_village", return_value=self.frame) as navigate, \
+             patch("autococ.event_rewards.open_reward_track", return_value={"status": "opened"}), \
+             patch("autococ.event_rewards.claim_one_free_reward", return_value=receipt), \
+             patch("autococ.event_rewards.close_reward_track", side_effect=FlowError("unrecognized page")):
+            stats = self.runner().run_routine(routine)
+        reward = next(item for item in stats.task_results if item.task == "reward")
+        self.assertEqual(reward.status, "failed")
+        self.assertIs(reward.metrics["claim"], receipt)
+        self.assertIn("unrecognized page", reward.metrics["close_failure"])
+        self.assertFalse(reward.metrics["returned_home"])
+        self.assertEqual(navigate.call_count, 2)  # Startup and pre-task; no recovery after the failed close.
 
     def test_building_event_requires_targeted_strategy_before_battle(self):
         routine = RoutineConfig((TaskSpec("building-event", "event", max_battles=1),))
@@ -210,6 +296,26 @@ class DailyRunnerTests(unittest.TestCase):
         self.assertEqual(collect.call_count, 2)
         self.assertEqual(stats.goals_completed, 1)
         battle.assert_not_called()
+
+    def test_periodic_maintenance_never_reopens_event_reward(self):
+        clock = [time.monotonic()]
+        goals = iter((False, True))
+        def read(_session, _task):
+            clock[0] += 601
+            return GoalProgress(next(goals), evidence=(self.frame.screenshot_path,))
+        reward = TaskSpec("reward", "event_reward", free_reward_target="glowy")
+        routine = RoutineConfig((reward, TaskSpec("farm", "resources")), 600)
+        with patch("autococ.daily.time.monotonic", side_effect=lambda: clock[0]), \
+             patch("autococ.daily.read_progress", side_effect=read), \
+             patch("autococ.event_rewards.open_reward_track", return_value={"status": "opened"}) as opened, \
+             patch("autococ.event_rewards.claim_one_free_reward", return_value={"status": "no_opportunity", "frames": []}) as claimed, \
+             patch("autococ.event_rewards.close_reward_track", return_value={"status": "home", "frame": str(self.frame.screenshot_path)}), \
+             patch("autococ.combat.run_battle") as battle:
+            stats = self.runner().run_routine(routine)
+        opened.assert_called_once()
+        claimed.assert_called_once()
+        battle.assert_not_called()
+        self.assertEqual(stats.goals_completed, 1)
 
     def test_goal_receipt_links_before_after_and_gains_never_use_inventory(self):
         before = GoalProgress(False, values={"gold": 100}, evidence=(self.frame.screenshot_path,))

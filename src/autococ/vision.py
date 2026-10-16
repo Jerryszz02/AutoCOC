@@ -1262,6 +1262,37 @@ class ScreenshotRecognizer:
                     matches.append(item)
             if matches:
                 anchors[name] = asdict(max(matches, key=lambda item: item.confidence))
+        if ("received" not in anchors and {"defeat", "losses", "return"} <= anchors.keys()
+                and "victory" not in anchors):
+            # In the current two-row defeat layout, a clan name behind the title
+            # can be merged into the same OCR box. Read only the foreground title
+            # from this frame; an arbitrary ASCII suffix is not a valid anchor.
+            merged_titles = [item for item in texts if item.bbox is not None
+                             and math.isfinite(item.confidence)
+                             and max(.9, self.ocr_config.confidence_threshold) <= item.confidence <= 1
+                             and self._in_observed_roi(item, (555, 275, 730, 330))
+                             and re.fullmatch(r"您得到了?[a-z]+", normalize_label(item.text))]
+            read_line = getattr(self.provider, "recognize_line", None)
+            if len(merged_titles) == 1 and callable(read_line):
+                box = scale_box(merged_titles[0].bbox, from_resolution=self.baseline_resolution,
+                                to_resolution=(1280, 720))
+                if 595 <= box[0] <= 604 and 300 <= box[1] <= 307 and 667 < box[2] <= 730 and 323 <= box[3] <= 330:
+                    roi = (597, 302, 667, 328)
+                    native_roi = scale_box(roi, from_resolution=(1280, 720), to_resolution=resolution)
+                    line = [self._baseline_result(item, resolution) for item in read_line(path, native_roi)]
+                    evidence["received_title_recheck"] = {
+                        "frame": str(path), "line_roi_at_1280x720": roi,
+                        "merged_full_ocr": asdict(merged_titles[0]), "readings": [asdict(item) for item in line],
+                    }
+                    if len(line) == 1:
+                        item = line[0]
+                        line_box = None if item.bbox is None else scale_box(
+                            item.bbox, from_resolution=self.baseline_resolution, to_resolution=(1280, 720))
+                        if (line_box == roi and math.isfinite(item.confidence)
+                                and max(.9, self.ocr_config.confidence_threshold) <= item.confidence <= 1
+                                and normalize_label(item.text) in {"您得到了", "您得到"}):
+                            anchors["received"] = {**asdict(item), "source": "current_title_line_roi",
+                                                   "frame": str(path), "line_roi_at_1280x720": roi}
         stars = 0 if "defeat" in anchors and "victory" not in anchors and percentage is not None and percentage < 50 else None
         if stars == 0:
             evidence["stars"] = {"source": "explicit_defeat_result", "result": anchors["defeat"]}
@@ -1327,6 +1358,9 @@ class ScreenshotRecognizer:
                     and all(value is not None for value in (*loot.values(), *bonus.values()))):
                 layout = "victory_with_bonus_three_rows_v1"
         evidence["resource_icons"] = icons
+        evidence["resource_icon_scores"] = icon_scores
+        evidence["anchors"] = anchors
+        evidence["separator_rows"] = separators
         evidence["layout"] = layout
         return {"loot": loot, "bonus": bonus, "percentage": percentage, "stars": stars, "evidence": evidence}
 

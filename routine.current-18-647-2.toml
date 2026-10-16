@@ -23,6 +23,12 @@ id = "train"
 kind = "train"
 
 [[routine.tasks]]
+id = "event_reward"
+kind = "event_reward"
+enabled = false
+free_reward_target = "shiny"
+
+[[routine.tasks]]
 id = "rift_event"
 kind = "event"
 strategy = "edrag_line"

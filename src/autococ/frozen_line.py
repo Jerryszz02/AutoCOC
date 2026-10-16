@@ -225,16 +225,12 @@ def _closed_dragon_card_border_18_647_2(current: Any,
         if (side[y, left] > .7 * left_edge or
                 side[y, right - 1] < .75 * right_edge):
             return None
-    lower_inside = gray[bottom - 4:bottom, left + 8:right - 8].mean(axis=0)
-    lower_outside = gray[bottom + 1:bottom + 3, left + 8:right - 8].mean(axis=0)
-    bottom_bands = [float(np.mean(band)) for band in
-                    np.array_split(lower_inside - lower_outside, 5)]
-    if min(bottom_bands) < 33:
-        return None
     # The lower rounded edge shifts inward by a pixel between rows on this
     # layout. A single x+3 sample at bottom-7 can land beyond that edge. Require
     # a four-connected rim within fixed card bounds instead: both full side
-    # traces must join the inner bottom center. This does not prove the top rim.
+    # traces must join the inner bottom center. The two sampled lower rows and
+    # their Sobel neighbours stay inside the card, independent of terrain below.
+    # This does not prove the top rim.
     from collections import deque
 
     vertical = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
@@ -242,11 +238,11 @@ def _closed_dragon_card_border_18_647_2(current: Any,
     for y in range(625, bottom):
         rim[y - 624, :9] |= side[y, left:left + 9] >= 40
         rim[y - 624, -9:] |= side[y, right - 9:right] <= -40
-    for y in range(bottom - 4, bottom + 1):
+    for y in range(bottom - 4, bottom - 2):
         rim[y - 624, 5:-5] |= vertical[y, left + 5:right - 5] <= -40
     seed = (650 - 624, 0)
     opposite = (650 - 624, right - left - 1)
-    center = (bottom - 1 - 624, (right - left) // 2)
+    center = (bottom - 3 - 624, (right - left) // 2)
     if not (rim[seed] and rim[opposite] and rim[center]):
         return None
     connected = {seed}
@@ -266,11 +262,23 @@ def _closed_dragon_card_border_18_647_2(current: Any,
         if (not any((row, x) in connected for x in range(9)) or
                 not any((row, x) in connected for x in range(right - left - 9, right - left))):
             return None
+    # Each of five fixed inner-bottom segments must retain a continuous
+    # downward gradient in every column of the same four-connected component.
+    # Earlier versions compared against y=bottom+1 terrain, which changes with
+    # the battlefield even when the gray card's own pixels are unchanged.
+    bottom_inner_bands = []
+    for segment in np.array_split(np.arange(left + 8, right - 8), 5):
+        strengths = [max((-float(vertical[y, x]) for y in range(bottom - 4, bottom - 2)
+                         if (y - 624, x - left) in connected), default=0.)
+                     for x in segment]
+        bottom_inner_bands.append(min(strengths))
+    if min(bottom_inner_bands) < 40:
+        return None
     return {"method": "18.647.2_dragon_rounded_closed_card",
             "left_edge": left_edge, "right_edge": right_edge,
-            "bottom_contrast": float(np.mean(bottom_bands)),
             "left_side_bands": left_bands, "right_side_bands": right_bands,
-            "bottom_bands": bottom_bands,
+            "bottom_inner_gradient_min": min(bottom_inner_bands),
+            "bottom_inner_gradient_bands": bottom_inner_bands,
             "lower_outline": {"connectivity": 4, "gradient_min": 40,
                               "bottom_gradient_max": -40,
                               "connected_pixels": len(connected)}}

@@ -22,11 +22,18 @@ from .routine_config import RoutineConfig, default_routine, routine_from_dict, r
 
 TASK_LABELS = {"launch": "连接与启动", "collect": "收集资源", "request": "请求增援",
                "donate": "部落捐兵", "train": "检查军队", "battle": "自动对战", "recover": "恢复连接",
-               "resources": "刷资源", "event": "刷活动", "clan_games": "部落竞赛"}
+               "resources": "刷资源", "event": "刷活动", "event_reward": "领取免费活动奖励",
+               "clan_games": "部落竞赛"}
 STATUS_LABELS = {"succeeded": "成功", "failed": "失败", "skipped": "跳过", "simulated": "预演",
                  "running": "进行中", "pending": "等待", "not_supported": "未支持",
                  "cancelled": "已停止", "limited": "达到限额"}
 STRATEGY_LABELS = {name: entry.label for name, entry in STRATEGIES.items()}
+
+
+def display_status(status: str, reason: str = "") -> str:
+    if status == "limited" and reason == "event_reward_ui_acknowledged_inventory_unverified":
+        return "待核验"
+    return STATUS_LABELS.get(status, status)
 
 
 def display_reason(reason: str) -> str:
@@ -44,6 +51,10 @@ def display_reason(reason: str) -> str:
             "search_limit_reached_without_target": "搜索上限内未找到符合条件的对手",
             "daily task queue finished": "本次任务已全部处理",
             "event_inactive": "当前活动已结束或不适用",
+            "event_reward_no_opportunity": "当前目标没有可领取的免费奖励",
+            "event_reward_ui_acknowledged_inventory_unverified": "领取界面已确认，矿石库存尚未核验",
+            "event_reward_claim_unknown": "免费奖励领取结果未确认",
+            "event_reward_close_unverified": "领奖页面未能安全关闭并确认回村",
             "no_accepted_clan_challenge": "尚未接受支持的部落竞赛任务",
             "No calibrated progress adapter selected for this task": "请先配置当前活动或竞赛的进度识别",
             "strategy_actions_settlement_and_return_verified": "打法动作、结算及回村已确认",
@@ -183,7 +194,7 @@ def report_text(payload: dict) -> str:
     for result in payload.get("task_results", []):
         if isinstance(result, dict):
             lines.extend([f"{TASK_LABELS.get(result.get('task'), result.get('task'))} · "
-                          f"{STATUS_LABELS.get(result.get('status'), result.get('status'))}",
+                          f"{display_status(result.get('status'), result.get('reason', ''))}",
                           display_reason(str(result.get("reason", "未知"))), ""])
             agent = (result.get("metrics") or {}).get("vision_agent")
             if isinstance(agent, dict):

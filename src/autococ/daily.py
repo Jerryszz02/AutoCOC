@@ -17,6 +17,76 @@ class _RecordedTaskFailure(FlowError):
     """Abort the queue without recording the same task failure twice."""
 
 
+def _event_reward_task(session, spec) -> TaskResult:
+    """Run one selected free claim and keep UI evidence separate from inventory."""
+    from .event_rewards import close_reward_track, claim_one_free_reward, open_reward_track
+
+    end = min(session.deadline, session.task_deadline,
+              time.monotonic() + spec.max_duration_sec)
+    opened = None
+    claim = None
+    closed = None
+    failure = None
+    close_failure = None
+
+    def timeout(*, reserve_sec=0):
+        remaining = end - time.monotonic() - reserve_sec
+        if remaining <= 0:
+            raise FlowError("Event reward task has no safe time remaining")
+        return min(20, remaining)
+
+    try:
+        # Keep a closing window before any optional claim input.
+        opened = open_reward_track(session, timeout_sec=timeout(reserve_sec=20))
+        claim = claim_one_free_reward(session, spec.free_reward_target, enabled=True,
+                                      timeout_sec=timeout(reserve_sec=20))
+    except StopRequested:
+        raise
+    except Exception as exc:
+        failure = f"{type(exc).__name__}: {exc}"
+    finally:
+        current = getattr(session, "last_snapshot", None)
+        current_track = (current is not None and current.scene == "popup"
+                         and isinstance(current.observations.get("event_reward_track"), dict))
+        if opened is not None or current_track:
+            try:
+                closed = close_reward_track(session, timeout_sec=timeout())
+            except Exception as exc:
+                close_failure = f"{type(exc).__name__}: {exc}"
+
+    frames = []
+    if isinstance(opened, dict) and opened.get("frame"):
+        frames.append(opened["frame"])
+    if isinstance(claim, dict):
+        frames.extend(frame["path"] for frame in claim.get("frames", [])
+                      if isinstance(frame, dict) and frame.get("path"))
+    if isinstance(closed, dict) and closed.get("frame"):
+        frames.append(closed["frame"])
+    evidence = [Path(path) for path in dict.fromkeys(frames)]
+    metrics = {"receipt_kind": "event_reward", "target": spec.free_reward_target,
+               "opened": opened, "claim": claim, "closed": closed,
+               "ui_claim_acknowledged": bool(claim and claim.get("ui_claim_acknowledged") is True),
+               "reward_inventory_verified": False, "formal_success": False,
+               "returned_home": bool(closed and closed.get("status") == "home"),
+               "failure": failure, "close_failure": close_failure}
+    if close_failure or (opened is not None and not metrics["returned_home"]):
+        return TaskResult(spec.id, "failed", "event_reward_close_unverified",
+                          evidence=evidence, metrics=metrics)
+    if failure:
+        return TaskResult(spec.id, "failed", failure, evidence=evidence, metrics=metrics)
+    if not isinstance(claim, dict):
+        return TaskResult(spec.id, "failed", "event_reward_claim_unknown",
+                          evidence=evidence, metrics=metrics)
+    if claim.get("status") == "no_opportunity":
+        return TaskResult(spec.id, "skipped", "event_reward_no_opportunity",
+                          evidence=evidence, metrics=metrics)
+    if claim.get("status") == "ui_acknowledged":
+        return TaskResult(spec.id, "limited", "event_reward_ui_acknowledged_inventory_unverified",
+                          evidence=evidence, metrics=metrics)
+    return TaskResult(spec.id, "failed", "event_reward_claim_unknown",
+                      evidence=evidence, metrics=metrics)
+
+
 def validate_routine_files(config, routine):
     """Validate syntax and referenced files before connecting or changing the army."""
     routine.validate()
@@ -74,7 +144,8 @@ def run_routine(runner, routine: RoutineConfig) -> RunStats:
         return_to_village(session)
         if not periodic:
             runner._notify("task_started", task=spec.id, cycle=1)
-        result = runner._handler(spec.kind)(session)
+        result = (_event_reward_task(session, spec) if spec.kind == "event_reward"
+                  else runner._handler(spec.kind)(session))
         # Unsupported donation remains an explicit capability result, not an empty chat.
         if result.status == "failed" and result.reason == "donation_interaction_not_supported":
             result = replace(result, status="not_supported")
@@ -83,7 +154,8 @@ def run_routine(runner, routine: RoutineConfig) -> RunStats:
         record(result, notify=not periodic)
         if result.status == "failed":
             raise _RecordedTaskFailure(f"{spec.id}: {result.reason}")
-        return_to_village(session)
+        if spec.kind != "event_reward":
+            return_to_village(session)
 
     try:
         runner._check_stop()
@@ -162,7 +234,7 @@ def run_routine(runner, routine: RoutineConfig) -> RunStats:
                     break
                 if routine.maintenance_interval_sec and time.monotonic() - last_maintenance >= routine.maintenance_interval_sec:
                     for daily_task in enabled:
-                        if daily_task.kind not in BATTLE_KINDS:
+                        if daily_task.kind not in BATTLE_KINDS and daily_task.kind != "event_reward":
                             maintenance(daily_task, periodic=True)
                     last_maintenance = time.monotonic()
                     session.begin_task()

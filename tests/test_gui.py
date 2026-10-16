@@ -53,6 +53,36 @@ class GUITests(unittest.TestCase):
         self.assertEqual(self.app.mode.get(), "离线预演")
         self.assertEqual(self.app.start_button.cget("text"), "开始预演")
 
+    def test_free_event_reward_target_dropdown_and_saved_roundtrip(self):
+        self.assertFalse(self.app.task_vars["event_reward"].get())
+        self.app._open_task_config("event_reward")
+        choices = [child for child in self.app.task_config.winfo_children()
+                   if isinstance(child, ttk.Combobox)]
+        self.assertEqual(len(choices), 1)
+        self.assertEqual(tuple(choices[0].cget("values")),
+                         ("请选择免费奖励", "闪亮矿石 1250", "璀璨矿石 115"))
+        choices[0].current(2)
+        choices[0].event_generate("<<ComboboxSelected>>")
+        self.root.update()
+        self.app.task_vars["event_reward"].set(True)
+        options = self.app._options()
+        reward = next(task for task in options.routine.tasks if task.kind == "event_reward")
+        self.assertEqual(reward.free_reward_target, "glowy")
+        self.assertFalse(next(task for task in options.routine.tasks if task.kind == "event").enabled)
+        self.app._save()
+        self.app._load()
+        rebuilt = next(task for task in self.app._options().routine.tasks if task.kind == "event_reward")
+        self.assertTrue(rebuilt.enabled)
+        self.assertEqual(rebuilt.free_reward_target, "glowy")
+
+    def test_enabled_free_event_reward_without_target_never_starts_worker(self):
+        self.app.task_vars["event_reward"].set(True)
+        self.app.task_fields["event_reward"]["free_reward_target"].set("")
+        with patch("autococ.gui.messagebox.showerror") as error:
+            self.app.start()
+        error.assert_called_once()
+        self.controller.start.assert_not_called()
+
     def test_selected_tasks_are_passed_to_background_worker(self):
         for var in self.app.task_vars.values():
             var.set(False)

@@ -367,6 +367,7 @@ class CurrentReceivedSettlementTests(unittest.TestCase):
                 self.assertTrue(all(value is None for value in result["bonus"].values()))
                 self.assertEqual(result["loot"]["gold"], 733740)
 
+
     def test_marker_signed_amount_conflict_and_other_anchors_still_gate_bonus(self):
         sample = self.metadata["samples"][1]
         readings = [OCRText(row["text"], row["confidence"], tuple(row["bbox"]))
@@ -524,3 +525,92 @@ class VictorySettlementTests(unittest.TestCase):
         result, _ = self.result(texts=self.texts + [OCRText("失败", .99, (608, 194, 671, 237))])
         self.assertIsNone(result["stars"])
         self.assertTrue(all(value is None for value in result["bonus"].values()))
+
+
+class BackgroundMergedSettlementTitleTests(unittest.TestCase):
+    root = Path(__file__).resolve().parents[1]
+
+    def setUp(self):
+        self.path = self.root / "tests/fixtures/settlement-title-background-203115.png"
+        self.metadata = json.loads(self.path.with_suffix(".provenance.json").read_text(encoding="utf8"))
+        self.assertEqual(hashlib.sha256(self.path.read_bytes()).hexdigest(), self.metadata["fixture_sha256"])
+        self.assertFalse(self.metadata["formal_training_data"])
+        self.texts = [OCRText(row["text"], row["confidence"], tuple(row["bbox"])) for row in self.metadata["ocr"]]
+        self.title = [OCRText(row["text"], row["confidence"], tuple(row["bbox"]))
+                      for row in self.metadata["title_line_native"]]
+        self.title_roi = tuple(v * 2 for v in self.metadata["title_line_roi_at_1280x720"])
+
+    def replay(self, *, texts=None, title=None, path=None):
+        gold = self.metadata["original_gold_line"]
+        gold_roi = tuple(v * 2 for v in gold["bbox"])
+        provider = Mock()
+
+        def read_line(frame, roi):
+            self.assertEqual(frame, self.path if path is None else path)
+            if roi == self.title_roi:
+                return self.title if title is None else title
+            if roi == gold_roi:
+                return [OCRText(gold["text"], gold["confidence"], gold_roi)]
+            return []
+
+        provider.recognize_line.side_effect = read_line
+        result = ScreenshotRecognizer(provider=provider)._settlement_observation(
+            self.path if path is None else path, self.texts if texts is None else texts, (2560, 1440))
+        return result, provider
+
+    def test_current_title_line_recovers_complete_two_row_defeat(self):
+        result, provider = self.replay()
+        self.assertEqual(result["loot"], {"gold": 0, "elixir": 3470, "dark_elixir": 0})
+        self.assertEqual(result["bonus"], {"gold": 0, "elixir": 0, "dark_elixir": 0})
+        self.assertEqual(result["evidence"]["layout"], "regular_defeat_gold_elixir_only_v1")
+        self.assertEqual(result["stars"], 0)
+        self.assertEqual(result["percentage"], 2)
+        self.assertTrue(result["evidence"]["loot"]["dark_elixir"]["requires_inventory_reconciliation"])
+        anchor = result["evidence"]["anchors"]["received"]
+        self.assertEqual(anchor["source"], "current_title_line_roi")
+        self.assertEqual(anchor["frame"], str(self.path))
+        self.assertEqual(anchor["text"], "您得到了")
+        self.assertEqual(sum(call.args[1] == self.title_roi for call in provider.recognize_line.call_args_list), 1)
+
+    def test_merged_prefix_alone_or_weak_conflicting_line_never_supplies_zero(self):
+        good = self.title[0]
+        variants = [[], [replace(good, text="您得到了KISTAN")], [replace(good, text="您没有得到")],
+                    [replace(good, confidence=.89)], [replace(good, confidence=math.nan)],
+                    [replace(good, confidence=math.inf)], [good, replace(good, text="奖励")],
+                    [replace(good, bbox=(0, 0, 140, 52))]]
+        for line in variants:
+            with self.subTest(line=line):
+                result, _ = self.replay(title=line)
+                self.assertIsNone(result["loot"]["dark_elixir"])
+                self.assertIsNone(result["evidence"]["layout"])
+                self.assertTrue(all(value is None for value in result["bonus"].values()))
+
+    def test_wrong_or_ambiguous_title_geometry_does_not_trigger_recheck(self):
+        merged = next(item for item in self.texts if item.text.startswith("您得到"))
+        variants = [[replace(item, bbox=(300, 302, 409, 327)) if item is merged else item for item in self.texts],
+                    [replace(item, text="您没有得到KISTAN") if item is merged else item for item in self.texts],
+                    [replace(item, confidence=.89) if item is merged else item for item in self.texts],
+                    self.texts + [replace(merged, text="您得到了OTHER")]]
+        for readings in variants:
+            with self.subTest(readings=readings):
+                result, provider = self.replay(texts=readings)
+                self.assertIsNone(result["evidence"]["layout"])
+                self.assertNotIn(self.title_roi, [call.args[1] for call in provider.recognize_line.call_args_list])
+
+    def test_other_anchors_bonus_and_complete_rows_are_still_required(self):
+        for readings in ([item for item in self.texts if item.text != "回营"],
+                         [item for item in self.texts if item.text != "损耗的部队"],
+                         self.texts + [OCRText("奖励", .99, (900, 320, 940, 345))]):
+            with self.subTest(readings=readings):
+                result, _ = self.replay(texts=readings)
+                self.assertIsNone(result["evidence"]["layout"])
+                self.assertIsNone(result["loot"]["dark_elixir"])
+                self.assertTrue(all(value is None for value in result["bonus"].values()))
+        image = cv2.imdecode(np.fromfile(self.path, np.uint8), cv2.IMREAD_COLOR)
+        image[750:762, 680:1880] = 0
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "missing-gold-divider.png"
+            cv2.imencode(".png", image)[1].tofile(path)
+            result, _ = self.replay(path=path)
+        self.assertIn("received", result["evidence"]["anchors"])
+        self.assertIsNone(result["evidence"]["layout"])

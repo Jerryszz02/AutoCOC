@@ -14,7 +14,7 @@ from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
 from .config import VisionAgentConfig, load_config
-from .desktop import (DesktopController, RunOptions, STATUS_LABELS, STRATEGY_LABELS, TASK_LABELS, desktop_config, display_reason,
+from .desktop import (DesktopController, RunOptions, STRATEGY_LABELS, TASK_LABELS, desktop_config, display_reason, display_status,
                       load_options, report_history, report_text, save_options, settings_path)
 from .errors import AutoCOCError
 from .routine_config import (BATTLE_KINDS, TASK_KINDS, GoalConfig, ResourceFilter,
@@ -345,9 +345,25 @@ class AutoCOCApp:
         defaults = {"strategy": "two_edge", "strategy_file": "", "max_battles": "10", "minutes": "30",
                     "searches": "30", "filter": "1", "gold": "", "elixir": "", "dark_elixir": "", "total": "300000",
                     "target_gold": "", "target_elixir": "", "target_dark_elixir": "", "full_resources": "",
-                    "adapter_path": "", "target": "", "building_type": ""}
+                    "adapter_path": "", "target": "", "building_type": "", "free_reward_target": ""}
         for key, default in defaults.items():
             values.setdefault(key, tk.StringVar(value=default))
+        if kind == "event_reward":
+            reward_labels = {"": "请选择免费奖励", "shiny": "闪亮矿石 1250", "glowy": "璀璨矿石 115"}
+            selected_label = values.setdefault("free_reward_label", tk.StringVar())
+            selected_label.set(reward_labels.get(values["free_reward_target"].get(), reward_labels[""]))
+            ttk.Label(self.task_config, text="免费活动奖励").grid(row=0, column=0, sticky="w", padx=(0, 7))
+            choice = ttk.Combobox(self.task_config, textvariable=selected_label,
+                                  values=tuple(reward_labels.values()), state="readonly", width=22)
+            choice.grid(row=0, column=1, sticky="w")
+            choice.bind("<<ComboboxSelected>>", lambda _event: values["free_reward_target"].set(
+                next(key for key, label in reward_labels.items() if label == selected_label.get())))
+            ttk.Label(self.task_config, text="仅领取当前版本已识别的免费档位；到账仍需库存核验。",
+                      style="Muted.TLabel").grid(row=1, column=0, columnspan=3, sticky="w", pady=(8, 0))
+            if hasattr(self, "strategy_text"):
+                for widget in (self.strategy_text, self.load_strategy_button, self.save_strategy_button, self.strategy_presets):
+                    widget.grid_remove()
+            return
         if kind not in BATTLE_KINDS:
             ttk.Label(self.task_config, text="此任务按本次清单执行一次。", style="Muted.TLabel").grid(row=0, column=0, sticky="w")
             if hasattr(self, "strategy_text"):
@@ -532,7 +548,8 @@ class AutoCOCApp:
                        "target_elixir": goal.resource_targets.get("elixir"),
                        "target_dark_elixir": goal.resource_targets.get("dark_elixir"),
                        "full_resources": ",".join(goal.full_resources), "adapter_path": goal.adapter_path,
-                       "target": goal.target, "building_type": goal.building_type}
+                       "target": goal.target, "building_type": goal.building_type,
+                       "free_reward_target": task.free_reward_target}
             for key, value in entries.items():
                 fields[key].set("" if value is None else str(value))
         for task_id in self.task_order:
@@ -578,7 +595,8 @@ class AutoCOCApp:
                 strategy=values["strategy"].get(), strategy_file=values["strategy_file"].get().strip(),
                 max_battles=int(values["max_battles"].get()),
                 max_duration_sec=seconds(values["minutes"].get(), "任务时长"),
-                max_searches=int(values["searches"].get()), resource_filter=resource_filter, goal=goal))
+                max_searches=int(values["searches"].get()), resource_filter=resource_filter, goal=goal,
+                free_reward_target=values["free_reward_target"].get().strip()))
         routine = RoutineConfig(tuple(routine_tasks),
                                 maintenance_interval_sec=seconds(self.values["maintenance"].get(), "维护间隔", True))
         routine.validate()
@@ -703,16 +721,17 @@ class AutoCOCApp:
             if "goals_completed" in event.get("metrics", {}):
                 self.counters["goals_completed"].set(str(event["metrics"]["goals_completed"]))
             state = "running" if kind == "task_started" else event["status"]
+            status_text = display_status(state, event.get("reason", ""))
             if self.task_table.exists(task):
-                self.task_table.item(task, values=(self._task_label(task), STATUS_LABELS.get(state, state), display_reason(event.get("reason", ""))))
-            self._log(f"{self._task_label(task)} · {STATUS_LABELS.get(state, state)}  {display_reason(event.get('reason', ''))}")
+                self.task_table.item(task, values=(self._task_label(task), status_text, display_reason(event.get("reason", ""))))
+            self._log(f"{self._task_label(task)} · {status_text}  {display_reason(event.get('reason', ''))}")
         elif kind == "finished":
             payload = event["summary"]
             self._show_counts(payload)
             final_tasks = {result["task"]: result for result in payload.get("task_results", [])}
             for task in self.task_table.get_children():
                 result = final_tasks.get(task)
-                state = STATUS_LABELS.get(result["status"], result["status"]) if result else "未执行"
+                state = display_status(result["status"], result.get("reason", "")) if result else "未执行"
                 reason = display_reason(result["reason"]) if result else "运行已结束"
                 self.task_table.item(task, values=(self._task_label(task), state, reason))
             self.report_path = event["report"]
