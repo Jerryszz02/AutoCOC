@@ -477,7 +477,7 @@ def freeze_model_free_line(session: Any, selected: SceneSnapshot, *,
     """Freeze the existing line roster, optionally with a bounded archer filler row."""
     if getattr(getattr(session.config, "vision_agent", None), "enabled", False):
         raise FlowError("Model-free line cannot replace vision-mode model release")
-    if line_tactics not in {"single_edge", "two_edge_split"}:
+    if line_tactics not in {"single_edge", "two_edge_split", "two_edge_furnace_mixed_probes"}:
         raise FlowError("Frozen line tactics are unsupported")
     if getattr(session, "client_version", None) != _CLIENT_VERSION or not isinstance(battle_id, str) or not battle_id:
         raise FlowError("Frozen line requires a current-version battle identity")
@@ -524,6 +524,10 @@ def freeze_model_free_line(session: Any, selected: SceneSnapshot, *,
     expected = {(row["unit_id"], row["source"]): row["count"] for row in troops}
     if len(expected) != len(troops):
         raise FlowError("Frozen line army manifest repeats a troop identity")
+    if line_tactics == "two_edge_furnace_mixed_probes" and expected != {
+            ("electro_dragon", "army"): 10, ("dragon", "army"): 1,
+            ("furnace", "army"): 1, ("balloon", "army"): 1}:
+        raise FlowError("Mixed furnace probes require exact current army counts")
     if len(troops) == 5:
         expected_five_ids = {
             (unit_id, "army") for unit_id in _BASE_LINE_TROOP_IDS | {_ARCHER_FILLER_UNIT_ID}
@@ -608,7 +612,13 @@ def freeze_model_free_line(session: Any, selected: SceneSnapshot, *,
                 type(score) not in (int, float) or not math.isfinite(score) or score < .94):
             raise FlowError("Frozen line hero lacks current-frame identity")
         selected_heroes.append(prior)
-    planner = EdragLineStrategy() if line_tactics == "single_edge" else TwoEdgeSplitStrategy()
+    if line_tactics == "single_edge":
+        planner = EdragLineStrategy()
+    elif line_tactics == "two_edge_split":
+        planner = TwoEdgeSplitStrategy()
+    else:
+        from .strategies import TwoEdgeFurnaceStrategy
+        planner = TwoEdgeFurnaceStrategy()
     placement = planner.build_plan(BattleContext(tuple(current_troops),
                                                  tuple(selected_heroes), tuple(terrain)))
     actions = []

@@ -134,7 +134,8 @@ class BattleConfig:
         if (self.line_execution_mode not in {"verified", "continuous"}
                 or self.line_execution_mode == "continuous" and self.strategy != "edrag_line"):
             raise ConfigError("battle.line_execution_mode continuous requires edrag_line")
-        if (self.line_tactics not in {"single_edge", "two_edge_split", "two_edge_probed_anchors"} or
+        if (self.line_tactics not in {"single_edge", "two_edge_split", "two_edge_probed_anchors",
+                                      "two_edge_furnace_mixed_probes"} or
                 self.line_tactics != "single_edge" and
                 (self.line_execution_mode != "continuous" or self.strategy != "edrag_line")):
             raise ConfigError("battle.line_tactics two-edge modes require continuous edrag_line")

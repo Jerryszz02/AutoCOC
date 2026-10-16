@@ -225,8 +225,8 @@ def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, 
     continuous_line = getattr(session.config.battle, "line_execution_mode", "verified") == "continuous"
     if line_mode:
         probed_boundary_scan = (continuous_line and
-                                getattr(session.config.battle, "line_tactics", "single_edge") ==
-                                "two_edge_probed_anchors")
+                                getattr(session.config.battle, "line_tactics", "single_edge")
+                                in {"two_edge_probed_anchors", "two_edge_furnace_mixed_probes"})
         if probed_boundary_scan:
             # This phase contains zoom and card selection, but no field tap or
             # probe. These explicit zeroes are scoped to this phase only.
@@ -726,6 +726,7 @@ def _deploy_continuous_line(session, current, receipt, context, hero_manifest, d
     from uuid import uuid4
     from .frozen_line import execute_frozen_line, freeze_model_free_line
     from .probed_anchor import execute_probed_anchor_line, freeze_probed_anchor_line, remainder_burst_limit
+    from .mixed_probe import execute_mixed_probe_line, freeze_mixed_probe_line
     from .prepared_battle import _remaining_seconds
 
     # Starting the batch must remain inside the observed preview countdown.
@@ -742,24 +743,28 @@ def _deploy_continuous_line(session, current, receipt, context, hero_manifest, d
     if not isinstance(rows, list) or not rows or any(not isinstance(row, dict) for row in rows):
         raise FlowError("Continuous line hero roster is unavailable")
     tactics = getattr(session.config.battle, "line_tactics", "single_edge")
-    freeze = freeze_probed_anchor_line if tactics == "two_edge_probed_anchors" else freeze_model_free_line
+    probed = tactics in {"two_edge_probed_anchors", "two_edge_furnace_mixed_probes"}
+    freeze = (freeze_probed_anchor_line if tactics == "two_edge_probed_anchors" else
+              freeze_mixed_probe_line if tactics == "two_edge_furnace_mixed_probes" else
+              freeze_model_free_line)
     plan = freeze(session, current, toolbar_before=context["toolbar_before"],
         terrain=receipt["terrain_evidence"], army_manifest=receipt["expected_army_manifest"],
         minimum_zoom=receipt["minimum_zoom"], battle_id=uuid4().hex,
         latest_start=latest_start, burst_limit_sec=10,
-        **({} if tactics == "two_edge_probed_anchors" else {"line_tactics": tactics}),
+        **({} if probed else {"line_tactics": tactics}),
         hero_ids=[row.get("unit_id") for row in rows], hero_manifest=hero_manifest)
-    frozen = plan.base if tactics == "two_edge_probed_anchors" else plan
-    probed = tactics == "two_edge_probed_anchors"
+    frozen = plan.base if probed else plan
     session.event("model_free_line_plan", plan_id=frozen.plan_id,
-                  plan_sha256=plan.digest if tactics == "two_edge_probed_anchors" else frozen.plan_sha256,
+                  plan_sha256=plan.digest if probed else frozen.plan_sha256,
                   frame=str(current.screenshot_path), latest_start=latest_start,
-                  input_count=len(plan.remaining) + 3 if tactics == "two_edge_probed_anchors" else len(frozen.actions),
+                  input_count=len(plan.remaining) + (4 if tactics == "two_edge_furnace_mixed_probes" else 3)
+                  if probed else len(frozen.actions),
                   burst_limit_sec=remainder_burst_limit(plan) if probed else frozen.burst_limit_sec,
                   **({"probe_limit_sec": 12., "remainder_limit_sec": remainder_burst_limit(plan)} if probed else {}),
                   line_tactics=tactics)
-    post = (execute_probed_anchor_line(session, plan) if tactics == "two_edge_probed_anchors"
-            else execute_frozen_line(session, plan))
+    post = (execute_probed_anchor_line(session, plan) if tactics == "two_edge_probed_anchors" else
+            execute_mixed_probe_line(session, plan) if tactics == "two_edge_furnace_mixed_probes" else
+            execute_frozen_line(session, plan))
     frames = receipt["evidence"]
     receipt.update(post.observations["deployment"])
     receipt["evidence"] = list(dict.fromkeys(frames + receipt["evidence"]))

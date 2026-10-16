@@ -46,10 +46,10 @@ class CurrentFurnaceTests(TestCase):
         metadata = json.loads((FIXTURES / "furnace_identity_18_647_2.json").read_text(encoding="utf-8"))
         self.assertEqual(get_unit("furnace").housing_space, 18)
         manifest = [entry for entry in template_manifest(client_version="18.647.2")["templates"]
-                    if entry["unit_id"] == "furnace"]
+                    if entry["unit_id"] == "furnace" and entry["surface"] != "battle"]
         self.assertEqual({(entry["surface"], entry["state"]) for entry in manifest},
                          {("army", "active"), ("current_picker", "capacity_gray")})
-        self.assertFalse(any(entry["surface"] == "battle" for entry in manifest))
+        # Later active battle samples have their own source-bound regression.
         for entry in metadata["templates"] + metadata["fixtures"]:
             with self.subTest(path=entry["path"]):
                 path = ROOT / entry["path"]

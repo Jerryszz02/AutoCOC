@@ -91,6 +91,7 @@ deploy_timeout_sec = 180
 # Development options below require strategy = "edrag_line"; see docs/STRATEGIES.md.
 # line_execution_mode = "continuous"
 # line_tactics = "two_edge_probed_anchors"
+# line_tactics = "two_edge_furnace_mixed_probes" # Experimental exact 10 electro dragons, 1 dragon, 1 furnace, 1 balloon.
 # post_deployment_hero_skill = "grand_warden" # Empty by default; sampled equipment only.
 # hero_skill_delay_sec = 20 # Integer 0..30 after verified deployment.
 

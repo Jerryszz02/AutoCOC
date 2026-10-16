@@ -452,11 +452,13 @@ def interrupted_battle_metrics(session) -> dict[str, object]:
                          and chest_receipt.get("kind") == "battle_chest_ui") else {})
     line_receipt = getattr(session, "frozen_line_receipt", None)
     if isinstance(line_receipt, dict) and line_receipt.get("mode") in {
-            "model_free_line_continuous", "model_free_line_probed_anchors"}:
+            "model_free_line_continuous", "model_free_line_probed_anchors",
+            "model_free_line_mixed_probes"}:
         return {"deployment": line_receipt, **chest_metrics,
-                "line_execution": {"mode": ("two_edge_probed_anchors" if
-                                             line_receipt["mode"] == "model_free_line_probed_anchors"
-                                             else "continuous"), "status": "cancelled"}}
+                "line_execution": {"mode": ({"model_free_line_probed_anchors": "two_edge_probed_anchors",
+                                              "model_free_line_mixed_probes": "two_edge_furnace_mixed_probes"}
+                                             .get(line_receipt["mode"], "continuous")),
+                                   "status": "cancelled"}}
     receipt = getattr(session, "prepared_battle_receipt", None)
     if not isinstance(receipt, dict):
         return chest_metrics

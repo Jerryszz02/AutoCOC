@@ -363,6 +363,36 @@ class CombatTests(unittest.TestCase):
         active.frozen_line_receipt = {"attempted_placements": 1}
         self.assertFalse(_retryable_boundary_preflight(active, self._probed_boundary_error()))
 
+    def test_mixed_probe_boundary_rejection_can_rescout_without_input(self):
+        frames = complete_frames()[:3] + [self._preview(83), self._preview(84),
+                  frame(85, "enemy_village", resources={"gold": 170, "elixir": 100,
+                                                         "dark_elixir": 10}),
+                  frame(86, "battle", deployment=deepcopy(DEPLOYMENT)),
+                  frame(87, "settlement", settlement=deepcopy(SETTLEMENT)),
+                  frame(88, "village", resources={**BEFORE, "gold": 1100,
+                                                  "elixir": 2055, "dark_elixir": 310})]
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle, strategy="edrag_line",
+                                        line_execution_mode="continuous",
+                                        line_tactics="two_edge_furnace_mixed_probes", max_searches=2)
+
+        def deploy(active, _scout):
+            active.deploy_calls += 1
+            if active.deploy_calls == 1:
+                raise self._probed_boundary_error()
+            return active.observe("deployment-confirmed")
+
+        session.deploy = deploy
+        with patch("autococ.combat._read_continuous_line_army",
+                   side_effect=lambda active, current, evidence: (current, _read_army(current))):
+            result = battle(session)
+        self.assertEqual(result.status, "succeeded")
+        self.assertEqual(session.deploy_calls, 2)
+        self.assertEqual(result.metrics["search_count"], 2)
+        self.assertEqual(result.metrics["search_cost_gold"], 20)
+        self.assertEqual(len(result.metrics["preflight_rejections"]), 1)
+        self.assertEqual(sum("Recognized next" in reason for _, reason in session.taps), 1)
+
     def test_rescout_requires_fresh_positive_preview_timer_and_navigation(self):
         good = self._preview(31)
         variations = [frame(32, "unknown"), frame(33, "battle"),

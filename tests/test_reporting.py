@@ -46,6 +46,19 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(metrics["deployment"]["deployed_units"], 1)
         self.assertFalse(metrics["deployment"]["completed"])
 
+    def test_cancelled_mixed_probe_keeps_distinct_partial_mode(self) -> None:
+        receipt = {"mode": "model_free_line_mixed_probes",
+                   "line_tactics": "two_edge_furnace_mixed_probes",
+                   "attempted_placements": 2, "issued_placements": 1,
+                   "deployed_units": 1, "verified": False, "completed": False,
+                   "probe_events": [{"unit_id": "balloon", "status": "verified"},
+                                    {"unit_id": "dragon", "status": "uncertain"}]}
+        metrics = interrupted_battle_metrics(SimpleNamespace(frozen_line_receipt=receipt,
+                                                              prepared_battle_receipt=None))
+        self.assertIs(metrics["deployment"], receipt)
+        self.assertEqual(metrics["line_execution"],
+                         {"mode": "two_edge_furnace_mixed_probes", "status": "cancelled"})
+
     def test_vision_agent_report_keeps_failed_partial_and_unknown_attempts(self) -> None:
         complete = {"mode": "continuous", "status": "consumption_verified", "plan_ready": True,
                     "input_sent": True, "consumption_verified": True,

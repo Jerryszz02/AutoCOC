@@ -125,7 +125,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(BattleConfig().line_tactics, "single_edge")
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.toml"
-            for tactics in ("two_edge_split", "two_edge_probed_anchors"):
+            for tactics in ("two_edge_split", "two_edge_probed_anchors",
+                            "two_edge_furnace_mixed_probes"):
                 with self.subTest(tactics=tactics):
                     path.write_text('[battle]\nstrategy="edrag_line"\n'
                                     'line_execution_mode="continuous"\n'

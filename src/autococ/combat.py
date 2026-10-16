@@ -224,7 +224,8 @@ def run_battle(session: GameSession) -> TaskResult:
         probed_rescout = (not vision_mode and definition is None
                           and session.config.battle.strategy == "edrag_line"
                           and session.config.battle.line_execution_mode == "continuous"
-                          and session.config.battle.line_tactics == "two_edge_probed_anchors")
+                          and session.config.battle.line_tactics in {
+                              "two_edge_probed_anchors", "two_edge_furnace_mixed_probes"})
         cached_deployment = None
         cached_deployment_error = None
         while True:

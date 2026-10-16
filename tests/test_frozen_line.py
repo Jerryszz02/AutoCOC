@@ -107,6 +107,46 @@ def freeze(session, selected, before, *, heroes=(), line_tactics="single_edge"):
                                   hero_ids=heroes, hero_manifest=hero_manifest, clock=lambda: 101.)
 
 
+def test_mixed_furnace_freeze_rejects_old_roster_before_card_or_device_work(tmp_path, monkeypatch):
+    before = frame("old-before", 99, root=tmp_path)
+    selected = frame("old-selected", 100, root=tmp_path)
+    session = Session(selected, None)
+    monkeypatch.setattr("autococ.frozen_line._cards",
+                        lambda *_a, **_kw: pytest.fail("old roster must fail before card recognition"))
+    with pytest.raises(FlowError, match="exact current army counts"):
+        freeze(session, selected, before, line_tactics="two_edge_furnace_mixed_probes")
+
+
+def test_mixed_furnace_freeze_uses_distinct_planner_and_conserves_exact_roster(tmp_path, monkeypatch):
+    import numpy as np
+
+    current = (("electro_dragon", 10), ("dragon", 1), ("furnace", 1), ("balloon", 1))
+    before = frame("mixed-before", 99, root=tmp_path, troops=current)
+    selected = frame("mixed-selected", 100, root=tmp_path, troops=current)
+    hero_ids = ("grand_warden", "archer_queen", "dragon_duke", "minion_prince")
+    for item in (before, selected):
+        item.observations["battle"]["slots"].extend(
+            slot(unit_id, None, 650 + index * 97, kind="hero")
+            for index, unit_id in enumerate(hero_ids))
+    by_left = {610 + index * 97: unit_id for index, unit_id in enumerate(hero_ids)}
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_args: [100, 580, 180, 710])
+    monkeypatch.setattr("autococ.images.read_frame", lambda _path: np.zeros((720, 1280, 3), dtype=np.uint8))
+    monkeypatch.setattr("autococ.unit_catalog.recognize_card_identity",
+                        lambda _image, bbox, *_a, **_kw: {"unit_id": by_left[bbox[0]],
+                                                               "version_verified": True,
+                                                               "confidence": .99})
+    session = Session(selected, None)
+    plan = freeze(session, selected, before, heroes=hero_ids,
+                  line_tactics="two_edge_furnace_mixed_probes")
+    placements = [action for action in plan.actions if action.kind == "deploy"]
+    assert plan.line_tactics == "two_edge_furnace_mixed_probes"
+    assert len(placements) == 17
+    assert {unit_id: sum(action.unit_id == unit_id for action in placements)
+            for unit_id, _count in current} == dict(current)
+    assert [action.unit_id for action in placements[:3]] == ["balloon", "dragon", "furnace"]
+    assert len(plan.hero_cards) == 4
+
+
 @pytest.fixture(autouse=True)
 def offline_post_reader(monkeypatch):
     monkeypatch.setattr("autococ.frozen_line._post_troop_reading",

@@ -99,6 +99,34 @@ class TwoEdgeSplitStrategy:
         return DeploymentPlan(tuple(placements), hero_placements)
 
 
+class TwoEdgeFurnaceStrategy:
+    """Current mixed roster: separate edge probes before the frozen remainder."""
+
+    def build_plan(self, context: BattleContext) -> DeploymentPlan:
+        troops = {card["unit_id"]: card for card in context.troops}
+        heroes = {card["unit_id"]: card for card in context.heroes}
+        expected = {"electro_dragon": 10, "dragon": 1, "furnace": 1, "balloon": 1}
+        hero_ids = {"grand_warden", "archer_queen", "dragon_duke", "minion_prince"}
+        if (len(troops) != len(context.troops) or len(heroes) != len(context.heroes) or
+                set(troops) != set(expected) or set(heroes) != hero_ids or
+                any(type(troops[unit_id].get("count")) is not int or
+                    troops[unit_id]["count"] != count for unit_id, count in expected.items())):
+            raise FlowError("Mixed furnace probes require the exact identified current roster")
+
+        def place(unit_id: str, first_count: int) -> Placement:
+            count = expected[unit_id]
+            return Placement(troops[unit_id], spread_on_edge(context.terrain, 0, first_count) +
+                             spread_on_edge(context.terrain, 1, count - first_count))
+
+        placements = (place("balloon", 1), place("dragon", 0),
+                      place("furnace", 1), place("electro_dragon", 6))
+        hero_edges = (("grand_warden", 0), ("archer_queen", 0),
+                      ("dragon_duke", 1), ("minion_prince", 1))
+        hero_placements = tuple(Placement(heroes[unit_id], spread_on_edge(context.terrain, edge, 1))
+                                for unit_id, edge in hero_edges)
+        return DeploymentPlan(placements, hero_placements)
+
+
 @dataclass(frozen=True)
 class StrategyRegistration:
     label: str

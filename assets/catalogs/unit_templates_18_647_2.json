@@ -6,6 +6,32 @@
   ],
   "templates": [
     {
+      "unit_id": "furnace",
+      "surface": "battle",
+      "path": "units/furnace_battle_active_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261016-160800-observe/frames/00001-before.png",
+      "source_bbox_1280": [
+        301,
+        624,
+        363,
+        680
+      ],
+      "source_card_bbox_1280": [
+        287,
+        595,
+        375,
+        711
+      ],
+      "state": "active",
+      "client_version": "18.647.2",
+      "source_sha256": "ab7fe70376acc3a63051e793ef73d1b4dae18187303e7932ec6679d0cc701a01",
+      "template_sha256": "256959bd4d3964ae198c136c9528561dcd4f14c2942049f84967e2269edcf686",
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261016-154621-tap/frames/00002-after.png",
+      "identity_evidence_sha256": "3752e78a3af402e1351f9847111a54fd8fabcd8646bef722bb2433e49e636a69",
+      "identity_evidence_title": "4级烈焰熔炉",
+      "identity_evidence_status": "agent_visual_detail_and_army_to_battle_not_human_ground_truth"
+    },
+    {
       "unit_id": "electro_dragon",
       "surface": "army",
       "path": "units/electro_dragon_army_18_647_2.png",
