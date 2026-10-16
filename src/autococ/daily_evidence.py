@@ -9,6 +9,18 @@ from pathlib import Path
 
 
 REQUIRED_TASKS = ("collect", "request", "donate", "train", "event", "resources")
+MAINTENANCE_CHECKS = {"collect": 3, "donate": 3, "request": 2}
+VERIFIED_CHECK_REASONS = {
+    "collect": {"collected_resources", "collected_resources_remaining_storage_full"},
+    "donate": {"donation_units_and_cost_verified"},
+    "request": {"request_record_and_cooldown_verified"},
+}
+NO_OPPORTUNITY_REASONS = {
+    "collect": {"no_collectibles", "storage_full"},
+    "donate": {"no_donation_requests_in_scanned_chat",
+               "no_eligible_resource_donation_in_verified_dialog"},
+    "request": {"request_cooldown"},
+}
 
 
 def audit_daily_report(path: Path) -> dict:
@@ -23,6 +35,9 @@ def audit_daily_report(path: Path) -> dict:
     elapsed = report.get("elapsed_sec")
     elapsed = elapsed if type(elapsed) in (int, float) and math.isfinite(elapsed) and elapsed >= 0 else None
     task_receipts = {kind: [] for kind in REQUIRED_TASKS}
+    maintenance_checks = {kind: 0 for kind in MAINTENANCE_CHECKS}
+    maintenance_successes = {kind: 0 for kind in MAINTENANCE_CHECKS}
+    used_check_evidence: set[str] = set()
     battles = []
     goal_progress = []
     reached_goals = set()
@@ -34,12 +49,41 @@ def audit_daily_report(path: Path) -> dict:
                     (Path(item) if Path(item).is_absolute() else path.parent / item).is_file()
                     for item in evidence))
 
+    def new_check_evidence(row: dict) -> bool:
+        """A check needs its own saved image from this run, not a reused receipt."""
+        run_id = report.get("run_id")
+        if (not isinstance(run_id, str) or not run_id or
+                Path(run_id).name != run_id or run_id in {".", ".."}):
+            return False
+        root = (path.parent / run_id).resolve()
+        fingerprints = []
+        for item in row["evidence"]:
+            source = (Path(item) if Path(item).is_absolute() else path.parent / item).resolve()
+            if not source.is_relative_to(root):
+                return False
+            try:
+                fingerprints.append(hashlib.sha256(source.read_bytes()).hexdigest())
+            except OSError:
+                return False
+        if not any(fingerprint not in used_check_evidence for fingerprint in fingerprints):
+            return False
+        used_check_evidence.update(fingerprints)
+        return True
+
     for row in results:
         metrics = row.get("metrics") if isinstance(row.get("metrics"), dict) else {}
         kind = metrics.get("receipt_kind")
         if kind in task_receipts:
             task_receipts[kind].append({"task": row.get("task"), "status": row.get("status"),
                                         "reason": row.get("reason"), "evidence": evidence_present(row)})
+        if kind in maintenance_checks and evidence_present(row):
+            succeeded = (row.get("status") == "succeeded" and
+                         row.get("reason") in VERIFIED_CHECK_REASONS[kind])
+            no_opportunity = (row.get("status") == "skipped" and
+                              row.get("reason") in NO_OPPORTUNITY_REASONS[kind])
+            if (succeeded or no_opportunity) and new_check_evidence(row):
+                maintenance_checks[kind] += 1
+                maintenance_successes[kind] += int(succeeded)
         if row.get("reason") == "goal_reached" and row.get("status") == "succeeded" and evidence_present(row):
             reached_goals.add(row.get("task"))
         if kind == "goal_progress" and row.get("status") == "succeeded" and evidence_present(row):
@@ -102,6 +146,9 @@ def audit_daily_report(path: Path) -> dict:
                       for item in goal_progress))
     checks = {"one_live_daily_run": live, "elapsed_60_minutes": elapsed is not None and elapsed >= 3600,
               "ten_consecutive_complete_battles": best_streak >= 10 and distinct,
+              "three_collect_checks": maintenance_checks["collect"] >= 3,
+              "three_donation_checks": maintenance_checks["donate"] >= 3,
+              "two_request_checks": maintenance_checks["request"] >= 2,
               "at_least_one_verified_win": won_count >= 1,
               "event_progress_gain": event_gain,
               "army_inspected": task_state["train"] == "army_inspected_only",
@@ -118,11 +165,14 @@ def audit_daily_report(path: Path) -> dict:
             "profile": report.get("profile"), "mode": report.get("mode"), "elapsed_sec": elapsed,
             "status": "FAIL" if contradictions else "PASS" if all(checks.values()) else "INSUFFICIENT_DATA",
             "checks": checks, "contradictions": contradictions,
-            "task_state": task_state, "battle_receipts": battles,
+            "task_state": task_state, "maintenance_checks": maintenance_checks,
+            "maintenance_successes": maintenance_successes, "battle_receipts": battles,
             "settled_battles": settled_count, "complete_battles": sum(b["complete"] for b in battles),
             "best_complete_streak": best_streak, "verified_wins": won_count,
             "goal_progress": goal_progress,
             "limits": ["PASS is limited to the listed single-run workflow checks; formal daily acceptance remains false.",
                        "Training task only inspects the army; it does not prove a recipe change.",
                        "A goal reached without a battle objective receipt cannot be attributed to an arbitrary task ID.",
+                       "Every maintenance receipt frame must be inside this run; byte-identical frames are conservatively unproven as independent checks, not proof of repeated game actions.",
+                       "A no-opportunity skip counts as a check, not as a successful donation, request or collection.",
                        "This report audits one run only; external or later recovery cannot fill missing receipts."]}

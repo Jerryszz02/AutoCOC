@@ -559,15 +559,26 @@ def execute_probed_anchor_line(session: Any, plan: ProbedAnchorPlan, *,
             for observation in range(2):
                 if clock() >= stage_deadline:
                     break
-                current = session.observe(f"probed-anchor-{index}-post-{observation}")
+                current = session.observe(f"probed-anchor-{index}-post-{observation}",
+                                          purpose="troop_count",
+                                          slot={"point": list(plan.balloon_point),
+                                                "bbox": list(plan.balloon_bbox)})
                 receipt["evidence"].append(str(current.screenshot_path))
-                # A second probe is authorized only by a positively observed
-                # battle. A preview after a first tap is never enough.
-                if current.scene != "battle":
-                    if current.scene == "account_in_use":
-                        raise FlowError("Game interruption: account_in_use")
+                if current.scene == "account_in_use":
+                    raise FlowError("Game interruption: account_in_use")
+                if current.observations.get("deployment_count_conflict") is not None:
+                    raise FlowError("Probe strong_count_conflict in the post-input frame")
+                scope = current.observations.get("recognition_scope")
+                if scope == "troop_count":
+                    if (current.observations.get("fast_fallback") is not False or
+                            current.observations.get("matched_reasons") != ["two_current_hud_anchors"]):
+                        raise FlowError("Probe fast post frame lacks independent HUD scene proof")
+                elif not (scope == "full" and current.observations.get("fast_fallback") is True and
+                          current.observations.get("recognition_requested") == "troop_count"):
+                    raise FlowError("Probe post frame lacks a fresh full or guarded fast recognition")
+                if current.scene not in {"enemy_village", "battle"}:
                     continue
-                post = _current_frame(session, plan, current, after=done, scene="battle")
+                post = _current_frame(session, plan, current, after=done, scene=current.scene)
                 try:
                     reading = _balloon_count(session, plan, current, 1 - index,
                                              source_bound=True, selected=True,
@@ -575,9 +586,14 @@ def execute_probed_anchor_line(session: Any, plan: ProbedAnchorPlan, *,
                 except FlowError as count_error:
                     if ("strong_count_conflict" in str(count_error) or
                             "differs from frozen" in str(count_error) or
-                            "source balloon versioned identity" in str(count_error)):
+                            "source balloon versioned identity" in str(count_error) or
+                            "strong current-card identity conflicts" in str(count_error)):
                         raise
                     continue  # One more new frame, never one more input.
+                if current.scene == "enemy_village":
+                    if reading["count"] != 2 - index:
+                        raise FlowError("Probe preview changed count without a positive battle scene")
+                    continue  # A preview cannot authorize the next game input.
                 if reading["count"] == 2 - index:
                     continue  # Game has not consumed this one tap yet; never replay it.
                 verified_at = clock()
@@ -591,13 +607,34 @@ def execute_probed_anchor_line(session: Any, plan: ProbedAnchorPlan, *,
                                                 after_count=1 - index, reading=confirmed[1],
                                                 verified_at=verified_at)
             receipt["deployed_units"] = index + 1
-        # This one latest battle frame must still contain every unspent card.
-        # Do not patch labels/counts from the pre-probe army or either prior frame.
+        # The fast second-probe frame proves only that one balloon was consumed.
+        # A separate, newer full frame must prove the entire remaining roster.
+        session.check_deadline()
+        if clock() >= min(started + 12, session.deadline, session.task_deadline):
+            raise FlowError("Probed anchor final full checkpoint missed the total budget")
+        current = session.observe("probed-anchor-final-checkpoint")
+        receipt["evidence"].append(str(current.screenshot_path))
+        # Ordinary full observation does not currently publish recognition_scope;
+        # explicit fast scope/fallback is never enough for the roster checkpoint.
+        if current.scene != "battle" or current.observations.get("recognition_scope") not in (None, "full") or \
+                current.observations.get("fast_fallback") is True:
+            if current.scene == "account_in_use":
+                raise FlowError("Game interruption: account_in_use")
+            raise FlowError("Probed anchor final checkpoint lacks an independent full battle frame")
+        final_proof = _current_frame(session, plan, current, after=verified_at, scene="battle")
+        final_balloon = _balloon_count(session, plan, current, 0)
         receipt["checkpoint"] = _remaining_roster_checkpoint(session, plan, current)
+        receipt["final_checkpoint"] = {"frame": final_proof["frame"],
+                                        "sha256": final_proof["sha256"],
+                                        "observed_at": final_proof["observed_at"],
+                                        "camera": final_proof["camera"],
+                                        "balloon": final_balloon,
+                                        "roster_sha256": receipt["checkpoint"]["sha256"],
+                                        "verified_at": clock()}
         if (clock() >= started + 12 or clock() >= min(session.deadline, session.task_deadline) or
                 current is not session.last_snapshot or
                 _digest_plan(plan) != plan.digest or _plan_digest(base) != base.plan_sha256 or
-                _file_sha256(current.screenshot_path) != confirmed[0]["sha256"] or
+                _file_sha256(current.screenshot_path) != final_proof["sha256"] or
                 _file_sha256(base.frame.screenshot_path) != base.frame_sha256 or
                 _file_sha256(base.toolbar_before_frame_id) != base.toolbar_before_sha256 or
                 base.hero_manifest_frame_id is not None and
@@ -610,7 +647,7 @@ def execute_probed_anchor_line(session: Any, plan: ProbedAnchorPlan, *,
                 if _file_sha256(event[key]["frame"]) != event[key]["sha256"]:
                     raise FlowError("Probed anchor source proof pixels changed")
         _foreground_now(session)
-        if _file_sha256(current.screenshot_path) != confirmed[0]["sha256"]:
+        if _file_sha256(current.screenshot_path) != final_proof["sha256"]:
             raise FlowError("Probed anchor final frame pixels changed")
         authorized_at = clock()  # All hashes and foreground proof have now finished.
         if authorized_at >= min(started + 12, session.deadline, session.task_deadline):
