@@ -103,6 +103,19 @@ class PreparedBattleTests(unittest.TestCase):
     def prepare(self):
         return prepare_battle(self.session, self.scout, model=self.model, clock=self.clock)
 
+    def enable_multi_core(self, **settings):
+        self.profile["multi_core"] = {"enabled": True, "link_distance_pixels": 60,
+                                      "separation_margin_pixels": 20, "min_targets_per_core": 1,
+                                      "max_cores": 3, "max_selected_detections": 12,
+                                      "max_candidates": 12, **settings}
+        (self.root / "layout.json").write_text(json.dumps(self.profile), encoding="utf-8")
+
+    def set_core_detections(self, centers):
+        from autococ.model_vision import BuildingObservation
+        self.model.detect.return_value = tuple(
+            BuildingObservation("town_hall", (x - 10., y - 10., x + 10., y + 10.),
+                                .99, 100., "modelhash") for x, y in centers)
+
     def test_prepare_execute_verify_and_single_use_without_observation_in_queue(self):
         plan = self.prepare()
         self.assertEqual(plan.input_count, 3)
@@ -257,6 +270,88 @@ class PreparedBattleTests(unittest.TestCase):
         with self.assertRaisesRegex(FlowError, "modified"):
             execute_prepared_battle(self.session, plan, clock=self.clock)
         self.assertEqual(self.inputs, [])
+
+    def test_multi_core_candidates_bind_group_entry_spell_and_jev_whitelist(self):
+        self.enable_multi_core(max_candidates=8)
+        self.set_core_detections(((120, 250), (700, 250)))
+        spell = {"kind": "spell", "unit_id": "rage", "source": "army", "count": 1,
+                 "point": [220, 630]}
+        self.scout.observations["battle"]["slots"].append({**spell, "confidence": .99,
+            "evidence": {"count": {"confidence": .99}}})
+        self.scout.observations["expected_army_manifest"]["spells"].append(
+            {"unit_id": "rage", "count": 1})
+        self.profile.update(cards=self.cards + [spell], candidate_orders=[["archer", "rage"]],
+                            spell_targets={"rage": "core"})
+        (self.root / "layout.json").write_text(json.dumps(self.profile), encoding="utf-8")
+        decider = Mock()
+        decider.select.return_value = SimpleNamespace(candidate_id="core-1-main-0-funnel-0-order-0",
+            source="jev", reason="finite_choice", model="jev-pinned", elapsed_sec=.01, confidence=.9)
+        plan = prepare_battle(self.session, self.scout, model=self.model,
+                              decider=decider, clock=self.clock)
+        candidates = decider.select.call_args.args[1]
+        self.assertEqual(len(candidates), 4)
+        self.assertEqual({item["core_index"] for item in candidates}, {0, 1})
+        self.assertEqual({item["id"] for item in candidates}, {
+            f"core-{core}-main-{flank}-funnel-{flank}-order-0"
+            for core in (0, 1) for flank in (0, 1)})
+        self.assertEqual(plan.selected_core_index, 1)
+        self.assertEqual(len(plan.core_geometries), 2)
+        self.assertEqual(plan.candidate_id, "core-1-main-0-funnel-0-order-0")
+        self.assertEqual([action.point for action in plan.actions
+                          if action.unit_id == "rage" and action.kind == "deploy"], [(700, 250)])
+        self.assertEqual(decider.select.call_args.args[0]["cores"], plan.core_geometries)
+        self.assertEqual(self.events[-1][1]["selected_core_index"], 1)
+        with self.assertRaisesRegex(FlowError, "modified"):
+            execute_prepared_battle(self.session, replace(plan, selected_core_index=0), clock=self.clock)
+        plan.core_geometries[0]["bbox"] = (0., 0., 1., 1.)
+        with self.assertRaisesRegex(FlowError, "modified"):
+            execute_prepared_battle(self.session, plan, clock=self.clock)
+        self.assertEqual(self.inputs, [])
+
+    def test_three_cores_have_finite_stable_local_choice_and_invalid_jev_falls_back(self):
+        self.enable_multi_core(max_candidates=6)
+        self.set_core_detections(((700, 250), (120, 250), (1100, 250)))
+        decider = Mock()
+        decider.select.return_value = SimpleNamespace(candidate_id="made-up-core", source="jev")
+        plan = prepare_battle(self.session, self.scout, model=self.model,
+                              decider=decider, clock=self.clock)
+        self.assertEqual(len(decider.select.call_args.args[1]), 6)
+        self.assertEqual([group["center"][0] for group in plan.core_geometries], [120, 700, 1100])
+        self.assertEqual(plan.selected_core_index, 0)
+        self.assertEqual(plan.candidate_id, "core-0-main-0-funnel-0-order-0")
+        self.assertEqual(plan.decision_reason, "jev_invalid_or_late_candidate")
+        self.assertEqual(plan.decision_source, "local")
+
+    def test_multi_core_budget_profile_and_frame_fail_closed_before_input(self):
+        from autococ.model_vision import BuildingObservation
+        self.enable_multi_core(max_candidates=3)
+        self.set_core_detections(((120, 250), (700, 250)))
+        with self.assertRaisesRegex(Exception, "candidate count"):
+            self.prepare()
+        self.assertEqual(self.inputs, [])
+        self.enable_multi_core(max_candidates=8)
+        for wrong_frame, wrong_model in ((99., "modelhash"), (100., "other-model")):
+            with self.subTest(frame=wrong_frame, model=wrong_model):
+                self.model.detect.return_value = (
+                    BuildingObservation("town_hall", (110., 240., 130., 260.), .99, 100., "modelhash"),
+                    BuildingObservation("town_hall", (690., 240., 710., 260.), .99,
+                                        wrong_frame, wrong_model))
+                with self.assertRaisesRegex(Exception, "current frame/model"):
+                    self.prepare()
+        self.assertEqual(self.inputs, [])
+        self.enable_multi_core(link_distance_pixels=float("nan"))
+        self.model.detect.reset_mock()
+        with self.assertRaisesRegex(Exception, "parameters are invalid"):
+            self.prepare()
+        self.model.detect.assert_not_called()
+
+    def test_disabled_multi_core_keeps_original_candidate_ids(self):
+        self.profile["multi_core"] = {"enabled": False}
+        (self.root / "layout.json").write_text(json.dumps(self.profile), encoding="utf-8")
+        plan = self.prepare()
+        self.assertEqual(plan.candidate_id, "main-0-funnel-0-order-0")
+        self.assertEqual(plan.core_geometries, ())
+        self.assertIsNone(plan.selected_core_index)
 
 
 if __name__ == "__main__":

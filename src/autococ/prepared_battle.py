@@ -91,6 +91,8 @@ class FrozenBattlePlan:
     budgets: tuple[tuple[str, str, str, int], ...]
     plan_sha256: str
     visible_layout: dict | None = None
+    core_geometries: tuple[dict, ...] = ()
+    selected_core_index: int | None = None
 
     @property
     def input_count(self) -> int:
@@ -144,6 +146,11 @@ def _profile(session: Any) -> tuple[dict, str]:
         raise CapabilityUnavailable("Battle layout has no accepted stable-card verification")
     if session.client_version == "unknown":
         raise CapabilityUnavailable("Battle client version could not be verified")
+    from .core_geometry import validate_multi_core_profile
+    try:
+        validate_multi_core_profile(profile)
+    except ValueError as exc:
+        raise CapabilityUnavailable(f"Accepted multi-core parameters are invalid: {exc}") from exc
     return profile, sha256(raw).hexdigest()
 
 
@@ -346,22 +353,33 @@ def prepare_battle(session: Any, scout: SceneSnapshot, *, model: Any, decider: A
     terrain = tuple(terrain)
     from .images import read_frame
     from .model_vision import ModelUnavailable, infer_core_geometry
+    from .core_geometry import infer_multi_core_geometry, validate_multi_core_profile
     image = read_frame(frame.screenshot_path)
     if image is None:
         raise FlowError("Battle frame cannot be decoded for building inference")
     try:
         detections = model.detect(image, captured_at=frame.captured_at, now=clock())
-        core = infer_core_geometry(detections, profile, source_resolution=(image.shape[1], image.shape[0]),
-                                   baseline_resolution=frame.resolution)
+        multi_settings = validate_multi_core_profile(profile)
+        if multi_settings is None:
+            core = infer_core_geometry(detections, profile, source_resolution=(image.shape[1], image.shape[0]),
+                                       baseline_resolution=frame.resolution)
+            cores = ()
+        else:
+            cores = infer_multi_core_geometry(
+                detections, profile, captured_at=frame.captured_at, model_sha256=model_sha,
+                source_resolution=(image.shape[1], image.shape[0]), baseline_resolution=frame.resolution)
+            core = None
     except (ModelUnavailable, ValueError) as exc:
         raise CapabilityUnavailable(f"Current battle building inference unavailable: {exc}") from exc
     core_threshold = profile.get("core_min_confidence", .9)
     if (type(core_threshold) not in (int, float) or not math.isfinite(core_threshold) or
             not 0 <= core_threshold <= 1):
         raise CapabilityUnavailable("Accepted core confidence threshold is invalid")
-    if core is None or not .0 <= core.confidence <= 1 or core.confidence < core_threshold:
+    if (core is None and not cores or
+            core is not None and (not .0 <= core.confidence <= 1 or core.confidence < core_threshold) or
+            any(not .0 <= item["confidence"] <= 1 or item["confidence"] < core_threshold for item in cores)):
         raise FlowError("Core location is unknown or below the accepted confidence threshold")
-    core_point = tuple(core.center)
+    core_point = tuple(core.center) if core is not None else tuple(cores[0]["center"])
     if clock() >= latest_start:
         raise FlowError("Preparation budget expired after model inference")
     centers = {edge: spread_on_edge(list(terrain), edge, 1)[0] for edge in (0, 1)}
@@ -374,8 +392,6 @@ def prepare_battle(session: Any, scout: SceneSnapshot, *, model: Any, decider: A
             baseline_resolution=frame.resolution, entries=centers)
     except ValueError as exc:
         raise FlowError(f"Current battle layout evidence is invalid: {exc}") from exc
-    first = min(centers, key=lambda edge: (centers[edge][0] - core_point[0]) ** 2 +
-                (centers[edge][1] - core_point[1]) ** 2)
     accepted_orders = profile.get("candidate_orders")
     names = {card["unit_id"] for card in cards}
     if (not isinstance(accepted_orders, list) or not 1 <= len(accepted_orders) <= 4 or
@@ -393,43 +409,68 @@ def prepare_battle(session: Any, scout: SceneSnapshot, *, model: Any, decider: A
             not set(funnel_units).issubset(troop_names)):
         raise CapabilityUnavailable("Funnel units must be distinct observed troop cards")
     funnel_set = frozenset(funnel_units)
+    if cores and len(cores) * 2 * (2 if funnel_set else 1) * len(accepted_orders) > multi_settings["max_candidates"]:
+        raise CapabilityUnavailable("Multi-core candidate count exceeds the accepted finite budget")
     candidate_actions = {}
     candidate_details = {}
-    for main_flank in (first, 1 - first):
-        funnel_options = (1 - main_flank, main_flank) if funnel_set else (main_flank,)
-        for funnel_flank in funnel_options:
-            for index, order in enumerate(accepted_orders):
-                candidate_id = f"main-{main_flank}-funnel-{funnel_flank}-order-{index}"
-                candidate_actions[candidate_id] = _candidate_actions(
-                    cards, terrain, core_point, flank=main_flank, funnel_flank=funnel_flank,
-                    funnel_units=funnel_set, order=tuple(order), spell_targets=spell_targets)
-                candidate_details[candidate_id] = (main_flank, funnel_flank, index)
+    core_options = tuple(enumerate(cores)) if cores else ((None, {"center": core_point}),)
+    for core_index, geometry in core_options:
+        point = tuple(geometry["center"])
+        first = min(centers, key=lambda edge: ((centers[edge][0] - point[0]) ** 2 +
+                                                (centers[edge][1] - point[1]) ** 2, edge))
+        for main_flank in (first, 1 - first):
+            funnel_options = (1 - main_flank, main_flank) if funnel_set else (main_flank,)
+            for funnel_flank in funnel_options:
+                for index, order in enumerate(accepted_orders):
+                    suffix = f"main-{main_flank}-funnel-{funnel_flank}-order-{index}"
+                    candidate_id = f"core-{core_index}-{suffix}" if cores else suffix
+                    candidate_actions[candidate_id] = _candidate_actions(
+                        cards, terrain, point, flank=main_flank, funnel_flank=funnel_flank,
+                        funnel_units=funnel_set, order=tuple(order), spell_targets=spell_targets)
+                    candidate_details[candidate_id] = (core_index, main_flank, funnel_flank, index)
     candidates = []
     for candidate_id, actions in candidate_actions.items():
         budgets = _validate_actions(actions, cards, frame.resolution)
-        main_flank, funnel_flank, order_index = candidate_details[candidate_id]
+        core_index, main_flank, funnel_flank, order_index = candidate_details[candidate_id]
+        geometry = cores[core_index] if core_index is not None else None
+        point = tuple(geometry["center"]) if geometry is not None else core_point
         entry = centers[main_flank]
-        candidates.append({"id": candidate_id, "entry_point": entry,
-                           "funnel_entry_point": centers[funnel_flank],
-                           "funnel_units": funnel_units,
-                           "core_distance_pixels": round(math.dist(entry, core_point), 2),
-                           "observed_entry": visible_layout["entries"][str(main_flank)],
-                           "unit_order": accepted_orders[order_index],
-                           "spell_targets": spell_targets,
-                           "input_count": len(actions),
-                           "burst_limit_sec": min(15., 1. + .25 * len(actions)),
-                           "budgets": budgets})
+        candidate = {"id": candidate_id, "entry_point": entry,
+                     "funnel_entry_point": centers[funnel_flank],
+                     "funnel_units": funnel_units,
+                     "core_distance_pixels": round(math.dist(entry, point), 2),
+                     "observed_entry": visible_layout["entries"][str(main_flank)],
+                     "unit_order": accepted_orders[order_index],
+                     "spell_targets": spell_targets,
+                     "input_count": len(actions),
+                     "burst_limit_sec": min(15., 1. + .25 * len(actions)),
+                     "budgets": budgets}
+        if geometry is not None:
+            candidate.update(core_index=core_index, core_center=point,
+                             core_bbox=geometry["bbox"], core_confidence=geometry["confidence"])
+        candidates.append(candidate)
     choice = candidates[0]["id"]
     decision_source = "local"
     decision_reason = "nearest_core_entry"
+    if cores:
+        choice = min(candidate_actions, key=lambda candidate_id: (
+            math.dist(centers[candidate_details[candidate_id][1]],
+                      cores[candidate_details[candidate_id][0]]["center"]),
+            *candidate_details[candidate_id]))
+        decision_reason = "nearest_visible_core_entry"
     decision_model = None
     decision_elapsed_sec = 0.
     decision_confidence = None
     if decider is not None:
-        state = {"core": {"center": core_point,
-                 "confidence": core.confidence}, "cards": cards,
+        local_core_index = candidate_details[choice][0]
+        chosen_geometry = cores[local_core_index] if local_core_index is not None else None
+        state = {"core": {"center": tuple(chosen_geometry["center"]),
+                           "confidence": chosen_geometry["confidence"]} if chosen_geometry is not None else
+                         {"center": core_point, "confidence": core.confidence}, "cards": cards,
                  "visible_layout": visible_layout,
                  "countdown_remaining_sec": max(0., frame.captured_at + remaining - clock())}
+        if cores:
+            state["cores"] = cores
         from .jev import relevant_guides
         selected_guides = relevant_guides(guides, {card["unit_id"] for card in cards})
         try:
@@ -454,14 +495,18 @@ def prepare_battle(session: Any, scout: SceneSnapshot, *, model: Any, decider: A
         budget.require_frames((image.shape[1], image.shape[0]), count=6)
     actions = candidate_actions[choice]
     budgets = _validate_actions(actions, cards, frame.resolution)
+    selected_core_index = candidate_details[choice][0]
+    selected_geometry = cores[selected_core_index] if selected_core_index is not None else None
+    chosen_core_point = tuple(selected_geometry["center"]) if selected_geometry is not None else core_point
+    chosen_core_confidence = selected_geometry["confidence"] if selected_geometry is not None else core.confidence
     state = PreparedBattleState(frame, uuid4().hex, preparation_deadline, latest_start,
-                                core_point, core.confidence, cards, terrain, profile_sha, model_sha)
+                                chosen_core_point, chosen_core_confidence, cards, terrain, profile_sha, model_sha)
     plan = FrozenBattlePlan(uuid4().hex, state.battle_id, frame, clock(), latest_start,
                             min(15., 1. + .25 * len(actions)), "continuous", choice,
                             decision_source, decision_reason, decision_model,
                             decision_elapsed_sec, decision_confidence,
                             profile_sha, model_sha, _digest(cards), actions,
-                            budgets, "", visible_layout)
+                            budgets, "", visible_layout, cores, selected_core_index)
     from dataclasses import replace
     plan = replace(plan, plan_sha256=_plan_digest(plan))
     session.event("prepared_battle_frozen", plan_id=plan.plan_id, battle_id=plan.battle_id,
@@ -470,6 +515,7 @@ def prepare_battle(session: Any, scout: SceneSnapshot, *, model: Any, decider: A
                   decision_elapsed_sec=decision_elapsed_sec, decision_confidence=decision_confidence,
                   input_count=plan.input_count, burst_limit_sec=plan.burst_limit_sec,
                   visible_layout=visible_layout,
+                  core_geometries=cores, selected_core_index=selected_core_index,
                   preparation_deadline=preparation_deadline, plan_sha256=plan.plan_sha256)
     return plan
 

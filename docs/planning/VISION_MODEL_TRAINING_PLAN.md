@@ -21,7 +21,7 @@
 | [model_vision.py](../../src/autococ/model_vision.py) | `SceneModel`、`BuildingModel`；ONNX Runtime CPU；版本、哈希、输入和时效校验 | 第一批交付 `scene/`、`building/` 两个模型包；不能将新 kind 假装已有支持 |
 | [MODEL_PACKAGE.md](../MODEL_PACKAGE.md) | manifest schema v1，scene logits/probabilities，building 两种坐标输出 | 训练和导出必须服从真实预处理/输出形状，不照抄框架默认推理代码 |
 | [evaluate_model_package.py](../../scripts/evaluate_model_package.py) | 加载包、绑定快照的分类与独立 raw AP/mAP50–95、定位/耗时评估 | 运行点与独立 AP 分开；退出码 0 只表示过程无错误，不代表准入通过 |
-| `infer_core_geometry` | 按 profile 选建筑，输出一个中心和一个范围 | 多核心分区、方向/模式、墙体图和动态状态均需后续适配；模型训练完成不自动补齐这些功能 |
+| `infer_core_geometry` / [多核心实验接口](../../src/autococ/core_geometry.py) | 默认单中心；显式 profile 可把同帧目标确定性分成 2–3 组 | 多核心仅有合成接口验证，真实质量未验收；方向/模式、墙体图和动态状态仍需后续适配，训练完成不自动补齐这些功能 |
 | [building_vision.py](../../src/autococ/building_vision.py) | 新检测与旧模板状态分开；漏检不证明摧毁 | 不把跨帧数组序号当稳定 ID，不用“没检测到”触发主力进场 |
 | [主计划状态表](VISION_AGENT_PLAN.md#102-状态维护) | 默认连续投放；增强执行保持禁用 | 新动态权重先离线验证，不能借训练任务静默启用实战增强 |
 
@@ -43,7 +43,7 @@
 
 ### 3.1 建筑与攻略之间的中间表示
 
-战前从 B 的建筑事实计算 `buildings[]`、`core_regions[]`、关键目标距离、候选入口、外围结构、未知区域。核心价值由策略 profile 指定，多个核心不能简单合并后仍宣称识别了双核心。首轮维持现有单核心聚合的能力说明；另以人工核心参考验证多核心扩展，尚未通过时排除依赖它的模板。
+战前从 B 的建筑事实计算 `buildings[]`、`core_regions[]`、关键目标距离、候选入口、外围结构、未知区域。核心价值由策略 profile 指定，多个核心不能简单合并后仍宣称识别了双核心。默认维持单核心聚合；显式多核心实验接口虽已实现并通过合成测试，仍须另以人工核心参考验证，尚未通过时排除依赖它的运行模板。
 
 攻略条目存“适用军队/装备、局面条件、前戏目标、主力入口、触发条件、失败分支、证据 URL/时间点”。训练图的建筑真值不包含“必须从六点打”这种战术结论。对可接受的多种入口用集合评价，不以单一作者选择作为唯一正确答案。
 

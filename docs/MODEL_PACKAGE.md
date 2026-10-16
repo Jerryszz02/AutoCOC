@@ -60,6 +60,8 @@ model_dir/
 
 调用方必须传入**取帧开始时的单调时钟时间** `captured_at`，不可在推理时重置时间。`SceneModel(...).classify(image, captured_at=...)` 返回场景、置信度和拒识原因；`BuildingModel(...).detect(image, captured_at=...)` 返回可见建筑框。若要聚合核心区，向 `infer_core_geometry` 提供经审定 profile 的 `core_classes`（类别到最低置信度的映射）、`min_core_targets` 和可选的 `core_padding_pixels`；没有这些条件时核心区为未知。输出中心与范围位于调用方指定的基准坐标系。建筑漏检不会被解释为摧毁。
 
+可选的多核心分组属于布局档案的战前候选接口，不改变模型包格式或模型发布要求。档案显式启用 `multi_core` 后，`infer_multi_core_geometry` 只消费同帧同模型且达到 `core_classes` 阈值的有限检测，并拒绝桥接、间距歧义和超限组；字段、候选上限及冻结计划绑定见[战前连续投放运行契约](VISION_AGENT_RUNTIME.md)。未启用时沿用原单核接口。该路径目前只有合成离线验证，不代表已有模型或多核心实战准入。
+
 `ScreenshotRecognizer` 可选择注入两个模型，并在 `recognize(..., captured_at=...)` 中使用。场景 OCR 与模型给出两个互相冲突的已知类别时，结果为未知；建筑模型结果与现有模板跟踪结果分别保存，避免把可见目标混成已核验的摧毁状态。
 
 已有人工复核的 JSONL 可用以下命令离线评估；省略 `--reviewed-jsonl` 时只校验包和加载权重：
