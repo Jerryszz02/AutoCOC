@@ -49,6 +49,44 @@ def parse_resource_number(text: str) -> int | None:
     return int(re.sub(r"\D", "", normalized))
 
 
+def _segmented_hud_number(
+    candidates: list[tuple[float, int, OCRText]],
+    line_roi: tuple[int, int, int, int],
+    min_confidence: float,
+) -> tuple[str, tuple[int, int, int, int]] | None:
+    """Locate two complete, aligned OCR fragments for an independent line read."""
+    if len(candidates) != 2:
+        return None
+    if any(item.bbox is None for _, _, item in candidates):
+        return None
+    first, second = sorted((item for _, _, item in candidates), key=lambda item: item.bbox[0])
+    if first.bbox is None or second.bbox is None:
+        return None
+    if any(item.confidence < min_confidence or re.fullmatch(r"[0-9]+", item.text) is None
+           for item in (first, second)):
+        return None
+    left, top, right, bottom = first.bbox
+    next_left, next_top, next_right, next_bottom = second.bbox
+    hud_left = min(line_roi[0], 998)  # The fixed gem crop may clip a split leading digit.
+    if not (hud_left <= left < right <= line_roi[2]
+            and hud_left <= next_left < next_right <= line_roi[2]
+            and line_roi[1] <= top < bottom <= line_roi[3]
+            and line_roi[1] <= next_top < next_bottom <= line_roi[3]):
+        return None
+    height = min(bottom - top, next_bottom - next_top)
+    if (min(bottom, next_bottom) - max(top, next_top) < .6 * height
+            or abs((top + bottom) - (next_top + next_bottom)) > 12):
+        return None
+    gap = next_left - right
+    if gap > 12 or -gap > .35 * min(right - left, next_right - next_left):
+        return None
+    # These are OCR box paddings, not inferred missing digits. The result must
+    # be read independently and agree exactly with both fragments below.
+    tight_roi = (max(hud_left, left - 4), max(line_roi[1], min(top, next_top) - 3),
+                 min(line_roi[2], next_right + 4), min(line_roi[3], max(bottom, next_bottom) + 3))
+    return first.text + second.text, tight_roi
+
+
 def parse_capacity(text: str) -> tuple[int, int] | None:
     match = re.fullmatch(r"\s*(\d+)\s*/\s*(\d+)\s*", text)
     if match is None:
@@ -1810,42 +1848,75 @@ class ScreenshotRecognizer:
         for name, (top, bottom) in bands.items():
             candidates = []
             source = "full_ocr"
+            tight_evidence = None
+            row_items = []
             for item in results:
                 if item.bbox is None:
                     continue
                 left, y1, right, y2 = item.bbox
+                if (new_home_hud and item.confidence >= max(.9, self.ocr_config.confidence_threshold)
+                        and width * .78 <= left < right <= line_rois[name][2]
+                        and top * height <= (y1 + y2) / 2 <= bottom * height):
+                    row_items.append(item)
                 value = parse_resource_number(item.text)
                 if value is None and name != "gems":
                     ratio = parse_capacity(item.text)
                     value = ratio[0] if ratio is not None else None
                 if value is not None and left >= width * 0.78 and top * height <= (y1 + y2) / 2 <= bottom * height:
                     candidates.append((item.confidence, value, item))
+            # An adjacent malformed fragment cannot make the remaining numeric
+            # fragment a complete balance by itself.
+            if new_home_hud and len(row_items) > len(candidates) and row_items:
+                continue
             if not candidates or (new_home_hud and (name == "gold" or len(candidates) > 1)):
                 read_line = getattr(self.provider, "recognize_line", None)
                 if read_line is not None:
                     source_roi = scale_box(line_rois[name], from_resolution=(1280, 720), to_resolution=source_resolution)
                     line_candidates = []
-                    for result in filter_ocr_results(read_line(path, source_roi), max(0.9, self.ocr_config.confidence_threshold)):
+                    fixed_reads = read_line(path, source_roi)
+                    for result in filter_ocr_results(fixed_reads, max(0.9, self.ocr_config.confidence_threshold)):
                         value = parse_resource_number(result.text)
                         if value is None and name != "gems":
                             ratio = parse_capacity(result.text)
                             value = ratio[0] if ratio is not None else None
                         if value is not None:
                             line_candidates.append((result.confidence, value, self._baseline_result(result, source_resolution)))
+                    segmented = (_segmented_hud_number(candidates, line_rois[name],
+                                                       max(.9, self.ocr_config.confidence_threshold))
+                                 if new_home_hud and len(row_items) == 2 else None)
+                    fixed_conflict = False
                     if line_candidates:
                         if new_home_hud and len(candidates) > 1:
+                            # The established fixed ROI can verify any number of
+                            # numeric fragments. Tight ROI is limited to two.
                             fragments = "".join(
                                 re.sub(r"\D", "", item.text)
                                 for _, _, item in sorted(candidates, key=lambda candidate: candidate[2].bbox[0])
                             )
-                            line_candidates = [candidate for candidate in line_candidates
-                                               if str(candidate[1]) == fragments]
+                            fixed_conflict = any(str(candidate[1]) != fragments for candidate in line_candidates)
+                            line_candidates = ([] if fixed_conflict else [
+                                candidate for candidate in line_candidates if str(candidate[1]) == fragments
+                            ])
                         elif new_home_hud and name == "gold" and candidates:
                             line_candidates = [candidate for candidate in line_candidates
                                                if len(str(candidate[1])) >= len(str(candidates[0][1]))]
                         if line_candidates:
                             candidates = line_candidates
                             source = "line_roi"
+                    if segmented is not None and not line_candidates and not fixed_conflict:
+                        fragments, tight_box = segmented
+                        tight_roi = scale_box(tight_box, from_resolution=(1280, 720), to_resolution=source_resolution)
+                        tight_reads = filter_ocr_results(
+                            read_line(path, tight_roi), max(.9, self.ocr_config.confidence_threshold),
+                        )
+                        if len(tight_reads) == 1 and str(parse_resource_number(tight_reads[0].text)) == fragments:
+                            segment_items = [asdict(item) for _, _, item in candidates]
+                            candidates = [(tight_reads[0].confidence, int(fragments),
+                                           self._baseline_result(tight_reads[0], source_resolution))]
+                            source = "tight_line_roi"
+                            tight_evidence = {"frame": str(path), "roi": list(tight_box),
+                                              "full_fragments": segment_items,
+                                              "fixed_line_readings": [asdict(item) for item in fixed_reads]}
             if new_home_hud and source != "line_roi" and len(candidates) != 1:
                 # The new wide balance can be split into overlapping OCR fragments.
                 candidates = []
@@ -1853,6 +1924,8 @@ class ScreenshotRecognizer:
                 _, value, item = max(candidates, key=lambda candidate: candidate[0])
                 values[name] = value
                 evidence[name] = {**asdict(item), "source": source}
+                if tight_evidence is not None:
+                    evidence[name].update(tight_evidence)
         return values, evidence
 
     def _village_resource_capacities(self, texts: list[OCRText]) -> dict[str, int | None]:

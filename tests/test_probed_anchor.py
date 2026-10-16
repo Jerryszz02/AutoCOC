@@ -294,6 +294,60 @@ def test_first_probe_pending_count_uses_second_frame_without_replaying(monkeypat
     assert [point for kind, point in session.inputs if kind == "tap" and point in plan.anchors] == list(plan.anchors)
 
 
+def test_transient_count_rejection_is_recorded_before_later_probe_success(monkeypatch, tmp_path):
+    plan, source = make_plan(monkeypatch, tmp_path)
+    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1, fast=True)
+    rejected = image_frame(tmp_path, "rejected", "battle", 10.2)
+    accepted = image_frame(tmp_path, "accepted", "battle", 10.3)
+    second = image_frame(tmp_path, "second", "battle", 10.4)
+    final = image_frame(tmp_path, "final", "battle", 10.5)
+    session = Session(source, [selected, rejected, accepted, second, final])
+    monkeypatch.setattr("autococ.probed_anchor._current_frame",
+                        lambda _s, _p, snapshot, **_kw: frame_proof(snapshot))
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_a: plan.balloon_bbox)
+    def count(_session, _plan, snapshot, expected, **_kw):
+        if snapshot is rejected:
+            raise FlowError("Probe current balloon count is unreadable")
+        return {"count": expected}
+    monkeypatch.setattr("autococ.probed_anchor._balloon_count", count)
+    monkeypatch.setattr("autococ.probed_anchor._verify_frozen_line_post",
+                        lambda _s, _p, _r, _when, *, sleep: final)
+    assert execute_probed_anchor_line(session, plan, clock=lambda: 10., sleep=lambda _: None) is final
+    receipt = session.frozen_line_receipt
+    assert receipt["probe_events"][0]["count_proof_rejections"] == [{
+        "observation_index": 0, "frame": str(rejected.screenshot_path),
+        "sha256": _file_sha256(rejected.screenshot_path),
+        "message": "Probe current balloon count is unreadable"}]
+    assert receipt["probe_events"][0]["after"]["frame"] == str(accepted.screenshot_path)
+    assert [point for kind, point in session.inputs if kind == "tap" and point in plan.anchors] == list(plan.anchors)
+
+
+def test_two_count_rejections_remain_in_failed_probe_receipt_without_replay(monkeypatch, tmp_path):
+    plan, source = make_plan(monkeypatch, tmp_path)
+    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1, fast=True)
+    rejected = [image_frame(tmp_path, f"rejected-{index}", "battle", 10.2 + index * .1)
+                for index in range(2)]
+    session = Session(source, [selected, *rejected])
+    monkeypatch.setattr("autococ.probed_anchor._current_frame",
+                        lambda _s, _p, snapshot, **_kw: frame_proof(snapshot))
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_a: plan.balloon_bbox)
+    def count(_session, _plan, snapshot, _expected, **_kw):
+        if snapshot is selected:
+            return {"count": 2}
+        raise FlowError(f"unreadable {snapshot.screenshot_path.stem}")
+    monkeypatch.setattr("autococ.probed_anchor._balloon_count", count)
+    with pytest.raises(DeploymentError, match="complete battle/count/camera proof") as raised:
+        execute_probed_anchor_line(session, plan, clock=lambda: 10.)
+    receipt = raised.value.partial_receipt
+    assert receipt["probe_events"][0]["count_proof_rejections"] == [
+        {"observation_index": index, "frame": str(snapshot.screenshot_path),
+         "sha256": _file_sha256(snapshot.screenshot_path),
+         "message": f"unreadable {snapshot.screenshot_path.stem}"}
+        for index, snapshot in enumerate(rejected)]
+    assert receipt["issued_placements"] == 1
+    assert session.inputs == [("tap", plan.balloon_point), ("tap", plan.anchors[0])]
+
+
 def test_post_fast_preview_waits_then_full_battle_fallback_and_independent_final_full(monkeypatch, tmp_path):
     plan, source = make_plan(monkeypatch, tmp_path)
     selected = image_frame(tmp_path, "selected", "enemy_village", 10.1, fast=True)
@@ -525,6 +579,10 @@ def test_strong_count_conflict_stops_probe_without_next_frame_or_replay(monkeypa
     receipt = raised.value.partial_receipt
     assert receipt["attempted_placements"] == receipt["issued_placements"] == 1
     assert receipt["probe_events"][0]["status"] == "input_sent"
+    assert receipt["probe_events"][0]["count_proof_rejections"] == [{
+        "observation_index": 0, "frame": str(first.screenshot_path),
+        "sha256": _file_sha256(first.screenshot_path),
+        "message": "Probe strong_count_conflict between full card and local OCR"}]
     assert session.last_snapshot is first  # The second frame cannot wash out strong conflict.
     assert session.inputs == [("tap", plan.balloon_point), ("tap", plan.anchors[0])]
 

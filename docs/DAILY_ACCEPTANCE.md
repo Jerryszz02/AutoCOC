@@ -8,7 +8,13 @@
 
 本轮客户端为 `18.647.2` / `180647003`，MuMu 实例 1、2560×1440，代码在未合并的 `agent/complete-daily-vision`。本节证据均位于本机 `E:/projects/AutoCOC/reports/completion-20261015/`。它们跨开发修复，不拼成同一冻结版本的连续验收。
 
-04:41 数量漏读及 04:45 收集漏检修复的十六模块组合为 **605 passed、29 skipped、345 subtests passed**（112.82 秒），源码和夹具哈希一致；四张匿名夹具原图重建通过，尚待新现场窗口。证据为 `pytest-count-collect-final-20261016.json`、`current-count-collect-assets-v1.json`，收集倍率诊断元数据以 `diagnostics/collect-044553-scale082-verification-v2.json` 为准；v1 中原图哈希抄写错误的原件保留，v2 未伪造重跑耗时。
+库存后备、稳定收集核验和探针拒识诊断的十三模块组合为 **418 passed、33 skipped、263 subtests passed**（67.18 秒），源码/夹具哈希未变。证据为 `pytest-collect-hud-probe-final-20261016.json`；匿名实际 HUD 逐像素重建见 `collect-hud-050523-assets-v1.json`。它们仍为离线验证；第二气球灰卡下缘判据尚未修改，也未增加完整自动战斗数。
+
+05:05 / 05:06 的 `c89ebe6` 新窗口均失败，源码未变。`live/run-20261016-050523-425062-d2145862.json` 先自动恢复普通闲置重载，再点击一个圣水气泡；后帧余额漏读使产品失败，未错误记账。该帧动画数值 13,945,328 不是最终库存，下一场两张独立村庄图均显示 13,955,140；相对收集前的差额 225,016 只作为独立图像复核，原 `null` 保持。`live/run-20261016-050614-701683-82238c3e.json` 实际发出两只气球，仅第一只被软件核验，第二只证据失败后未投主力/英雄/技能；0 星、0%，两张结算显示金币 2,332，自动回村。战前圣水未知，因此原 `inventory_reconciled=false` 保留；末库存 13,641,455 / 13,955,140 / 352,433 / 217，累计搜索费 59,500。两场不增加 COL/BAT 通过数。
+
+针对缺余额与计数动画，收集核验在原三张后帧预算内允许纯重观察，并要求连续两张完整、相同的库存后再记增长；不重复点击。村庄、任务边界和日常证据定向为 82 passed、20 subtests passed，证据 `pytest-collect-stable-r2-20261016.xml`；不是新实机成功。
+
+04:41 数量漏读及 04:45 收集漏检修复的十六模块组合为 **605 passed、29 skipped、345 subtests passed**（112.82 秒），源码和夹具哈希一致；四张匿名夹具原图重建通过，随后现场结果见上文。证据为 `pytest-count-collect-final-20261016.json`、`current-count-collect-assets-v1.json`，收集倍率诊断元数据以 `diagnostics/collect-044553-scale082-verification-v2.json` 为准；v1 中原图哈希抄写错误的原件保留，v2 未伪造重跑耗时。
 
 `71eefbc` 的 `probes/20261016-043958-lightning-info` 完成 8 次只读输入（40.477 秒），自动读取 12 级雷电详情并返回主村，四资源相同。军队全量比较仍为 `not_established`：后帧飞龙公爵头像身份未过阈值，且援军内容未知。`live/run-20261016-044100-672854-5861f24a.json` 在投兵前因飞龙局部数量 OCR 缺证失败，0 投兵、0 技能并回村；原 `inventory_reconciled=false` 保留，原报告未写入 `resources_after` 字段。两张实际回村帧读数均为 13,640,823 / 13,730,124 / 352,433 / 217，只有 1,700 金币搜索费，累计开发费用 57,800。`live/run-20261016-044553-862923-89227bb5.json` 的收集任务错误地跳过为 `no_collectibles`；实际前帧可见金矿、圣水及黑油气泡，零点击且库存不变，不计正确无机会分支。三次运行源码均未变，父子入口均绑定该工作树；结果不能升级为正式验收。
 

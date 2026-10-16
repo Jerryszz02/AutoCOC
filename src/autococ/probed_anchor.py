@@ -662,6 +662,11 @@ def execute_probed_anchor_line(session: Any, plan: ProbedAnchorPlan, *,
                                              source_bound=True, selected=True,
                                              pending=2 - index)
                 except FlowError as count_error:
+                    receipt["probe_events"][-1].setdefault("count_proof_rejections", []).append({
+                        "observation_index": observation,
+                        "frame": post["frame"], "sha256": post["sha256"],
+                        "message": str(count_error),
+                    })
                     if ("strong_count_conflict" in str(count_error) or
                             "differs from frozen" in str(count_error) or
                             "source balloon versioned identity" in str(count_error) or

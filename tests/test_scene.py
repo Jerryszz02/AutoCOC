@@ -428,6 +428,97 @@ class SceneTests(unittest.TestCase):
         self.assertEqual(evidence["elixir"]["source"], "line_roi")
         self.assertGreaterEqual(evidence["elixir"]["confidence"], .9)
 
+    def test_current_split_elixir_050523_uses_independent_tight_line_read(self) -> None:
+        fixture = Path(__file__).parent / "fixtures/home_inventory_split_elixir_050523_18_647_2.png"
+        provenance = json.loads(fixture.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+        self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(), provenance["fixture_sha256"])
+        import cv2
+        image = cv2.imread(str(fixture))
+        self.assertEqual(image.shape, (1440, 2560, 3))
+        left, top, right, bottom = provenance["preserved_roi_at_native_2560x1440"]
+        self.assertFalse(image[:top].any() or image[bottom:].any()
+                         or image[top:bottom, :left].any() or image[top:bottom, right:].any())
+        readings = [OCRText("13", .99996, (1098, 75, 1130, 98)),
+                    OCRText("945328", .99993, (1123, 74, 1218, 99))]
+        values, evidence = ScreenshotRecognizer()._village_resources(
+            fixture, readings, (2560, 1440), new_home_hud=True,
+        )
+        self.assertEqual(values["elixir"], 13945328)
+        self.assertEqual(evidence["elixir"]["source"], "tight_line_roi")
+        self.assertGreaterEqual(evidence["elixir"]["confidence"], .9)
+        self.assertEqual(evidence["elixir"]["roi"], [1094, 71, 1222, 102])
+        self.assertEqual([item["text"] for item in evidence["elixir"]["full_fragments"]],
+                         ["13", "945328"])
+        self.assertEqual(evidence["elixir"]["frame"], str(fixture))
+        self.assertEqual([item["text"] for item in evidence["elixir"]["fixed_line_readings"]],
+                         ["人13945328"])
+
+    def test_current_split_tight_line_rejects_weak_or_conflicting_fragment_evidence(self) -> None:
+        fixed_roi = (1008, 69, 1240, 111)
+        tight_roi = (1094, 71, 1222, 102)
+        good = [OCRText("13", .99996, (1098, 75, 1130, 98)),
+                OCRText("945328", .99993, (1123, 74, 1218, 99))]
+        for changed, fixed_text, tight_text in (
+            (good, "13945329", "13945328"),  # Conflicting fixed line cannot be overridden.
+            ([OCRText("13", .89, good[0].bbox), good[1]], "人13945328", "13945328"),
+            ([good[0], OCRText("945328", .99993, (1123, 95, 1218, 110))],
+             "人13945328", "13945328"),
+            ([OCRText("13", .99996, (1098, 75, 1120, 98)),
+              OCRText("945328", .99993, (1150, 74, 1218, 99))], "人13945328", "13945328"),
+            ([OCRText("13", .99996, (1098, 75, 1170, 98)),
+              OCRText("945328", .99993, (1140, 74, 1218, 99))], "人13945328", "13945328"),
+            ([OCRText("I3", .99996, good[0].bbox), good[1]], "人13945328", "13945328"),
+            (good, "人13945328", "13945329"),
+            (good, "人13945328", "13945328弱"),
+        ):
+            with self.subTest(changed=changed, fixed=fixed_text, tight=tight_text):
+                provider = Mock()
+                def line_read(_path, roi):
+                    if roi == fixed_roi:
+                        return [OCRText(fixed_text, .99, roi)]
+                    if roi == tight_roi:
+                        return [OCRText(tight_text, .99, roi)]
+                    return []
+                provider.recognize_line.side_effect = line_read
+                values, _ = ScreenshotRecognizer(provider=provider)._village_resources(
+                    Path("current.png"), changed, (1280, 720), new_home_hud=True,
+                )
+                self.assertIsNone(values["elixir"])
+
+    def test_current_split_tight_line_requires_unique_high_confidence_number(self) -> None:
+        readings = [OCRText("13", .99996, (1098, 75, 1130, 98)),
+                    OCRText("945328", .99993, (1123, 74, 1218, 99))]
+        for tight_reads in (
+            [OCRText("13945328", .89, None)],
+            [OCRText("13945328", .99, None), OCRText("13945329", .99, None)],
+            [],
+        ):
+            with self.subTest(tight_reads=tight_reads):
+                provider = Mock()
+                provider.recognize_line.side_effect = lambda _path, roi: (
+                    [OCRText("人13945328", .99, None)] if roi == (1008, 69, 1240, 111)
+                    else tight_reads if roi == (1094, 71, 1222, 102) else []
+                )
+                values, _ = ScreenshotRecognizer(provider=provider)._village_resources(
+                    Path("current.png"), readings, (1280, 720), new_home_hud=True,
+                )
+                self.assertIsNone(values["elixir"])
+
+    def test_current_three_fragments_keep_existing_fixed_line_verification(self) -> None:
+        readings = [OCRText("13", .99, (1098, 75, 1126, 99)),
+                    OCRText("945", .99, (1123, 75, 1170, 99)),
+                    OCRText("328", .99, (1168, 75, 1218, 99))]
+        provider = Mock()
+        provider.recognize_line.side_effect = lambda _path, roi: (
+            [OCRText("13945328", .99, roi)] if roi == (1008, 69, 1240, 111) else []
+        )
+        values, evidence = ScreenshotRecognizer(provider=provider)._village_resources(
+            Path("current.png"), readings, (1280, 720), new_home_hud=True,
+        )
+        self.assertEqual(values["elixir"], 13945328)
+        self.assertEqual(evidence["elixir"]["source"], "line_roi")
+        self.assertNotIn("roi", evidence["elixir"])
+
     def test_checklist_home_icon_requires_current_version_and_other_hud_anchors(self) -> None:
         import cv2
         import numpy as np
