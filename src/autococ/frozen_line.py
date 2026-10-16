@@ -196,6 +196,51 @@ def _closed_card_border(current: Any, bbox: tuple[int, int, int, int]) -> dict |
             "bottom_contrast": bottom_contrast}
 
 
+def _closed_dragon_card_border_18_647_2(current: Any,
+                                         bbox: tuple[int, int, int, int]) -> dict | None:
+    """Recognize the complete rounded gray dragon card in this client layout.
+
+    This only proposes a header ROI. Fresh x0 OCR, saved portrait matching and
+    versioned source identity remain separate requirements in the caller.
+    """
+    import cv2
+    import numpy as np
+
+    left, top, right, bottom = bbox
+    if (current.shape[:2] != (720, 1280) or not (85 <= right - left <= 95) or
+            not (590 <= top <= 600 and 705 <= bottom <= 715) or
+            left < 2 or right >= 1278):
+        return None
+    gray = cv2.cvtColor(current, cv2.COLOR_BGR2GRAY)
+    side = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    # Seven independent vertical bands must carry both opposite card edges.
+    left_bands = [float(np.median(band)) for band in np.array_split(side[625:695, left], 7)]
+    right_bands = [float(np.median(band)) for band in np.array_split(side[625:695, right - 1], 7)]
+    if min(left_bands) < 175 or max(right_bands) > -160:
+        return None
+    left_edge, right_edge = float(np.median(left_bands)), float(np.median(right_bands))
+    # The side edges turn inward at both rounded ends; a straight neighboring
+    # seam or a rectangular overlay is insufficient.
+    for y in (top + 5, bottom - 7):
+        if (side[y, left] > .7 * left_edge or
+                side[y, right - 1] < .75 * right_edge):
+            return None
+    if (side[bottom - 7, left + 3] <= side[bottom - 7, left] or
+            side[bottom - 7, right - 2] >= side[bottom - 7, right - 1]):
+        return None
+    lower_inside = gray[bottom - 4:bottom, left + 8:right - 8].mean(axis=0)
+    lower_outside = gray[bottom + 1:bottom + 3, left + 8:right - 8].mean(axis=0)
+    bottom_bands = [float(np.mean(band)) for band in
+                    np.array_split(lower_inside - lower_outside, 5)]
+    if min(bottom_bands) < 33:
+        return None
+    return {"method": "18.647.2_dragon_rounded_closed_card",
+            "left_edge": left_edge, "right_edge": right_edge,
+            "bottom_contrast": float(np.mean(bottom_bands)),
+            "left_side_bands": left_bands, "right_side_bands": right_bands,
+            "bottom_bands": bottom_bands}
+
+
 def _post_troop_reading(session: Any, post_path: Any, source_path: str,
                         point: tuple[int, int], bbox: tuple[int, int, int, int], *,
                         unit_id: str | None = None) -> dict:
@@ -240,6 +285,21 @@ def _post_troop_reading(session: Any, post_path: Any, source_path: str,
     if len(strong_full_counts) > 1:
         return conflict(strong_full_counts)
     if reading:
+        if unit_id == "dragon":
+            # The neighboring gray card can itself produce a strong x0 fast
+            # read. Bind that read to this version's *source* dragon portrait
+            # before accepting it as the frozen dragon slot.
+            if (getattr(session.recognizer, "client_version", None) != _CLIENT_VERSION or
+                    getattr(session, "client_version", None) != _CLIENT_VERSION):
+                return {}
+            from .unit_catalog import recognize_card_identity
+
+            identity = recognize_card_identity(source, bbox, "troop", surface="battle",
+                                               client_version=_CLIENT_VERSION)
+            if (identity.get("unit_id") != unit_id or
+                    identity.get("version_verified") is not True or
+                    identity.get("template_client_version") != _CLIENT_VERSION):
+                return {}
         if strong_full_counts and strong_full_counts != {reading["count"]}:
             return conflict(strong_full_counts | {reading["count"]})
         return reading
@@ -301,6 +361,8 @@ def _post_troop_reading(session: Any, post_path: Any, source_path: str,
     border = None
     if locator_source == "current_frame_closed_card_header_geometry":
         border = _closed_card_border(current, bbox)
+        if border is None and unit_id == "dragon":
+            border = _closed_dragon_card_border_18_647_2(current, bbox)
         if border is None:
             return {}
     from .locator import scale_box

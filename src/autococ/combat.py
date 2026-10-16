@@ -46,6 +46,8 @@ def inspect_army(session: GameSession) -> TaskResult:
 
 def run_battle(session: GameSession) -> TaskResult:
     started_at, started = datetime.now(), time.monotonic()
+    prior_battle_reward_receipt = getattr(session, "battle_reward_receipt", None)
+    session._battle_reward_run_initial_receipt = prior_battle_reward_receipt
     evidence: list[Path] = []
     searches: list[dict[str, object]] = []
     metrics: dict[str, object] = {
@@ -624,8 +626,18 @@ def run_battle(session: GameSession) -> TaskResult:
         session.check_deadline()
         _require_scene(settlement_frame, {"settlement"})
         progress("结算回村")
-        session.click(settlement_frame, "return_home")
-        home_after = session.wait_for({"village", "popup"}, timeout_sec=45, label="battle-return-home")
+        if isinstance(settlement_frame.observations.get("battle_reward_claim"), dict):
+            # A chest-bearing result has a distinct claim control.  Its free
+            # chain must finish on new evidence before the old battle ledger
+            # can be reconciled; failed deployment remains failed below.
+            if settlement_error is not None or settlement is None or line_mode and not stable_line_result:
+                raise FlowError(settlement_error or "Battle chest settlement was not stable")
+            from .battle_rewards import finish_claimed_battle_reward
+            home_after, metrics["battle_reward"] = finish_claimed_battle_reward(
+                session, settlement_frame, evidence)
+        else:
+            session.click(settlement_frame, "return_home")
+            home_after = session.wait_for({"village", "popup"}, timeout_sec=45, label="battle-return-home")
         if home_after.scene == "popup":
             _require_scene(home_after, {"popup"})
             reward = [item for item in home_after.observations.get("ocr", [])
@@ -643,6 +655,8 @@ def run_battle(session: GameSession) -> TaskResult:
         home_after = return_to_village(session, initial_snapshot=home_after)
         if home_after.screenshot_path not in evidence:
             evidence.append(home_after.screenshot_path)
+        if isinstance(metrics.get("battle_reward"), dict) and metrics["battle_reward"].get("returned_home") is True:
+            metrics["returned_home"] = True
         if line_mode and not stable_line_result:
             metrics.update(returned_home=True, rounds_completed=1,
                            resources_after=home_after.observations.get("resources"), victory=None)
@@ -747,6 +761,10 @@ def run_battle(session: GameSession) -> TaskResult:
         if isinstance(exc, CapabilityUnavailable):
             status = "not_supported"
         reason = metrics.get("deployment_error") or settlement_error or str(exc)
+        chest_receipt = getattr(session, "battle_reward_receipt", None)
+        if (chest_receipt is not prior_battle_reward_receipt and isinstance(chest_receipt, dict)
+                and chest_receipt.get("kind") == "battle_chest_ui"):
+            metrics["battle_reward"] = chest_receipt
         if vision_mode and metrics["vision_agent"]["status"] == "not_started":
             metrics["vision_agent"]["status"] = "unavailable" if isinstance(exc, CapabilityUnavailable) else "failed"
         if settlement_error is not None:

@@ -14,7 +14,7 @@ from .images import read_frame, read_template
 from .errors import LocatorError, OCRError, SceneError
 from .locator import find_template, scale_box
 from .ocr import OCRProvider, OCRText, create_ocr_provider, filter_ocr_results
-from .scene import SCENE_ACCOUNT_IN_USE, SCENE_BATTLE, SCENE_CLAN_CHAT, SCENE_DISCONNECTED, SCENE_ENEMY_VILLAGE, SCENE_MAINTENANCE, SCENE_POPUP, SCENE_REQUEST, SCENE_SEARCH, SCENE_SETTLEMENT, SCENE_STARTING, SCENE_TRAINING, SCENE_UNKNOWN, SCENE_VILLAGE, SceneSnapshot, account_in_use_dialog_evidence, classify_scene_text, surrender_dialog_evidence
+from .scene import SCENE_ACCOUNT_IN_USE, SCENE_BATTLE, SCENE_BATTLE_REWARD, SCENE_CLAN_CHAT, SCENE_DISCONNECTED, SCENE_ENEMY_VILLAGE, SCENE_MAINTENANCE, SCENE_POPUP, SCENE_REQUEST, SCENE_SEARCH, SCENE_SETTLEMENT, SCENE_STARTING, SCENE_TRAINING, SCENE_UNKNOWN, SCENE_VILLAGE, SceneSnapshot, account_in_use_dialog_evidence, classify_scene_text, surrender_dialog_evidence
 from .model_vision import ModelUnavailable, SceneModel, BuildingModel
 
 
@@ -341,6 +341,24 @@ class ScreenshotRecognizer:
                 baseline_resolution=self.baseline_resolution)
             if event_reward_track is not None:
                 scene, confidence, reasons = SCENE_POPUP, .95, ["current_event_reward_track_verified"]
+        battle_reward_claim = None
+        battle_reward = None
+        if (self.client_version == "18.647.2" and not account_claim_visible
+                and account_in_use is None and scene == SCENE_UNKNOWN):
+            from .battle_rewards import observe_battle_reward_claim, observe_battle_chest
+            current_ocr = [asdict(item) for item in texts]
+            if any(normalize_label(item.text) == "领取奖励" for item in texts):
+                battle_reward_claim = observe_battle_reward_claim(
+                    path, current_ocr, client_version=self.client_version,
+                    baseline_resolution=self.baseline_resolution)
+                if battle_reward_claim is not None:
+                    scene, confidence, reasons = SCENE_SETTLEMENT, .95, ["current_battle_chest_claim_settlement"]
+            elif any(normalize_label(item.text) in {"普通", "稀有", "英雄药水"} for item in texts):
+                battle_reward = observe_battle_chest(
+                    path, current_ocr, client_version=self.client_version,
+                    baseline_resolution=self.baseline_resolution)
+                if battle_reward is not None:
+                    scene, confidence, reasons = SCENE_BATTLE_REWARD, .95, ["current_battle_chest_page"]
         village_type_evidence = None
         if scene == SCENE_UNKNOWN and not account_claim_visible and all(
             any(normalize_label(item.text) == label and self._in_observed_roi(item, roi)
@@ -352,7 +370,7 @@ class ScreenshotRecognizer:
             if village_type_evidence["type"] == "home":
                 scene, confidence, reasons = SCENE_VILLAGE, .9, ["home_battle_icon", "shop_and_build_hud"]
         model_scene_evidence: dict[str, object] | None = None
-        if self.scene_model is not None and not account_claim_visible:
+        if self.scene_model is not None and not account_claim_visible and battle_reward_claim is None and battle_reward is None:
             if captured_at is None:
                 model_scene_evidence = {"status": "unavailable", "reason": "capture_time_missing"}
             else:
@@ -481,6 +499,10 @@ class ScreenshotRecognizer:
             # Claiming is only available through the explicitly enabled reward
             # executor. General popup navigation can only close this surface.
             buttons = [event_reward_track["button"]]
+        if battle_reward_claim is not None and scene == SCENE_SETTLEMENT:
+            buttons = [battle_reward_claim["button"]]
+        if battle_reward is not None and scene == SCENE_BATTLE_REWARD:
+            buttons = [battle_reward["button"]]
         if (scene == SCENE_VILLAGE and village_type_evidence is not None
                 and village_type_evidence.get("type") == "home"
                 and not any(button["name"] == "attack" for button in buttons)):
@@ -504,6 +526,8 @@ class ScreenshotRecognizer:
             "village_type_evidence": None,
             "event_panel": event_panel,
             "event_reward_track": event_reward_track,
+            "battle_reward_claim": battle_reward_claim,
+            "battle_reward": battle_reward,
             "account_in_use": account_in_use,
             "resource_evidence": {},
             "collectibles": [],
@@ -1197,6 +1221,7 @@ class ScreenshotRecognizer:
             ("received", {"您得到了", "您得到", "lootgained"}, (555, 275, 730, 330)),
             ("losses", {"损耗的部队", "损耗部队"}, (550, 450, 735, 495)),
             ("return", {"回营", "returnhome"}, (520, 570, 760, 675)),
+            ("claim", {"领取奖励"}, (525, 580, 760, 660)),
         ):
             matches = []
             for item in texts:
@@ -1266,7 +1291,7 @@ class ScreenshotRecognizer:
             evidence["bonus"] = {"source": "verified_no_bonus_layout", "layout": layout,
                                  "requires_inventory_reconciliation": True,
                                  "anchors": anchors, "separator_rows": separators}
-        if {"victory", "received", "losses", "return"} <= anchors.keys() and "defeat" not in anchors:
+        if {"victory", "received", "losses"} <= anchors.keys() and ({"return", "claim"} & anchors.keys()) and "defeat" not in anchors:
             bonus, bonus_evidence = self._settlement_bonus(path, image, texts, resolution)
             evidence["bonus"] = bonus_evidence
             if (stars is not None and rows_complete and ordered_icons == list(resources)

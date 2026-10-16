@@ -1,6 +1,7 @@
 """Synthetic executor contracts; no game connection or model readiness is implied."""
 
 from dataclasses import replace
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,7 +9,8 @@ from types import SimpleNamespace
 import pytest
 
 from autococ.errors import DeploymentError, FlowError, StopRequested
-from autococ.frozen_line import (_cards, _count_proves, _post_troop_reading, execute_frozen_line,
+from autococ.frozen_line import (_cards, _closed_dragon_card_border_18_647_2, _count_proves,
+                                 _post_troop_reading, execute_frozen_line,
                                  freeze_model_free_line)
 from autococ.scene import SceneSnapshot
 
@@ -557,6 +559,115 @@ def test_saved_real_frames_replay_gray_card_x0_with_current_portrait(run, post_n
     assert result["portrait_source"] == "current_frame_saved_battle_portrait"
     assert result["frame"] == post["frame"]
     assert not any(slot.get("unit_id") == "electro_dragon" for slot in post["observations"]["battle"]["slots"])
+
+
+@pytest.mark.parametrize("battle,post", [
+    ("new", "post1"), ("new", "post2"), ("new", "post3"),
+    ("prior_a", "post1"), ("prior_b", "post1"),
+])
+def test_anonymized_real_dragon_gray_card_requires_current_x0(battle, post):
+    from autococ.ocr import RapidOCRProvider
+    from autococ.vision import ScreenshotRecognizer
+
+    root = Path(__file__).parent / "fixtures" / "dragon_closed_card_18_647_2"
+    source, current = root / f"{battle}_source.png", root / f"{battle}_{post}.png"
+    recognizer = ScreenshotRecognizer(provider=RapidOCRProvider())
+    recognizer.client_version = "18.647.2"
+    session = SimpleNamespace(recognizer=recognizer, client_version="18.647.2",
+                              last_snapshot=SceneSnapshot("battle", .99, current, {"ocr": []}))
+    result = _post_troop_reading(session, current, str(source), (185, 653), (141, 595, 230, 711),
+                                  unit_id="dragon")
+    assert result["count"] == 0
+    assert result["confidence"] >= .9
+    assert result["portrait_score"] >= .92
+    assert result["locator"]["source"] == "current_frame_closed_card_header_geometry"
+    assert result["current_card_border"]["method"] == "18.647.2_dragon_rounded_closed_card"
+
+
+def test_anonymized_dragon_toolbar_provenance_preserves_exact_native_pixels():
+    from autococ.images import read_frame
+
+    root = Path(__file__).parent / "fixtures" / "dragon_closed_card_18_647_2"
+    for path in root.glob("*.png"):
+        provenance = json.loads(path.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+        image = read_frame(path)
+        x0, y0, x1, y1 = provenance["native_preserved_xyxy"]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == provenance["output_sha256"]
+        assert hashlib.sha256(image[y0:y1, x0:x1].tobytes()).hexdigest() == \
+            provenance["native_preserved_pixel_sha256"]
+        assert provenance["native_preserved_pixel_sha256"] == \
+            provenance["output_preserved_pixel_sha256"]
+        assert image[:y0].max() == 0
+
+
+def test_dragon_specific_closed_shape_rejects_neighbor_shift_truncation_and_occlusion():
+    import cv2
+    from autococ.images import read_frame
+
+    path = Path(__file__).parent / "fixtures" / "dragon_closed_card_18_647_2" / "new_post1.png"
+    image = cv2.resize(read_frame(path), (1280, 720), interpolation=cv2.INTER_AREA)
+    box = (141, 595, 230, 711)
+    assert _closed_dragon_card_border_18_647_2(image, box)
+    assert _closed_dragon_card_border_18_647_2(image, (149, 595, 238, 711)) is None
+    for target in ("side", "bottom", "corner", "truncated"):
+        changed = image.copy()
+        if target == "side":
+            changed[650:690, 139:145] = 0
+        elif target == "bottom":
+            changed[707:715, 175:198] = 0
+        elif target == "corner":
+            changed[699:708, 139:147] = 0
+        else:
+            changed[700:715, 139:232] = 0
+        assert _closed_dragon_card_border_18_647_2(changed, box) is None, target
+
+
+@pytest.mark.parametrize("variant", ["wrong_version", "neighbor", "missing_digit", "nonzero"])
+def test_dragon_current_header_negative_evidence(tmp_path, variant):
+    import cv2
+    from autococ.images import read_frame
+    from autococ.ocr import RapidOCRProvider
+    from autococ.vision import ScreenshotRecognizer
+
+    root = Path(__file__).parent / "fixtures" / "dragon_closed_card_18_647_2"
+    source, post = root / "new_source.png", root / "new_post1.png"
+    box = (141, 595, 230, 711)
+    version = "18.600.7" if variant == "wrong_version" else "18.647.2"
+    if variant == "neighbor":
+        box = (238, 595, 327, 711)
+    if variant in {"missing_digit", "nonzero"}:
+        image = read_frame(post)
+        if variant == "missing_digit":
+            image[1184:1246, 370:456] = 0
+        else:
+            selected = read_frame(source)
+            image[1184:1246, 370:456] = selected[1184:1246, 370:456]
+        post = tmp_path / f"{variant}.png"
+        post.write_bytes(cv2.imencode(".png", image)[1].tobytes())
+    recognizer = ScreenshotRecognizer(provider=RapidOCRProvider())
+    recognizer.client_version = version
+    session = SimpleNamespace(recognizer=recognizer, client_version=version,
+                              last_snapshot=SceneSnapshot("battle", .99, post, {"ocr": []}))
+    result = _post_troop_reading(session, post, str(source), (185, 653), box, unit_id="dragon")
+    assert result.get("count") != 0
+
+
+def test_dragon_current_x0_cannot_override_strong_same_frame_x1():
+    from autococ.ocr import RapidOCRProvider
+    from autococ.vision import ScreenshotRecognizer
+
+    root = Path(__file__).parent / "fixtures" / "dragon_closed_card_18_647_2"
+    source, post = root / "new_source.png", root / "new_post1.png"
+    recognizer = ScreenshotRecognizer(provider=RapidOCRProvider())
+    recognizer.client_version = "18.647.2"
+    snapshot = SceneSnapshot("battle", .99, post, {"ocr": [
+        {"text": "x1", "confidence": .99, "bbox": [188, 595, 225, 620]}]})
+    session = SimpleNamespace(recognizer=recognizer, client_version="18.647.2",
+                              last_snapshot=snapshot)
+    result = _post_troop_reading(session, post, str(source), (185, 653), (141, 595, 230, 711),
+                                  unit_id="dragon")
+    assert result["reason"] == "strong_count_conflict"
+    assert result["counts"] == [0, 1]
 
 
 def test_saved_real_fast_selected_count_contract():

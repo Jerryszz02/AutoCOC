@@ -444,17 +444,23 @@ def summarize_run(stats: RunStats, *, save_decision_trace: bool = True) -> dict[
 
 def interrupted_battle_metrics(session) -> dict[str, object]:
     """Preserve issued inputs when cooperative stop prevents further observation."""
+    chest_receipt = getattr(session, "battle_reward_receipt", None)
+    chest_metrics = ({"battle_reward": chest_receipt}
+                     if (hasattr(session, "_battle_reward_run_initial_receipt")
+                         and chest_receipt is not session._battle_reward_run_initial_receipt
+                         and isinstance(chest_receipt, dict)
+                         and chest_receipt.get("kind") == "battle_chest_ui") else {})
     line_receipt = getattr(session, "frozen_line_receipt", None)
     if isinstance(line_receipt, dict) and line_receipt.get("mode") in {
             "model_free_line_continuous", "model_free_line_probed_anchors"}:
-        return {"deployment": line_receipt,
+        return {"deployment": line_receipt, **chest_metrics,
                 "line_execution": {"mode": ("two_edge_probed_anchors" if
                                              line_receipt["mode"] == "model_free_line_probed_anchors"
                                              else "continuous"), "status": "cancelled"}}
     receipt = getattr(session, "prepared_battle_receipt", None)
     if not isinstance(receipt, dict):
-        return {}
-    return {"deployment": receipt, "vision_agent": {
+        return chest_metrics
+    return {"deployment": receipt, **chest_metrics, "vision_agent": {
         "mode": "continuous", "status": "cancelled",
         "plan_ready": bool(receipt.get("plan_id")),
         "input_sent": receipt.get("input_sent") is True,

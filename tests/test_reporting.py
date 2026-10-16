@@ -20,6 +20,17 @@ def success(task: str, **metrics: object) -> TaskResult:
 
 
 class ReportingTests(unittest.TestCase):
+    def test_cancelled_battle_keeps_only_current_chest_input_receipt(self) -> None:
+        old = {"kind": "battle_chest_ui", "input_attempts": [{"action": "old"}]}
+        session = SimpleNamespace(battle_reward_receipt=old,
+                                  _battle_reward_run_initial_receipt=old,
+                                  frozen_line_receipt=None, prepared_battle_receipt=None)
+        self.assertNotIn("battle_reward", interrupted_battle_metrics(session))
+        current = {"kind": "battle_chest_ui", "status": "incomplete", "input_attempts": [
+            {"action": "claim_battle_reward", "input_attempted": True, "input_returned": False}]}
+        session.battle_reward_receipt = current
+        self.assertIs(interrupted_battle_metrics(session)["battle_reward"], current)
+
     def test_cancelled_probed_anchor_keeps_attempted_issued_and_verified_partial(self) -> None:
         receipt = {"mode": "model_free_line_probed_anchors", "line_tactics": "two_edge_probed_anchors",
                    "attempted_placements": 2, "issued_placements": 1,

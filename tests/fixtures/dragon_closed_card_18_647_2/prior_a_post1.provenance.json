@@ -1,0 +1,20 @@
+{
+  "client_version": "18.647.2",
+  "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-070901-762905-3d2c7360\\frames\\00038-frozen-line-post-recheck.png",
+  "source_sha256": "56947a7f019a1c71cae16723d04297af7ea424865fea7e57b390097ae1047dcc",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "native_preserved_xyxy": [
+    180,
+    1160,
+    1100,
+    1440
+  ],
+  "native_preserved_pixel_sha256": "a43eebbb02228021b7ca38e9e4614529b57063ced9b79414247ccac4a26dfe78",
+  "output_sha256": "48e1210555313db2a2fcd82d5018e9b5f15d5181e90291143abd6a6e4e710cbe",
+  "output_preserved_pixel_sha256": "a43eebbb02228021b7ca38e9e4614529b57063ced9b79414247ccac4a26dfe78",
+  "outside_preserved_area": "black masked",
+  "purpose": "Anonymized independent battle toolbar source/current-frame regression."
+}

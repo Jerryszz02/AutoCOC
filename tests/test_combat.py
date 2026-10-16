@@ -2089,5 +2089,50 @@ class ScoutReadinessTests(unittest.TestCase):
         self.assertFalse(any(data["ready"] for _, data in session.events))
 
 
+class BattleRewardIntegrationTests(unittest.TestCase):
+    def setUp(self):
+        patcher = patch("autococ.combat._wait_for_clear_scout",
+                        side_effect=lambda session, snapshot, deadline: snapshot)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_claim_branch_keeps_battle_ledger_and_separate_potion_receipt(self):
+        for completed in (True, False):
+            with self.subTest(completed=completed):
+                frames = complete_frames()
+                frames[4].observations["deployment"]["completed"] = completed
+                frames[5].observations["buttons"] = [{"name": "claim_battle_reward", "point": [613, 621],
+                                                       "text": "领取奖励"}]
+                frames[5].observations["battle_reward_claim"] = {"surface": "battle_reward_claim_settlement"}
+                session = FakeSession(frames)
+                potion = {"kind": "battle_chest_ui", "status": "ui_complete_home_verified",
+                          "reward_item": "hero_potion", "reward_amount": None,
+                          "reward_inventory_verified": False, "returned_home": True}
+
+                def finish(active, settlement, evidence):
+                    self.assertIs(settlement, frames[5])
+                    return active.observe("battle-chest-home"), potion
+
+                with patch("autococ.battle_rewards.finish_claimed_battle_reward", side_effect=finish) as handler:
+                    result = battle(session)
+                handler.assert_called_once()
+                self.assertEqual(result.metrics["battle_reward"], potion)
+                self.assertEqual(result.metrics["inventory_delta"], {"gold": 110, "elixir": 55,
+                                                                      "dark_elixir": 10, "gems": 0})
+                self.assertTrue(result.metrics["inventory_reconciled"])
+                self.assertTrue(result.metrics["returned_home"])
+                self.assertFalse(any("return_home" in reason for _, reason in session.taps))
+                self.assertEqual(result.status, "succeeded" if completed else "failed")
+
+    def test_old_chest_receipt_does_not_leak_into_later_non_chest_failure(self):
+        session = FakeSession([])
+        old = {"kind": "battle_chest_ui", "status": "ui_complete_home_verified", "returned_home": True}
+        session.battle_reward_receipt = old
+        result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertNotIn("battle_reward", result.metrics)
+        self.assertIs(session.battle_reward_receipt, old)
+
+
 if __name__ == "__main__":
     unittest.main()
