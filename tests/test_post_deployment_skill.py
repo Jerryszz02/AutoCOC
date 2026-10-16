@@ -4,6 +4,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from dataclasses import replace
 from types import SimpleNamespace
+import hashlib
+import json
+import math
 import time
 import unittest
 from unittest.mock import patch
@@ -30,6 +33,18 @@ def snapshot(number: int, *, scene: str = "battle", deployment: bool = False) ->
         observations["deployment"] = {"verified": True, "completed": True, "deployed_units": 17,
                                       "heroes": [{"unit_id": hero, "verified": True} for hero in HEROES]}
     return SceneSnapshot(scene, .99, path, observations)
+
+
+def stabilization_snapshot(number: int, *, deployment: bool = False) -> SceneSnapshot:
+    original = snapshot(23, deployment=deployment)
+    return replace(original, screenshot_path=FIXTURES /
+                   f"hero_skill_stabilization_054932_{number:05d}_18_647_2.png")
+
+
+def camera_motion(dx: float, dy: float, *, stationary: bool = True,
+                  matches: int = 100, inliers: int = 90, rotation: float = 0.0) -> dict:
+    return {"stationary": stationary, "matched_points": matches, "inliers": inliers,
+            "affine": [[1.0, rotation, dx], [-rotation, 1.0, dy]]}
 
 
 class FakeSession:
@@ -80,6 +95,201 @@ class PostDeploymentSkillTests(unittest.TestCase):
                    return_value={"stationary": True}), \
              patch("autococ.post_deployment_skill._minimum_zoom_motion", return_value=True):
             return execute_post_deployment_hero_skill(session, deployed, hero_id=hero_id, delay_sec=delay)
+
+    def test_real_camera_borderline_allows_one_observation_but_dead_hp_never_taps(self):
+        deployed = stabilization_snapshot(25, deployment=True)
+        session = FakeSession(deployed, [stabilization_snapshot(26), stabilization_snapshot(27)])
+        with patch("autococ.post_deployment_skill.foreground_package",
+                   return_value="com.supercell.clashofclans"):
+            latest, receipt = execute_post_deployment_hero_skill(session, deployed,
+                                                                 hero_id="grand_warden", delay_sec=0)
+        self.assertEqual(latest.screenshot_path.name,
+                         "hero_skill_stabilization_054932_00027_18_647_2.png")
+        self.assertEqual(receipt["reason"], "current_warden_ready_with_live_hp_unverified")
+        self.assertFalse(receipt["attempted"])
+        self.assertEqual(session.taps, [])
+        self.assertEqual(len(session.frames), 0)
+        first = receipt["stabilization"]["first"]
+        second = receipt["stabilization"]["second"]
+        self.assertEqual(first["sha256"], hashlib.sha256(stabilization_snapshot(26).screenshot_path.read_bytes()).hexdigest())
+        self.assertEqual(second["sha256"], hashlib.sha256(stabilization_snapshot(27).screenshot_path.read_bytes()).hexdigest())
+        self.assertLess(first["capture_request_monotonic"], second["capture_request_monotonic"])
+        first_motion = receipt["stabilization"]["first_motion"]
+        second_motion = receipt["stabilization"]["second_motion"]
+        self.assertTrue(first_motion["stationary"])
+        self.assertAlmostEqual(math.hypot(first_motion["affine"][0][2], first_motion["affine"][1][2]),
+                               3.018, delta=.002)
+        self.assertTrue(second_motion["stationary"])
+        self.assertLess(math.hypot(second_motion["affine"][0][2], second_motion["affine"][1][2]), 3)
+        self.assertEqual(receipt["stabilization"]["status"], "strict_motion_verified")
+        self.assertFalse(receipt["target_before"]["verified"])
+
+    def test_one_bounded_stabilization_can_authorize_only_second_fresh_ready_card(self):
+        # Synthetic state-machine timing only: the real 054932 second frame had
+        # no live HP and is covered by the separate negative replay above.
+        deployed = snapshot(23, deployment=True)
+        session = FakeSession(deployed, [snapshot(25), snapshot(24), snapshot(27)])
+        with patch("autococ.post_deployment_skill.foreground_package",
+                   return_value="com.supercell.clashofclans"), \
+             patch("autococ.post_deployment_skill.measure_camera_motion",
+                   side_effect=[camera_motion(3.1, 0.0), camera_motion(.2, 0.0)]):
+            latest, receipt = execute_post_deployment_hero_skill(session, deployed,
+                                                                 hero_id="grand_warden", delay_sec=0)
+        self.assertTrue(receipt["verified"])
+        self.assertEqual(latest.screenshot_path.name, "hero_skill_035742_00027_18_647_2.png")
+        self.assertEqual(receipt["before"]["frame"], str(snapshot(24).screenshot_path))
+        self.assertEqual(receipt["stabilization"]["first"]["frame"], str(snapshot(25).screenshot_path))
+        self.assertEqual(len(receipt["evidence"]), 3)
+        self.assertEqual(len(session.taps), 1)
+        self.assertEqual(session.taps[0][0].screenshot_path.name, "hero_skill_035742_00024_18_647_2.png")
+        self.assertEqual(session.taps[0][1], (691, 653))
+        _, again = execute_post_deployment_hero_skill(session, latest, hero_id="grand_warden", delay_sec=0)
+        self.assertIs(again, receipt)
+        self.assertEqual(len(session.taps), 1)
+
+    def test_stabilization_never_observes_again_after_large_or_weak_initial_motion(self):
+        for motion in (camera_motion(4.0, 0.0), camera_motion(3.2, 0.0, stationary=False),
+                       camera_motion(3.2, 0.0, inliers=70), camera_motion(3.2, 0.0, rotation=.003),
+                       {"stationary": True, "affine": None}):
+            with self.subTest(motion=motion):
+                deployed = snapshot(23, deployment=True)
+                session = FakeSession(deployed, [snapshot(25), snapshot(24)])
+                with patch("autococ.post_deployment_skill.foreground_package",
+                           return_value="com.supercell.clashofclans"), \
+                     patch("autococ.post_deployment_skill.measure_camera_motion", return_value=motion):
+                    _, receipt = execute_post_deployment_hero_skill(session, deployed,
+                                                                    hero_id="grand_warden", delay_sec=0)
+                self.assertEqual(receipt["reason"], "camera_not_strictly_stationary")
+                self.assertEqual(len(session.frames), 1)
+                self.assertEqual(session.taps, [])
+
+    def test_second_stabilization_must_be_new_strict_battle_and_keep_reserve(self):
+        first = camera_motion(3.1, 0.0)
+        for second, expected in ((camera_motion(3.1, 0.0), "camera_not_strictly_stationary_after_one_observation"),
+                                 (camera_motion(.1, 0.0, inliers=50, matches=100),
+                                  "camera_not_strictly_stationary_after_one_observation")):
+            with self.subTest(second_motion=second):
+                deployed = snapshot(23, deployment=True)
+                session = FakeSession(deployed, [snapshot(25), snapshot(24)])
+                with patch("autococ.post_deployment_skill.foreground_package",
+                           return_value="com.supercell.clashofclans"), \
+                     patch("autococ.post_deployment_skill.measure_camera_motion",
+                           side_effect=[first, second]):
+                    _, receipt = execute_post_deployment_hero_skill(session, deployed,
+                                                                    hero_id="grand_warden", delay_sec=0)
+                self.assertEqual(receipt["reason"], expected)
+                self.assertEqual(session.taps, [])
+                self.assertEqual(len(session.frames), 0)
+
+        deployed = snapshot(23, deployment=True)
+        session = FakeSession(deployed, [snapshot(25), snapshot(24, scene="unknown")])
+        with patch("autococ.post_deployment_skill.foreground_package",
+                   return_value="com.supercell.clashofclans"), \
+             patch("autococ.post_deployment_skill.measure_camera_motion", return_value=first):
+            _, receipt = execute_post_deployment_hero_skill(session, deployed,
+                                                            hero_id="grand_warden", delay_sec=0)
+        self.assertIn("positive current battle", receipt["reason"])
+        self.assertEqual(session.taps, [])
+
+        session = FakeSession(deployed, [snapshot(25), snapshot(24, scene="settlement")])
+        with patch("autococ.post_deployment_skill.foreground_package",
+                   return_value="com.supercell.clashofclans"), \
+             patch("autococ.post_deployment_skill.measure_camera_motion", return_value=first):
+            _, receipt = execute_post_deployment_hero_skill(session, deployed,
+                                                            hero_id="grand_warden", delay_sec=0)
+        self.assertEqual(receipt["reason"], "battle_already_settled")
+        self.assertEqual(session.taps, [])
+
+        class RepeatedStabilizationTime(FakeSession):
+            def observe(self, label, *, purpose="full"):
+                item = super().observe(label, purpose=purpose)
+                if label.endswith("skill-before"):
+                    self.first_capture_at = item.observations["requested_at_monotonic"]
+                if label.endswith("stabilized-before"):
+                    item.observations["requested_at_monotonic"] = self.first_capture_at
+                return item
+
+        session = RepeatedStabilizationTime(deployed, [snapshot(25), snapshot(24)])
+        with patch("autococ.post_deployment_skill.foreground_package",
+                   return_value="com.supercell.clashofclans"), \
+             patch("autococ.post_deployment_skill.measure_camera_motion", return_value=first):
+            _, receipt = execute_post_deployment_hero_skill(session, deployed,
+                                                            hero_id="grand_warden", delay_sec=0)
+        self.assertIn("capture order is unverified", receipt["reason"])
+        self.assertEqual(session.taps, [])
+
+        class LostReserve(FakeSession):
+            def observe(self, label, *, purpose="full"):
+                item = super().observe(label, purpose=purpose)
+                if label.endswith("stabilized-before"):
+                    self.task_deadline = time.monotonic() + 80
+                return item
+
+        session = LostReserve(deployed, [snapshot(25), snapshot(24)])
+        with patch("autococ.post_deployment_skill.foreground_package",
+                   return_value="com.supercell.clashofclans"), \
+             patch("autococ.post_deployment_skill.measure_camera_motion",
+                   side_effect=[first, camera_motion(.1, 0.0)]):
+            _, receipt = execute_post_deployment_hero_skill(session, deployed,
+                                                            hero_id="grand_warden", delay_sec=0)
+        self.assertEqual(receipt["reason"], "fresh_skill_input_source_stale_or_changed")
+        self.assertEqual(session.taps, [])
+
+        class ChangedDisplay(FakeSession):
+            def observe(self, label, *, purpose="full"):
+                item = super().observe(label, purpose=purpose)
+                if label.endswith("stabilized-before"):
+                    self.capture.input_display_id += 1
+                return item
+
+        session = ChangedDisplay(deployed, [snapshot(25), snapshot(24)])
+        with patch("autococ.post_deployment_skill.foreground_package",
+                   return_value="com.supercell.clashofclans"), \
+             patch("autococ.post_deployment_skill.measure_camera_motion", return_value=first):
+            _, receipt = execute_post_deployment_hero_skill(session, deployed,
+                                                            hero_id="grand_warden", delay_sec=0)
+        self.assertEqual(receipt["reason"], "stabilization_source_or_display_changed")
+        self.assertEqual(session.taps, [])
+
+    def test_stabilization_stop_and_account_conflict_send_zero_inputs(self):
+        deployed = snapshot(23, deployment=True)
+        session = FakeSession(deployed, [snapshot(25), snapshot(24)])
+        session.stop_on_check = 2
+        with patch("autococ.post_deployment_skill.foreground_package",
+                   return_value="com.supercell.clashofclans"), \
+             patch("autococ.post_deployment_skill.measure_camera_motion",
+                   return_value=camera_motion(3.1, 0.0)):
+            with self.assertRaises(StopRequested):
+                execute_post_deployment_hero_skill(session, deployed, hero_id="grand_warden", delay_sec=0)
+        self.assertEqual(len(session.frames), 1)
+        self.assertEqual(session.taps, [])
+
+        session = FakeSession(deployed, [snapshot(25), snapshot(24, scene="account_in_use")])
+        with patch("autococ.post_deployment_skill.foreground_package",
+                   return_value="com.supercell.clashofclans"), \
+             patch("autococ.post_deployment_skill.measure_camera_motion",
+                   return_value=camera_motion(3.1, 0.0)):
+            with self.assertRaisesRegex(FlowError, "account_in_use"):
+                execute_post_deployment_hero_skill(session, deployed, hero_id="grand_warden", delay_sec=0)
+        self.assertEqual(session.taps, [])
+
+    def test_stabilization_fixture_source_hashes_and_native_pixels(self):
+        metadata = json.loads((FIXTURES / "hero_skill_stabilization_054932_18_647_2.provenance.json")
+                              .read_text(encoding="utf-8"))
+        self.assertFalse(metadata["human_ground_truth"])
+        self.assertFalse(metadata["dynamic_event_validation"])
+        for name, record in metadata["fixtures"].items():
+            fixture = FIXTURES / name
+            self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(), record["fixture_sha256"])
+            original = Path("E:/projects/AutoCOC") / record["source_frame"]
+            if original.is_file():
+                self.assertEqual(hashlib.sha256(original.read_bytes()).hexdigest(), record["source_sha256"])
+                raw = cv2.imdecode(np.fromfile(original, np.uint8), cv2.IMREAD_COLOR)
+                expected = np.zeros_like(raw)
+                expected[220:1060, 400:2180] = raw[220:1060, 400:2180]
+                expected[1030:1440, :] = raw[1030:1440, :]
+                saved = cv2.imdecode(np.fromfile(fixture, np.uint8), cv2.IMREAD_COLOR)
+                self.assertTrue(np.array_equal(saved, expected))
 
     def test_ready_to_used_from_real_frames_taps_once_after_fresh_card_proof(self):
         deployed = snapshot(23, deployment=True)

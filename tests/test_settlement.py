@@ -35,6 +35,68 @@ class EarnedStarShapeTests(unittest.TestCase):
         image[20:220, 430:845] = crop
         return image
 
+    def current_three_star_region(self, number: int) -> np.ndarray:
+        crop = cv2.imdecode(np.fromfile(
+            self.root / f"tests/fixtures/settlement-three-stars-current-054932-{number:05d}.png",
+            dtype=np.uint8), cv2.IMREAD_COLOR)
+        image = np.zeros((720, 1280, 3), np.uint8)
+        image[20:220, 430:845] = crop
+        return image
+
+    def test_current_real_three_star_animation_keeps_all_complete_shapes(self):
+        for number in range(43, 49):
+            with self.subTest(frame=number):
+                result = recognize_earned_stars(self.current_three_star_region(number))
+                self.assertEqual(result["count"], 3)
+                self.assertEqual(len(result["evidence"]["shapes"]), 3)
+                self.assertTrue(all(shape["verified"] for shape in result["evidence"]["shapes"]))
+                self.assertTrue(all(len(shape["concavity_depths"]) == 5
+                                    for shape in result["evidence"]["shapes"]))
+                center = next(shape for shape in result["evidence"]["shapes"]
+                              if shape["bbox_at_1280x720"][1] < 50)
+                self.assertEqual(center["polygon_approximation"],
+                                 .025 if number in (43, 45, 47, 48) else .02)
+
+    def test_current_three_star_partial_center_or_extra_shape_stays_unknown(self):
+        source = self.current_three_star_region(48)
+        for mode in ("missing_top_tip", "missing_lower_tip", "missing_inner_corner",
+                     "partial_occlusion", "roi_edge_fragment", "extra_bright_shape"):
+            with self.subTest(mode=mode):
+                image = source.copy()
+                if mode == "missing_top_tip":
+                    image[20:62, 600:690] = 0
+                elif mode == "missing_lower_tip":
+                    image[160:196, 570:607] = 0
+                elif mode == "missing_inner_corner":
+                    image[90:145, 580:630] = 0
+                elif mode == "partial_occlusion":
+                    image[92:137, 550:635] = 0
+                elif mode == "roi_edge_fragment":
+                    image[95:150, 430:482] = 240
+                else:
+                    cv2.circle(image, (837, 110), 17, (240, 240, 240), -1)
+                self.assertIsNone(recognize_earned_stars(image)["count"])
+
+    def test_current_three_star_fixture_provenance(self):
+        metadata = json.loads((self.root / "tests/fixtures/settlement-three-stars-current-054932.provenance.json")
+                              .read_text(encoding="utf-8"))
+        self.assertEqual(metadata["client_version"], "18.647.2")
+        self.assertFalse(metadata["human_ground_truth"])
+        self.assertFalse(metadata["formal_success"])
+        for name, record in metadata["fixtures"].items():
+            with self.subTest(fixture=name):
+                fixture = self.root / "tests/fixtures" / name
+                self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(),
+                                 record["fixture_sha256"])
+                original = Path("E:/projects/AutoCOC") / record["source_frame"]
+                if original.is_file():
+                    self.assertEqual(hashlib.sha256(original.read_bytes()).hexdigest(),
+                                     record["source_sha256"])
+                    raw = cv2.imdecode(np.fromfile(original, np.uint8), cv2.IMREAD_COLOR)
+                    baseline = cv2.resize(raw, (1280, 720), interpolation=cv2.INTER_AREA)
+                    crop = cv2.imdecode(np.fromfile(fixture, np.uint8), cv2.IMREAD_COLOR)
+                    self.assertTrue(np.array_equal(crop, baseline[20:220, 430:845]))
+
     def test_current_real_two_star_screen_needs_both_complete_five_concavity_shapes(self):
         image = self.current_two_star_region()
         result = recognize_earned_stars(image)

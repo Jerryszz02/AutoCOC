@@ -24,6 +24,7 @@ HERO_ID = "grand_warden"
 FRESH_SECONDS = 8.0  # Existing manual sampler's capture-to-input bound.
 MAX_AFTER_FRAMES = 2
 SETTLEMENT_RESERVE_SECONDS = 90.0
+STABILIZATION_TRANSLATION_LIMIT = 4.0  # Read-only retry only; an input still needs the original <3 proof.
 
 
 def _sha(path: str | Path) -> str:
@@ -101,6 +102,25 @@ def _complete_deployment(snapshot: Any, hero_id: str) -> bool:
     return len(set(ids)) == 4 and hero_id in ids
 
 
+def _bounded_stabilization_candidate(motion: dict[str, object]) -> bool:
+    """Allow one more observation only when translation alone missed strict proof."""
+    affine = motion.get("affine")
+    if (not isinstance(affine, list) or len(affine) != 2
+            or any(not isinstance(row, list) or len(row) != 3 for row in affine)):
+        return False
+    dx, dy = affine[0][2], affine[1][2]
+    if (type(dx) not in (int, float) or type(dy) not in (int, float)
+            or not math.isfinite(dx) or not math.isfinite(dy)
+            or not 3 <= math.hypot(dx, dy) < STABILIZATION_TRANSLATION_LIMIT):
+        return False
+    # Reuse every strict inlier/scale/rotation/stationary gate without changing
+    # its action threshold. Zero translation is used only for this decision to
+    # take another image; the next real image must pass the unmodified guard.
+    without_translation = {**motion, "affine": [[*affine[0][:2], 0.0],
+                                              [*affine[1][:2], 0.0]]}
+    return _minimum_zoom_motion(without_translation)
+
+
 def execute_post_deployment_hero_skill(
     session: Any, deployed: Any, *, hero_id: str, delay_sec: float,
 ) -> tuple[Any, dict[str, object]]:
@@ -155,7 +175,31 @@ def execute_post_deployment_hero_skill(
         motion = measure_camera_motion(source_path, fresh.screenshot_path)
         receipt["camera_motion"] = motion
         if not _minimum_zoom_motion(motion):
-            return fail("camera_not_strictly_stationary")
+            if not _bounded_stabilization_candidate(motion):
+                return fail("camera_not_strictly_stationary")
+            receipt["stabilization"] = {"first": before, "first_motion": motion,
+                                        "status": "one_read_only_observation_pending"}
+            session.check_deadline()
+            if time.monotonic() >= min(session.deadline, session.task_deadline) - SETTLEMENT_RESERVE_SECONDS:
+                return fail("insufficient_settlement_reserve_for_stabilization")
+            _foreground(session)
+            second = session.observe("post-deployment-skill-stabilized-before", purpose="full")
+            latest = second
+            second_seen = _frame(session, second, previous=fresh)
+            receipt["evidence"].append(second_seen["frame"])
+            receipt["stabilization"]["second"] = second_seen
+            if second.scene == "settlement":
+                return fail("battle_already_settled")
+            if (_sha(source_path) != source_sha or _sha(fresh.screenshot_path) != before["sha256"]
+                    or session.capture.input_display_id != display_id):
+                return fail("stabilization_source_or_display_changed")
+            second_motion = measure_camera_motion(fresh.screenshot_path, second.screenshot_path)
+            receipt["stabilization"]["second_motion"] = second_motion
+            if not _minimum_zoom_motion(second_motion):
+                return fail("camera_not_strictly_stationary_after_one_observation")
+            receipt["stabilization"]["status"] = "strict_motion_verified"
+            fresh, before = second, second_seen
+            receipt["before"] = before
         target = _current_warden(session, fresh)
         receipt["target_before"] = target
         state = target.get("state") or {}

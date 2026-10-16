@@ -69,9 +69,20 @@ def recognize_earned_stars(image) -> dict:
         solidity = area / cv2.contourArea(cv2.convexHull(contour))
         # Antialiased highlights can add small vertices to a complete star.
         # A slightly coarser outline keeps its five deep concavities intact.
-        polygon = cv2.approxPolyDP(contour, .02 * cv2.arcLength(contour, True), True)
+        perimeter = cv2.arcLength(contour, True)
+        polygon = cv2.approxPolyDP(contour, .02 * perimeter, True)
+        approximation = .02
+        # A complete current-client star can gain two short outline vertices
+        # during its shine animation. Only an otherwise valid silhouette may
+        # use a slightly coarser outline; missing tips/concavities still fail.
+        if (len(polygon) > 12 and .35 <= area / (width * height) <= .6
+                and .5 <= solidity <= .8):
+            coarser = cv2.approxPolyDP(contour, .025 * perimeter, True)
+            if 10 <= len(coarser) <= 12:
+                polygon, approximation = coarser, .025
         if not 10 <= len(polygon) <= 12:
-            shape.update(solidity=solidity, polygon_vertices=len(polygon))
+            shape.update(solidity=solidity, polygon_vertices=len(polygon),
+                         polygon_approximation=approximation)
             valid = False
             continue
         defects = cv2.convexityDefects(polygon, cv2.convexHull(polygon, returnPoints=False))
@@ -79,7 +90,8 @@ def recognize_earned_stars(image) -> dict:
         deep_concavities = sum(depth >= min(width, height) * .09 for depth in depths)
         complete = (.35 <= area / (width * height) <= .6 and .5 <= solidity <= .8
                     and 10 <= len(polygon) <= 12 and deep_concavities == 5)
-        shape.update(verified=complete, solidity=solidity, polygon_vertices=len(polygon), concavity_depths=depths)
+        shape.update(verified=complete, solidity=solidity, polygon_vertices=len(polygon),
+                     polygon_approximation=approximation, concavity_depths=depths)
         valid = valid and complete
     shapes = evidence["shapes"]
     # An unexplained large fragment may be a second, occluded star. Never silently
