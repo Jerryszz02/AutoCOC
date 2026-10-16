@@ -1,0 +1,22 @@
+{
+  "client_version": "18.647.2",
+  "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-192541-589533-3b457584\\frames\\00022-mixed-dragon-post-1.png",
+  "source_sha256": "2796ccdb68fc95952ce149f0841715d79e4a11612d4b2dbcd9dee499ee1a4f38",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "native_preserved_xyxy": [
+    360,
+    1140,
+    590,
+    1440
+  ],
+  "native_preserved_pixel_sha256": "265a813f3d7b1a9f47383a96dc5cea0b77e198e609169f4c3494e455ba06e330",
+  "output_sha256": "40a38ac2dbb14fd3e6a74759d7149ce1af54aa208b693b06d9750c7519841077",
+  "output_preserved_pixel_sha256": "265a813f3d7b1a9f47383a96dc5cea0b77e198e609169f4c3494e455ba06e330",
+  "outside_preserved_area": "black masked",
+  "events_source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-192541-589533-3b457584\\events.jsonl",
+  "events_sha256": "e83d7c3cf185865819941719d57fa1883c95a8488b9f8621800cc590c0971c35",
+  "purpose": "Anonymized battle toolbar development fixture; source12 saved source and post22 live failure, not human truth or formal heldout."
+}

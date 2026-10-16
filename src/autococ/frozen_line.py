@@ -225,20 +225,55 @@ def _closed_dragon_card_border_18_647_2(current: Any,
         if (side[y, left] > .7 * left_edge or
                 side[y, right - 1] < .75 * right_edge):
             return None
-    if (side[bottom - 7, left + 3] <= side[bottom - 7, left] or
-            side[bottom - 7, right - 2] >= side[bottom - 7, right - 1]):
-        return None
     lower_inside = gray[bottom - 4:bottom, left + 8:right - 8].mean(axis=0)
     lower_outside = gray[bottom + 1:bottom + 3, left + 8:right - 8].mean(axis=0)
     bottom_bands = [float(np.mean(band)) for band in
                     np.array_split(lower_inside - lower_outside, 5)]
     if min(bottom_bands) < 33:
         return None
+    # The lower rounded edge shifts inward by a pixel between rows on this
+    # layout. A single x+3 sample at bottom-7 can land beyond that edge. Require
+    # a four-connected rim within fixed card bounds instead: both full side
+    # traces must join the inner bottom center. This does not prove the top rim.
+    from collections import deque
+
+    vertical = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+    rim = np.zeros((bottom - 623, right - left), dtype=np.bool_)
+    for y in range(625, bottom):
+        rim[y - 624, :9] |= side[y, left:left + 9] >= 40
+        rim[y - 624, -9:] |= side[y, right - 9:right] <= -40
+    for y in range(bottom - 4, bottom + 1):
+        rim[y - 624, 5:-5] |= vertical[y, left + 5:right - 5] <= -40
+    seed = (650 - 624, 0)
+    opposite = (650 - 624, right - left - 1)
+    center = (bottom - 1 - 624, (right - left) // 2)
+    if not (rim[seed] and rim[opposite] and rim[center]):
+        return None
+    connected = {seed}
+    pending = deque([seed])
+    while pending:
+        y, x = pending.popleft()
+        for point in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+            row, col = point
+            if (0 <= row < rim.shape[0] and 0 <= col < rim.shape[1] and
+                    rim[point] and point not in connected):
+                connected.add(point)
+                pending.append(point)
+    if opposite not in connected or center not in connected:
+        return None
+    for y in range(625, bottom):
+        row = y - 624
+        if (not any((row, x) in connected for x in range(9)) or
+                not any((row, x) in connected for x in range(right - left - 9, right - left))):
+            return None
     return {"method": "18.647.2_dragon_rounded_closed_card",
             "left_edge": left_edge, "right_edge": right_edge,
             "bottom_contrast": float(np.mean(bottom_bands)),
             "left_side_bands": left_bands, "right_side_bands": right_bands,
-            "bottom_bands": bottom_bands}
+            "bottom_bands": bottom_bands,
+            "lower_outline": {"connectivity": 4, "gradient_min": 40,
+                              "bottom_gradient_max": -40,
+                              "connected_pixels": len(connected)}}
 
 
 def _post_troop_reading(session: Any, post_path: Any, source_path: str,
