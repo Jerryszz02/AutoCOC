@@ -627,7 +627,52 @@ def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt
         confirmation = measure_camera_motion(after.screenshot_path, current.screenshot_path)
         if not _minimum_zoom_motion(confirmation):
             raise FlowError("Minimum zoom changed before the full roster read")
-        _remaining_seconds(current)
+        try:
+            _remaining_seconds(current)
+        except FlowError:
+            from .battle_vision import preparation_countdown_retry_candidate
+
+            weak_timer = preparation_countdown_retry_candidate(
+                current, session.config.game.baseline_resolution)
+            if weak_timer is None:
+                raise
+            # The scout's original preview end is the hard bound. The weak
+            # timer supplies no duration and cannot extend this permission.
+            hard_end = min(preview_end, getattr(session, "deadline", math.inf),
+                           getattr(session, "task_deadline", math.inf))
+            if time.monotonic() + 5 >= hard_end:
+                raise FlowError("Preview time is insufficient for a countdown recheck")
+            session._validate_snapshot(current)
+            previous = current
+            receipt["countdown_recheck"] = {"trigger": weak_timer["reason"],
+                                            "weak_frame": str(previous.screenshot_path),
+                                            "weak_timer_confidence": weak_timer["timer"]["confidence"]}
+            recheck_started = time.monotonic()
+            current = session.observe("line-countdown-recheck")
+            recheck_elapsed = time.monotonic() - recheck_started
+            receipt["evidence"].append(str(current.screenshot_path))
+            previous_at = previous.observations.get("observed_at_monotonic")
+            current_at = current.observations.get("observed_at_monotonic")
+            if (current.screenshot_path == previous.screenshot_path
+                    or type(previous_at) not in (int, float) or not math.isfinite(previous_at)
+                    or type(current_at) not in (int, float) or not math.isfinite(current_at)
+                    or current_at <= previous_at):
+                raise FlowError("Countdown recheck did not capture a new frame")
+            if (current.scene != "enemy_village" or not math.isfinite(current.confidence)
+                    or current.confidence < .8):
+                raise FlowError("Enemy preview was lost during countdown recheck")
+            recheck_motion = measure_camera_motion(previous.screenshot_path, current.screenshot_path)
+            if not _minimum_zoom_motion(recheck_motion):
+                raise FlowError("Minimum zoom changed during countdown recheck")
+            session._validate_snapshot(current)
+            if time.monotonic() + 5 >= hard_end:
+                raise FlowError("Preview time expired during countdown recheck")
+            _remaining_seconds(current)
+            receipt["countdown_recheck"].update(
+                frame=str(current.screenshot_path), elapsed_sec=recheck_elapsed,
+                motion=recheck_motion, countdown_evidence=current.observations["battle"]["countdown_evidence"])
+            receipt["minimum_zoom_initial_confirmation_motion"] = confirmation
+            confirmation = recheck_motion
     else:
         for _ in range(3):
             session._validate_snapshot(current)

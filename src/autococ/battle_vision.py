@@ -15,6 +15,90 @@ from .locator import scale_box
 from .scene import SceneSnapshot
 
 
+def _preparation_countdown_items(snapshot: SceneSnapshot,
+                                 baseline_resolution: tuple[int, int], minimum_confidence: float) -> list[dict]:
+    width, height = baseline_resolution
+    items = []
+    for raw in snapshot.observations.get("ocr", []):
+        if not isinstance(raw, dict):
+            continue
+        box, confidence = raw.get("bbox"), raw.get("confidence")
+        if (type(confidence) not in (int, float) or not math.isfinite(confidence)
+                or not minimum_confidence <= confidence <= 1
+                or not isinstance(box, (tuple, list)) or len(box) != 4
+                or any(type(v) not in (int, float) or not math.isfinite(v) for v in box)
+                or not (width * .25 <= box[0] < box[2] <= width * .75
+                        and 0 <= box[1] < box[3] <= height * .20)):
+            continue
+        items.append({"text": re.sub(r"\s+", "", str(raw.get("text", "")).lower()),
+                      "bbox": box, "confidence": confidence})
+    return items
+
+
+def _preparation_seconds(text: str) -> int | None:
+    text = text.strip(":：")
+    match = re.fullmatch(r"(\d{1,2})(?:秒|s|sec|seconds)?", text)
+    if match:
+        value = int(match.group(1))
+        return value if 1 <= value <= 60 else None
+    match = re.fullmatch(r"0:(\d{2})", text)
+    if match and 1 <= int(match.group(1)) < 60:
+        return int(match.group(1))
+    return None
+
+
+def _preparation_countdown_candidates(items: list[dict], baseline_resolution: tuple[int, int]):
+    width, height = baseline_resolution
+    labels = ("战斗开始倒计时", "开战倒计时", "battlestartsin")
+    anchors = [(item, prefix) for item in items for prefix in labels if item["text"].startswith(prefix)]
+    if len(anchors) != 1:
+        return anchors, []
+    anchor, prefix = anchors[0]
+    candidates = []
+    embedded = _preparation_seconds(anchor["text"][len(prefix):])
+    if embedded is not None:
+        candidates.append((embedded, anchor))
+    for item in items:
+        if item is anchor:
+            continue
+        value = _preparation_seconds(item["text"])
+        box, label_box = item["bbox"], anchor["bbox"]
+        # OCR boxes for the live timer can overlap the smaller heading by a
+        # few pixels even though the glyphs are on separate lines. Bound the
+        # overlap by their own text heights as well as 14 baseline pixels.
+        allowed_overlap = min(14, (label_box[3] - label_box[1]) * .40,
+                              (box[3] - box[1]) * .25)
+        if (value is not None and -allowed_overlap <= box[1] - label_box[3] <= height * .10
+                and abs((box[0] + box[2] - label_box[0] - label_box[2]) / 2) <= width * .07):
+            candidates.append((value, item))
+    return anchors, candidates
+
+
+def preparation_countdown_retry_candidate(snapshot: SceneSnapshot,
+                                          baseline_resolution: tuple[int, int] = (1280, 720)) -> dict | None:
+    """Describe one weak timer that may justify observing again, never a usable countdown."""
+    battle = snapshot.observations.get("battle")
+    if (snapshot.scene != "enemy_village" or not isinstance(battle, dict)
+            or "countdown_seconds" in battle or "countdown_evidence" in battle):
+        return None
+    items = _preparation_countdown_items(snapshot, baseline_resolution, 0)
+    anchors, candidates = _preparation_countdown_candidates(items, baseline_resolution)
+    if len(anchors) != 1 or len(candidates) != 1:
+        return None
+    anchor = anchors[0][0]
+    _, timer = candidates[0]
+    if (anchor["confidence"] < .9 or timer is anchor
+            or not 0 <= timer["confidence"] < .9):
+        return None
+    # A separate high-confidence timer anywhere in the valid heading region
+    # is a contradiction, even if it is not adjacent enough to be accepted.
+    if any(item is not anchor and item is not timer and item["confidence"] >= .9
+           and _preparation_seconds(item["text"]) is not None for item in items):
+        return None
+    return {"reason": "unique_weak_timer", "label": anchor, "timer": timer,
+            "frame": str(snapshot.screenshot_path)}
+
+
 def attach_preparation_countdown(snapshot: SceneSnapshot,
                                  baseline_resolution: tuple[int, int] = (1280, 720)) -> None:
     """Use a unique, high-confidence preparation label and adjacent timer only.
@@ -29,56 +113,13 @@ def attach_preparation_countdown(snapshot: SceneSnapshot,
         return
     battle.pop("countdown_seconds", None)
     battle.pop("countdown_evidence", None)
-    width, height = baseline_resolution
-    items = []
-    for raw in snapshot.observations.get("ocr", []):
-        if not isinstance(raw, dict):
-            continue
-        box, confidence = raw.get("bbox"), raw.get("confidence")
-        if (type(confidence) not in (int, float) or not math.isfinite(confidence) or not .9 <= confidence <= 1
-                or not isinstance(box, (tuple, list)) or len(box) != 4
-                or any(type(v) not in (int, float) or not math.isfinite(v) for v in box)
-                or not (width * .25 <= box[0] < box[2] <= width * .75
-                        and 0 <= box[1] < box[3] <= height * .20)):
-            continue
-        items.append({"text": re.sub(r"\s+", "", str(raw.get("text", "")).lower()),
-                      "bbox": box, "confidence": confidence})
-    labels = ("战斗开始倒计时", "开战倒计时", "battlestartsin")
-    anchors = [(item, prefix) for item in items for prefix in labels if item["text"].startswith(prefix)]
+    items = _preparation_countdown_items(snapshot, baseline_resolution, .9)
+    anchors, candidates = _preparation_countdown_candidates(items, baseline_resolution)
     if len(anchors) != 1:
         return
-    anchor, prefix = anchors[0]
-
-    def seconds(text):
-        text = text.strip(":：")
-        match = re.fullmatch(r"(\d{1,2})(?:秒|s|sec|seconds)?", text)
-        if match:
-            value = int(match.group(1))
-            return value if 1 <= value <= 60 else None
-        match = re.fullmatch(r"0:(\d{2})", text)
-        if match and 1 <= int(match.group(1)) < 60:
-            return int(match.group(1))
-        return None
-
-    candidates = []
-    embedded = seconds(anchor["text"][len(prefix):])
-    if embedded is not None:
-        candidates.append((embedded, anchor))
-    for item in items:
-        if item is anchor:
-            continue
-        value = seconds(item["text"])
-        box, label_box = item["bbox"], anchor["bbox"]
-        # OCR boxes for the live timer can overlap the smaller heading by a
-        # few pixels even though the glyphs are on separate lines. Bound the
-        # overlap by their own text heights as well as 14 baseline pixels.
-        allowed_overlap = min(14, (label_box[3] - label_box[1]) * .40,
-                              (box[3] - box[1]) * .25)
-        if (value is not None and -allowed_overlap <= box[1] - label_box[3] <= height * .10
-                and abs((box[0] + box[2] - label_box[0] - label_box[2]) / 2) <= width * .07):
-            candidates.append((value, item))
     if len(candidates) != 1:
         return
+    anchor = anchors[0][0]
     value, timer = candidates[0]
     battle["countdown_seconds"] = value
     battle["countdown_evidence"] = {"frame": str(snapshot.screenshot_path), "label": anchor,

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from autococ.battle_vision import attach_preparation_countdown
+from autococ.battle_vision import attach_preparation_countdown, preparation_countdown_retry_candidate
 from autococ.scene import SceneSnapshot
 
 
@@ -146,3 +146,78 @@ def test_does_not_reuse_prior_timer():
         "battle": {"countdown_seconds": 30, "countdown_evidence": {"frame": "old.png"}}, "ocr": []})
     attach_preparation_countdown(frame)
     assert frame.observations["battle"] == {}
+
+
+def _line_recheck_fixture():
+    path = Path(__file__).parent / "fixtures" / "line_countdown_recheck_18_647_2_20261016.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_live_190802_cached_timer_provenance_when_available():
+    metadata = _line_recheck_fixture()
+    root = Path(r"E:\projects\AutoCOC")
+    events = root / metadata["source_events"]
+    if not events.is_file():
+        pytest.skip("Original local live evidence is unavailable")
+    assert hashlib.sha256(events.read_bytes()).hexdigest() == metadata["source_events_sha256"]
+    observations = [event for line in events.read_text(encoding="utf-8").splitlines()
+                    if (event := json.loads(line)).get("kind") == "observation"]
+    for frame in metadata["frames"]:
+        source = root / frame["source_frame"]
+        assert source.is_file()
+        assert hashlib.sha256(source.read_bytes()).hexdigest() == frame["source_sha256"]
+        (observation,) = [event for event in observations if Path(event["frame"]) == source]
+        retained = [item for item in observation["observations"]["ocr"]
+                    if item.get("text") in ("开战倒计时", "21秒", "18秒")
+                    and isinstance(item.get("bbox"), list) and len(item["bbox"]) == 4
+                    and 500 <= item["bbox"][0] < item["bbox"][2] <= 750
+                    and 0 <= item["bbox"][1] < item["bbox"][3] <= 100]
+        assert retained == frame["cached_ocr"]
+        assert observation["observations"]["observed_at_monotonic"] == frame["observed_at_monotonic"]
+
+
+def test_live_190802_weak_timer_only_qualifies_for_new_observation():
+    frames = _line_recheck_fixture()["frames"]
+    weak = SceneSnapshot("enemy_village", .92, Path(frames[0]["source_frame"]),
+                         {"battle": {}, "ocr": frames[0]["cached_ocr"]})
+    attach_preparation_countdown(weak)
+    assert "countdown_seconds" not in weak.observations["battle"]
+    candidate = preparation_countdown_retry_candidate(weak)
+    assert candidate is not None and candidate["reason"] == "unique_weak_timer"
+    assert candidate["timer"]["confidence"] == .87578
+    assert weak.observations["battle"] == {}  # A weak value never grants time.
+    later = SceneSnapshot("enemy_village", .92, Path(frames[1]["source_frame"]),
+                          {"battle": {}, "ocr": frames[1]["cached_ocr"]})
+    attach_preparation_countdown(later)
+    assert later.observations["battle"]["countdown_seconds"] == 18
+    assert preparation_countdown_retry_candidate(later) is None
+
+
+@pytest.mark.parametrize("change", ["duplicate_weak", "duplicate_strong", "duplicate_anchor",
+                                            "weak_label", "invalid_confidence", "wrong_scene",
+                                            "misaligned", "invalid_timer", "stale_evidence"])
+def test_weak_timer_diagnostic_rejects_ambiguous_or_untrusted_evidence(change):
+    frame = _line_recheck_fixture()["frames"][0]
+    ocr = [dict(item) for item in frame["cached_ocr"]]
+    scene, battle = "enemy_village", {}
+    if change == "duplicate_weak":
+        ocr.append(dict(ocr[1]))
+    elif change == "duplicate_strong":
+        ocr.append(item("20秒", (710, 40, 744, 76), .99))
+    elif change == "duplicate_anchor":
+        ocr.append(dict(ocr[0]))
+    elif change == "weak_label":
+        ocr[0]["confidence"] = .89
+    elif change == "invalid_confidence":
+        ocr[1]["confidence"] = float("nan")
+    elif change == "wrong_scene":
+        scene = "account_in_use"
+    elif change == "misaligned":
+        ocr[1]["bbox"] = [700, 35, 775, 78]
+    elif change == "invalid_timer":
+        ocr[1]["text"] = "??秒"
+    else:
+        battle = {"countdown_seconds": 21, "countdown_evidence": {
+            "frame": "old.png", "source": "current_frame_ocr", "confidence": .99}}
+    snapshot = SceneSnapshot(scene, .92, Path("weak.png"), {"battle": battle, "ocr": ocr})
+    assert preparation_countdown_retry_candidate(snapshot) is None

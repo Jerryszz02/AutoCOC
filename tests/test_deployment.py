@@ -866,6 +866,166 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual([call.kwargs.get("purpose") for call in session.observe.call_args_list
                           if call.args[0] == "line-zoom-probe"], ["settlement", "settlement"])
 
+    def _countdown_recheck_session(self, *, second="strong", countdown=24):
+        from autococ.battle_vision import attach_preparation_countdown
+
+        fixture = json.loads((Path(__file__).parent / "fixtures" /
+                              "line_countdown_recheck_18_647_2_20261016.json").read_text(encoding="utf-8"))
+        session = self._continuous_zoom_session(countdown=countdown)
+        original = session.observe_hook
+
+        def hook(label, frame):
+            frame = original(label, frame)
+            if label in {"line-zoom-verified", "line-countdown-recheck"}:
+                frame.observations["battle"].pop("countdown_seconds", None)
+                frame.observations["battle"].pop("countdown_evidence", None)
+                frame.observations["ocr"] = deepcopy(fixture["frames"][0 if label == "line-zoom-verified"
+                                                                      or second == "weak" else 1]["cached_ocr"])
+                attach_preparation_countdown(frame)
+            return frame
+
+        session.observe_hook = hook
+        return session
+
+    def _prepare_recheck(self, session, receipt=None):
+        terrain = [{"edge": 0, "point": [450, 210]}, {"edge": 1, "point": [300, 370]}]
+        self.camera_motion.return_value = self._motion()
+        with patch("autococ.battle_vision.selected_card_bbox", return_value=[177, 587, 253, 703]), \
+             patch("autococ.deployment._verified_line_card_reading",
+                   return_value={"count": 10, "portrait_score": .99}), \
+             patch("autococ.terrain.find_line_deployment_edges", return_value=terrain):
+            return _prepare_two_edge_view(session, session.scout, receipt or {"evidence": []},
+                                          capture_context={})
+
+    def test_countdown_recheck_uses_new_strict_frame_and_only_one_full_observe(self):
+        session = self._countdown_recheck_session()
+        session.observe = Mock(wraps=session.observe)
+        receipt, context = {"evidence": []}, {}
+        self.camera_motion.return_value = self._motion()
+        with patch("autococ.battle_vision.selected_card_bbox", return_value=[177, 587, 253, 703]), \
+             patch("autococ.deployment._verified_line_card_reading",
+                   return_value={"count": 10, "portrait_score": .99}), \
+             patch("autococ.terrain.find_line_deployment_edges", return_value=[{"edge": 0}, {"edge": 1}]):
+            current, _ = _prepare_two_edge_view(session, session.scout, receipt, capture_context=context)
+        rechecked = session.frames[-2]
+        self.assertIs(context["toolbar_before"], rechecked)
+        self.assertEqual(receipt["minimum_zoom"]["frame"], str(rechecked.screenshot_path))
+        self.assertEqual(receipt["countdown_recheck"]["frame"], str(rechecked.screenshot_path))
+        self.assertEqual(receipt["countdown_recheck"]["countdown_evidence"]["frame"], str(rechecked.screenshot_path))
+        self.assertEqual([call.args[0] for call in session.observe.call_args_list].count("line-countdown-recheck"), 1)
+        self.assertEqual(session.native.zoom_out.call_count, 1)
+        self.assertEqual(len(session.taps), 1)  # Only the original boundary-reveal selection.
+        self.assertEqual(session.taps[0][0], rechecked)
+
+    def test_countdown_recheck_twice_weak_stops_without_selection(self):
+        session = self._countdown_recheck_session(second="weak")
+        session.observe = Mock(wraps=session.observe)
+        with self.assertRaisesRegex(FlowError, "Current preparation countdown is unavailable"):
+            self._prepare_recheck(session)
+        self.assertEqual([call.args[0] for call in session.observe.call_args_list].count("line-countdown-recheck"), 1)
+        self.assertEqual(session.native.zoom_out.call_count, 1)
+        self.assertEqual(session.taps, [])
+
+    def test_countdown_recheck_second_frame_conflict_cannot_grant_time(self):
+        session = self._countdown_recheck_session()
+        original = session.observe_hook
+
+        def conflict(label, frame):
+            frame = original(label, frame)
+            if label == "line-countdown-recheck":
+                frame.observations["ocr"].append({"text": "17秒", "confidence": .99,
+                                                    "bbox": [602, 38, 680, 78]})
+                from autococ.battle_vision import attach_preparation_countdown
+                attach_preparation_countdown(frame)
+            return frame
+
+        session.observe_hook = conflict
+        with self.assertRaisesRegex(FlowError, "Current preparation countdown is unavailable"):
+            self._prepare_recheck(session)
+        self.assertEqual(session.taps, [])
+
+    def test_countdown_recheck_never_extends_original_preview_end(self):
+        session = self._countdown_recheck_session(countdown=10)
+        original = session.observe_hook
+
+        def slow_recheck(label, frame):
+            frame = original(label, frame)
+            if label == "line-countdown-recheck":
+                self.clock.advance(1)
+            return frame
+
+        session.observe_hook = slow_recheck
+        session.observe = Mock(wraps=session.observe)
+        with self.assertRaisesRegex(FlowError, "Preview time expired during countdown recheck"):
+            self._prepare_recheck(session)
+        self.assertEqual([call.args[0] for call in session.observe.call_args_list].count("line-countdown-recheck"), 1)
+        self.assertEqual(session.taps, [])
+
+    def test_countdown_recheck_rejects_conflict_and_stale_evidence_before_retry(self):
+        for change in ("second_strong_timer", "duplicate_anchor", "stale_evidence"):
+            with self.subTest(change=change):
+                session = self._countdown_recheck_session()
+                original = session.observe_hook
+
+                def conflict(label, frame):
+                    frame = original(label, frame)
+                    if label == "line-zoom-verified":
+                        if change == "second_strong_timer":
+                            frame.observations["ocr"].append({"text": "20秒", "confidence": .99,
+                                                                "bbox": [710, 40, 744, 76]})
+                        elif change == "duplicate_anchor":
+                            frame.observations["ocr"].append(deepcopy(frame.observations["ocr"][0]))
+                        else:
+                            frame.observations["battle"]["countdown_seconds"] = 21
+                            frame.observations["battle"]["countdown_evidence"] = {
+                                "frame": "stale.png", "source": "current_frame_ocr", "confidence": .99}
+                    return frame
+
+                session.observe_hook = conflict
+                session.observe = Mock(wraps=session.observe)
+                with self.assertRaisesRegex(FlowError, "Current preparation countdown is unavailable"):
+                    self._prepare_recheck(session)
+                self.assertFalse(any(call.args[0] == "line-countdown-recheck"
+                                     for call in session.observe.call_args_list))
+                self.assertEqual(session.taps, [])
+
+    def test_countdown_recheck_rejects_deadlines_scene_camera_and_reused_frame(self):
+        for change in ("pre_deadline", "post_deadline", "account_popup", "camera_move",
+                       "same_path", "old_capture_time"):
+            with self.subTest(change=change):
+                session = self._countdown_recheck_session()
+                if change == "pre_deadline":
+                    session.task_deadline = self.clock.now + 7
+                if change == "post_deadline":
+                    session.deadline = self.clock.now + 15
+                original = session.observe_hook
+
+                def alter(label, frame):
+                    frame = original(label, frame)
+                    if label == "line-countdown-recheck":
+                        if change == "post_deadline":
+                            self.clock.advance(8)
+                        elif change == "account_popup":
+                            frame = replace(frame, scene="account_in_use")
+                        elif change == "same_path":
+                            frame = replace(frame, screenshot_path=session.frames[-1].screenshot_path)
+                        elif change == "old_capture_time":
+                            frame.observations["observed_at_monotonic"] = session.frames[-1].observations[
+                                "observed_at_monotonic"]
+                    return frame
+
+                session.observe_hook = alter
+                session.observe = Mock(wraps=session.observe)
+                if change == "camera_move":
+                    self.camera_motion.side_effect = [self._motion(), self._motion(), self._motion(.99)]
+                else:
+                    self.camera_motion.side_effect = None
+                with self.assertRaises(FlowError):
+                    self._prepare_recheck(session)
+                count = sum(call.args[0] == "line-countdown-recheck" for call in session.observe.call_args_list)
+                self.assertEqual(count, 0 if change == "pre_deadline" else 1)
+                self.assertEqual(session.taps, [])
+
     def test_continuous_zoom_rejects_short_preview_before_any_gesture(self):
         session = self._continuous_zoom_session(countdown=4)
         with self.assertRaisesRegex(FlowError, "Preview time is insufficient"):
