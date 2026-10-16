@@ -12,7 +12,7 @@ S/R 训练配方现固定为版本 2：头部阶段冻结主干参数和 BatchNo
 | --- | --- | --- |
 | [VISION_AGENT_PLAN.md](VISION_AGENT_PLAN.md) | 产品执行边界、准备/连续投放时间契约、M0–M7 里程碑 | 首版非训练实现及 M2 工具已有；正式数据、M5/M6 和 M7 仍有未完成项 |
 | [VISION_DATA_COLLECTION_PLAN.md](VISION_DATA_COLLECTION_PLAN.md) | 素材矩阵、标签、时序、分组拆分、D0–D4 和跨机交接 | 146 张历史候选图保留；另有版本明确的新采集和 agent_visual 原型快照，正式人工复核、覆盖及冻结未完成 |
-| [VISION_MODEL_TRAINING_PLAN.md](VISION_MODEL_TRAINING_PLAN.md) | S/B 必训模型、R/U 增强模型、训练/导出/评估、T0–T6 | S/B 原型冒烟与开发训练已有实录；R/U 离线工具及合成集成已有，正式数据、质量准入和实战未完成 |
+| [VISION_MODEL_TRAINING_PLAN.md](VISION_MODEL_TRAINING_PLAN.md) | S/B 必训模型、R/U 增强模型、训练/导出/评估、T0–T6 | S/B、R-card 原型实际训练/导出已有实录；R-card val 事件仍漏检，U 尚无真实权重；正式数据、质量准入和实战未完成 |
 
 配置与已实现的接口分别以[战前视觉规划说明](../VISION_AGENT.md)、[模型包接口](../MODEL_PACKAGE.md)、[连续投放运行契约](../VISION_AGENT_RUNTIME.md)为准。数据与训练的实际命令见[工具说明](../../training/vision/README.md)；计划目标不等于正式验收结果。
 
