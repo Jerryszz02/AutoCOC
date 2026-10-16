@@ -39,7 +39,8 @@ class BattleVisionTests(unittest.TestCase):
 
     def observe(self, image=None, purpose="troop_count"):
         return self.reader.recognize_battle(self.write("after", self.image if image is None else image),
-            purpose=purpose, slot=self.slot if purpose == "troop_count" else None, previous=self.previous)
+            purpose=purpose, slot=self.slot if purpose in {"troop_count", "mixed_selection_wait"} else None,
+            previous=self.previous)
 
     def test_current_count_is_read_without_full_ocr_and_not_copied(self):
         snapshot = self.observe()
@@ -72,6 +73,59 @@ class BattleVisionTests(unittest.TestCase):
             with self.subTest(reads=reads):
                 self.provider.recognize_line_image.return_value = reads
                 self.assertTrue(self.observe().observations["fast_fallback"])
+
+    def test_mixed_selection_weak_or_missing_count_waits_without_full_ocr(self):
+        for reads in ([], [OCRText("x1", .89)], [OCRText("xO", .99)],
+                      [OCRText("x1", float("nan"))]):
+            with self.subTest(reads=reads):
+                self.provider.recognize_line_image.return_value = reads
+                frame = self.observe(purpose="mixed_selection_wait")
+                self.assertEqual(frame.scene, "battle")
+                self.assertEqual(frame.observations["matched_reasons"], ["two_current_hud_anchors"])
+                self.assertEqual(frame.observations["ocr"], [])
+                self.assertNotIn("deployment_count_reads", frame.observations)
+                self.assertEqual(frame.observations["deployment_count_pending"], {
+                    "frame": str(frame.screenshot_path), "slot_bbox": self.slot["bbox"],
+                    "purpose": "mixed_selection_wait", "reason": "current_frame_count_unavailable"})
+                self.reader.recognize.assert_not_called()
+
+    def test_mixed_selection_strong_conflict_and_invalid_count_cannot_wait(self):
+        self.provider.recognize_line_image.return_value = [OCRText("x0", .97), OCRText("x2", .98)]
+        conflict = self.observe(purpose="mixed_selection_wait")
+        self.assertEqual(conflict.scene, "unknown")
+        self.assertEqual(conflict.observations["deployment_count_conflict"]["counts"], [0, 2])
+        self.assertNotIn("deployment_count_pending", conflict.observations)
+        self.reader.recognize.assert_not_called()
+        self.reader.battle_observer.count = Mock(return_value={"count": -1, "confidence": .99,
+                                                              "readings": [{"text": "x-1"}]})
+        invalid = self.observe(purpose="mixed_selection_wait")
+        self.assertEqual(invalid.scene, "unknown")
+        self.assertEqual(invalid.observations["matched_reasons"], ["mixed_selection_invalid_count"])
+        self.assertNotIn("deployment_count_pending", invalid.observations)
+
+    def test_mixed_selection_strong_count_retains_fast_evidence(self):
+        self.provider.recognize_line_image.return_value = [OCRText("x1", .99)]
+        frame = self.observe(purpose="mixed_selection_wait")
+        self.assertEqual(frame.observations["deployment_count_reads"][0]["count"], 1)
+        self.assertNotIn("deployment_count_pending", frame.observations)
+        self.reader.recognize.assert_not_called()
+
+    def test_mixed_selection_guard_failure_and_missing_slot_cannot_wait(self):
+        dimmed = self.observe(np.uint8(self.image * .6), purpose="mixed_selection_wait")
+        self.assertEqual(dimmed.scene, "unknown")
+        self.assertEqual(dimmed.observations["matched_reasons"], ["mixed_selection_guard_unverified"])
+        self.assertNotIn("deployment_count_pending", dimmed.observations)
+        modal = self.image.copy()
+        modal[200:400, 400:850] = 190
+        self.assertEqual(self.observe(modal, purpose="mixed_selection_wait").scene, "unknown")
+        cloud = self.image.copy()
+        cloud[150:490, 240:1050] = 255
+        self.assertEqual(self.observe(cloud, purpose="mixed_selection_wait").scene, "unknown")
+        with self.assertRaises(ValueError):
+            self.reader.recognize_battle(self.previous.screenshot_path,
+                                         purpose="mixed_selection_wait", slot=None,
+                                         previous=self.previous)
+        self.reader.recognize.assert_not_called()
 
     def test_dimmed_popup_and_clouds_cannot_authorize_input(self):
         images = [np.uint8(self.image * .6), self.image.copy(), self.image.copy()]

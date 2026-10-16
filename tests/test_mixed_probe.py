@@ -51,6 +51,8 @@ def snapshot(tmp_path, name, scene, observed, *, fast=None):
     if fast:
         observations.update(recognition_scope=fast, fast_fallback=False,
                             matched_reasons=["two_current_hud_anchors"])
+        if fast == "mixed_selection_wait":
+            observations["deployment_count_reads"] = [{"count": 1}]
     return SceneSnapshot(scene, .99, path, observations)
 
 
@@ -224,9 +226,9 @@ def test_real_anonymous_furnace_toolbar_proves_unspent_checkpoint_without_new_oc
 
 def test_mixed_two_independent_selections_and_consumptions(monkeypatch, tmp_path):
     plan, source = make_plan(monkeypatch, tmp_path)
-    selected_balloon = snapshot(tmp_path, "balloon-selected", "enemy_village", 10.1, fast="troop_count")
+    selected_balloon = snapshot(tmp_path, "balloon-selected", "enemy_village", 10.1, fast="mixed_selection_wait")
     spent_balloon = snapshot(tmp_path, "balloon-spent", "battle", 10.2, fast="battle_hud")
-    selected_dragon = snapshot(tmp_path, "dragon-selected", "battle", 10.3, fast="troop_count")
+    selected_dragon = snapshot(tmp_path, "dragon-selected", "battle", 10.3, fast="mixed_selection_wait")
     spent_dragon = snapshot(tmp_path, "dragon-spent", "battle", 10.4, fast="battle_hud")
     final = snapshot(tmp_path, "full-final", "battle", 10.5)
     session = Session(source, [selected_balloon, spent_balloon, selected_dragon, spent_dragon, final])
@@ -263,7 +265,7 @@ def test_first_post_strong_count_two_stops_before_new_frame_or_second_card(monke
     from autococ import mixed_probe
 
     plan, source = make_plan(monkeypatch, tmp_path)
-    selected = snapshot(tmp_path, "first-selected", "enemy_village", 10.1, fast="troop_count")
+    selected = snapshot(tmp_path, "first-selected", "enemy_village", 10.1, fast="mixed_selection_wait")
     wrong = snapshot(tmp_path, "first-wrong-x2", "battle", 10.2, fast="battle_hud")
     later_zero = snapshot(tmp_path, "later-x0", "battle", 10.3, fast="battle_hud")
     session = Session(source, [selected, wrong, later_zero])
@@ -293,9 +295,9 @@ def test_first_post_strong_count_two_stops_before_new_frame_or_second_card(monke
 def test_mixed_expired_proof_never_authorizes_another_input(monkeypatch, tmp_path,
                                                              expired_at, elapsed, expected_inputs):
     plan, source = make_plan(monkeypatch, tmp_path)
-    frames = [snapshot(tmp_path, "timed-selected-a", "enemy_village", 10.1, fast="troop_count"),
+    frames = [snapshot(tmp_path, "timed-selected-a", "enemy_village", 10.1, fast="mixed_selection_wait"),
               snapshot(tmp_path, "timed-spent-a", "battle", 10.2, fast="battle_hud"),
-              snapshot(tmp_path, "timed-selected-b", "battle", 10.3, fast="troop_count"),
+              snapshot(tmp_path, "timed-selected-b", "battle", 10.3, fast="mixed_selection_wait"),
               snapshot(tmp_path, "timed-spent-b", "battle", 10.4, fast="battle_hud"),
               snapshot(tmp_path, "timed-final", "battle", 10.5)]
     session = Session(source, frames)
@@ -331,9 +333,9 @@ def test_mixed_expired_proof_never_authorizes_another_input(monkeypatch, tmp_pat
 def test_mixed_failures_do_not_repeat_input_or_start_remainder(monkeypatch, tmp_path,
                                                                 failure, expected_inputs):
     plan, source = make_plan(monkeypatch, tmp_path)
-    frames = [snapshot(tmp_path, "selected-a", "enemy_village", 10.1, fast="troop_count"),
+    frames = [snapshot(tmp_path, "selected-a", "enemy_village", 10.1, fast="mixed_selection_wait"),
               snapshot(tmp_path, "spent-a", "battle", 10.2, fast="battle_hud"),
-              snapshot(tmp_path, "selected-b", "battle", 10.3, fast="troop_count"),
+              snapshot(tmp_path, "selected-b", "battle", 10.3, fast="mixed_selection_wait"),
               snapshot(tmp_path, "spent-b", "battle", 10.4, fast="battle_hud"),
               snapshot(tmp_path, "final-b", "battle", 10.5)]
     session = Session(source, frames)
@@ -481,7 +483,7 @@ def test_pending_selection_only_reobserves_within_existing_budget(
         monkeypatch, tmp_path, outcome, selected_frames, expected_inputs):
     plan, source = make_plan(monkeypatch, tmp_path)
     selected = [snapshot(tmp_path, f"selected-{index}", "enemy_village",
-                         10.1 + index * .1, fast="troop_count")
+                         10.1 + index * .1, fast="mixed_selection_wait")
                 for index in range(selected_frames)]
     posts = [snapshot(tmp_path, f"post-{index}", "battle", 10.5 + index * .1,
                       fast="battle_hud") for index in range(2)] if outcome == "resolved" else []
@@ -530,6 +532,7 @@ def test_pending_selection_only_reobserves_within_existing_budget(
     assert session.frozen_line_receipt["actions"][0]["pending_frames"][0] == {
         "frame": str(selected[0].screenshot_path),
         "sha256": _file_sha256(selected[0].screenshot_path),
+        "status": "count_proven_border_pending",
         "message": "closed card border pending"}
     if outcome == "resolved":
         assert session.inputs[1] == ("tap", plan.anchors[0])
@@ -541,3 +544,81 @@ def test_pending_selection_only_reobserves_within_existing_budget(
         assert session.last_snapshot is selected[0]
     else:
         assert session.last_snapshot is selected[1]
+
+
+@pytest.mark.parametrize("outcome,expected_inputs", [
+    ("pending_then_valid", 2), ("always_pending", 1), ("malformed_pending", 1),
+    ("strong_wrong_count", 1), ("guard_failed", 1), ("camera_changed", 1),
+    ("expired", 1), ("wrong_purpose", 1)])
+def test_unproved_mixed_selection_never_reuses_a_count_or_repeats_select(
+        monkeypatch, tmp_path, outcome, expected_inputs):
+    plan, source = make_plan(monkeypatch, tmp_path)
+    selected = [snapshot(tmp_path, f"unproved-{index}", "enemy_village",
+                         10.1 + index * .1, fast="mixed_selection_wait")
+                for index in range(3)]
+    for frame in selected:
+        frame.observations.pop("deployment_count_reads")
+        frame.observations["deployment_count_pending"] = {
+            "frame": str(frame.screenshot_path), "slot_bbox": list(plan.balloon_bbox),
+            "purpose": "mixed_selection_wait", "reason": "current_frame_count_unavailable"}
+    if outcome == "pending_then_valid":
+        selected[1].observations.pop("deployment_count_pending")
+        selected[1].observations["deployment_count_reads"] = [{"count": 1}]
+    elif outcome == "malformed_pending":
+        selected[0].observations["deployment_count_pending"]["frame"] = "stale.png"
+    elif outcome == "strong_wrong_count":
+        selected[0].observations.pop("deployment_count_pending")
+        selected[0].observations["deployment_count_reads"] = [{"count": 2}]
+    elif outcome == "guard_failed":
+        selected[0].observations["matched_reasons"] = ["mixed_selection_guard_unverified"]
+        selected[0] = replace(selected[0], scene="unknown")
+    elif outcome == "wrong_purpose":
+        selected[0].observations["recognition_scope"] = "troop_count"
+    post = snapshot(tmp_path, "unproved-post", "battle", 10.5, fast="battle_hud")
+    session = Session(source, selected + [post])
+    now = {"value": 10.}
+    requested_purposes = []
+    original_observe = session.observe
+
+    def observe(label, **kwargs):
+        requested_purposes.append(kwargs.get("purpose"))
+        frame = original_observe(label, **kwargs)
+        if outcome == "expired":
+            now["value"] = 13.1
+        return frame
+
+    session.observe = observe
+
+    def current(_session, _plan, frame, **_kwargs):
+        if outcome == "camera_changed" and frame is selected[0]:
+            raise FlowError("camera proof changed")
+        return proof(frame)
+
+    monkeypatch.setattr("autococ.mixed_probe._current_frame", current)
+    monkeypatch.setattr("autococ.mixed_probe._foreground_now", lambda _s: None)
+    count_calls = []
+
+    def count(_session, _plan, frame, _unit_id, expected, **_kwargs):
+        count_calls.append(frame)
+        if frame is selected[1]:
+            return {"count": expected}
+        raise FlowError("post proof unavailable")
+
+    monkeypatch.setattr("autococ.mixed_probe._probe_count", count)
+    with pytest.raises(DeploymentError):
+        execute_mixed_probe_line(session, plan, clock=lambda: now["value"],
+                                 sleep=lambda _s: None)
+    assert len(session.inputs) == expected_inputs
+    assert session.inputs.count(("tap", plan.balloon_point)) == 1
+    assert not any(kind == "frozen" for kind, _point in session.inputs)
+    assert requested_purposes[0] == "mixed_selection_wait"
+    if outcome == "pending_then_valid":
+        assert count_calls == [selected[1]]
+        assert session.inputs[1] == ("tap", plan.anchors[0])
+        assert session.frozen_line_receipt["actions"][0]["pending_frames"][0]["status"] == \
+               "count_unproved_waiting"
+    elif outcome == "always_pending":
+        assert len(session.frozen_line_receipt["actions"][0]["pending_frames"]) == 3
+        assert count_calls == []
+    else:
+        assert count_calls == []

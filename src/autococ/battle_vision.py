@@ -409,7 +409,8 @@ class BattleObserver:
         guarded_at = time.monotonic()
         reading = None
         self.last_count_diagnostic = None
-        if guarded is not None and purpose == "troop_count" and slot is not None:
+        selection_wait = purpose == "mixed_selection_wait"
+        if guarded is not None and purpose in {"troop_count", "mixed_selection_wait"} and slot is not None:
             reading = self.count(path, image, slot)
         count_at = time.monotonic()
         timings = {"prepare": decoded - started, "guard": guarded_at - decoded,
@@ -426,6 +427,32 @@ class BattleObserver:
                 "deployment_count_conflict": reading,
                 "deployment_count_reads": [reading], "buttons": [], "ocr": [],
                 "battle": {"slots": []}, "matched_reasons": ["strong_count_conflict"],
+            })
+        if selection_wait and reading is not None and (
+                not isinstance(reading, dict) or type(reading.get("count")) is not int or
+                reading["count"] < 0 or
+                type(reading.get("confidence")) not in (int, float) or
+                not math.isfinite(reading["confidence"]) or reading["confidence"] < .9 or
+                not isinstance(reading.get("readings"), list) or not reading["readings"]):
+            return SceneSnapshot("unknown", 0.0, path, {
+                "recognition_scope": purpose, "fast_fallback": False,
+                "recognition_seconds": time.monotonic() - started,
+                "recognition_timings_sec": timings,
+                "source_resolution": [width, height],
+                "baseline_resolution": list(self.recognizer.baseline_resolution),
+                "buttons": [], "ocr": [], "battle": {"slots": []},
+                "matched_reasons": ["mixed_selection_invalid_count"],
+            })
+        if selection_wait and (guarded is None or slot is None):
+            return SceneSnapshot("unknown", 0.0, path, {
+                "recognition_scope": purpose, "fast_fallback": False,
+                "recognition_seconds": time.monotonic() - started,
+                "recognition_timings_sec": timings,
+                "source_resolution": [width, height],
+                "baseline_resolution": list(self.recognizer.baseline_resolution),
+                "cloud_cover": cloud, "modal_visible": modal,
+                "buttons": [], "ocr": [], "battle": {"slots": []},
+                "matched_reasons": ["mixed_selection_guard_unverified"],
             })
         if guarded is None or (purpose == "troop_count" and reading is None):
             snapshot = self.recognizer.recognize(path)
@@ -449,6 +476,13 @@ class BattleObserver:
             "cloud_cover": cloud, "buttons": [], "ocr": [], "battle": {"slots": []},
             "matched_reasons": ["two_current_hud_anchors"],
         })
+        if selection_wait and reading is None:
+            # This frame proves only the scene guard. It is not a count, a
+            # selected card, or permission to issue any input.
+            snapshot.observations["deployment_count_pending"] = {
+                "frame": str(path), "slot_bbox": list(slot["bbox"]),
+                "purpose": purpose, "reason": "current_frame_count_unavailable"}
+            return snapshot
         if reading is not None:
             snapshot.observations["deployment_count_reads"] = [reading]
             snapshot.observations["ocr"] = reading["readings"]
