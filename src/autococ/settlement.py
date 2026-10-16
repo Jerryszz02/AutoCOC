@@ -1,5 +1,6 @@
 """Positive image evidence for earned stars and the observed reward panel."""
 
+import math
 from pathlib import Path
 
 
@@ -10,6 +11,84 @@ BONUS_TEMPLATE_CROPS = {
     "elixir": (1007, 385, 1036, 418),
     "dark_elixir": (1007, 421, 1036, 454),
 }
+
+
+def _split_star_notch(contour, polygon, defects, width: int, height: int,
+                      origin: tuple[int, int]) -> dict | None:
+    """Identify one short extra tip that divides a single deep star notch.
+
+    The current victory animation can put six convex tips and six concavities
+    on a five-point silhouette. Both close pairs and the remaining angular
+    distribution must agree; a six-point star or a weak/missing tip does not.
+    """
+    import cv2
+
+    # Only the smaller side-star silhouette showed this animation. An
+    # incomplete enlarged centre star can also grow six notches after a tip
+    # is covered, but it is not evidence for a second earned star.
+    if (len(polygon) != 12 or defects is None or len(defects) != 6 or
+            not 110 <= width <= 140 or not 105 <= height <= 135):
+        return None
+    minimum = min(width, height)
+    if any(float(row[3]) / 256 < minimum * .09 for row in defects[:, 0]):
+        return None
+    moments = cv2.moments(contour)
+    if moments["m00"] <= 0:
+        return None
+    center = moments["m10"] / moments["m00"], moments["m01"] / moments["m00"]
+
+    def angular_points(points):
+        return sorted((math.atan2(float(point[1]) - center[1],
+                                  float(point[0]) - center[0]) % (2 * math.pi),
+                       (int(point[0]), int(point[1]))) for point in points)
+
+    valleys = angular_points([polygon[int(row[2])][0] for row in defects[:, 0]])
+    tips = angular_points(cv2.convexHull(polygon)[:, 0])
+    if len(tips) != 6:
+        return None
+
+    def close_pairs(points, max_angle: float, max_distance: float):
+        return [(index, gap) for index, (angle, point) in enumerate(points)
+                if (gap := (points[(index + 1) % len(points)][0] - angle) % (2 * math.pi)) <= max_angle
+                and math.dist(point, points[(index + 1) % len(points)][1]) <= max_distance]
+
+    valley_pairs = close_pairs(valleys, math.radians(30), minimum * .18)
+    tip_pairs = close_pairs(tips, math.radians(35), minimum * .27)
+    if len(valley_pairs) != 1 or len(tip_pairs) != 1:
+        return None
+    valley_index, valley_gap = valley_pairs[0]
+    tip_index, _ = tip_pairs[0]
+    # The short tip must lie in the same angular sector as the doubled notch.
+    valley_mid = (valleys[valley_index][0] + valley_gap / 2) % (2 * math.pi)
+    tip_gap = (tips[(tip_index + 1) % 6][0] - tips[tip_index][0]) % (2 * math.pi)
+    tip_mid = (tips[tip_index][0] + tip_gap / 2) % (2 * math.pi)
+    if abs((valley_mid - tip_mid + math.pi) % (2 * math.pi) - math.pi) > math.radians(30):
+        return None
+    paired = valleys[valley_index][1], valleys[(valley_index + 1) % 6][1]
+    if (min(point[0] for point in paired) <= center[0] + minimum * .1 or
+            max(point[1] for point in paired) >= center[1] - minimum * .1):
+        return None  # The observed side-star split is confined to its upper-right notch.
+    grouped = [(angle, point) for index, (angle, point) in enumerate(valleys)
+               if index not in {valley_index, (valley_index + 1) % 6}]
+    grouped.append((valley_mid, (round((paired[0][0] + paired[1][0]) / 2),
+                                 round((paired[0][1] + paired[1][1]) / 2))))
+    grouped.sort()
+    gaps = [(grouped[(index + 1) % 5][0] - angle) % (2 * math.pi)
+            for index, (angle, _) in enumerate(grouped)]
+    if any(not math.radians(40) <= gap <= math.radians(105) for gap in gaps):
+        return None
+
+    def placed(point):
+        return [point[0] + origin[0], point[1] + origin[1]]
+
+    return {"raw_valleys_at_1280x720": [placed(point) for _, point in valleys],
+            "grouped_valleys_at_1280x720": [placed(point) for _, point in grouped],
+            "merged_valleys_at_1280x720": [placed(point) for point in paired],
+            "short_tip_pair_at_1280x720": [placed(tips[tip_index][1]),
+                                           placed(tips[(tip_index + 1) % 6][1])],
+            "valley_gap_degrees": round(math.degrees(valley_gap), 3),
+            "valley_gap_pixels": round(math.dist(*paired), 3),
+            "remaining_gaps_degrees": [round(math.degrees(gap), 3) for gap in gaps]}
 
 
 def locate_number_line(image, roi: tuple[int, int, int, int]) -> tuple[int, int, int, int] | None:
@@ -88,10 +167,15 @@ def recognize_earned_stars(image) -> dict:
         defects = cv2.convexityDefects(polygon, cv2.convexHull(polygon, returnPoints=False))
         depths = [] if defects is None else [float(item[0][3]) / 256 for item in defects]
         deep_concavities = sum(depth >= min(width, height) * .09 for depth in depths)
+        merged_notch = (_split_star_notch(contour, polygon, defects, width, height,
+                                          (left, top))
+                        if deep_concavities == 6 else None)
         complete = (.35 <= area / (width * height) <= .6 and .5 <= solidity <= .8
-                    and 10 <= len(polygon) <= 12 and deep_concavities == 5)
+                    and 10 <= len(polygon) <= 12 and
+                    (deep_concavities == 5 or merged_notch is not None))
         shape.update(verified=complete, solidity=solidity, polygon_vertices=len(polygon),
-                     polygon_approximation=approximation, concavity_depths=depths)
+                     polygon_approximation=approximation, concavity_depths=depths,
+                     merged_concavity_pair=merged_notch)
         valid = valid and complete
     shapes = evidence["shapes"]
     # An unexplained large fragment may be a second, occluded star. Never silently

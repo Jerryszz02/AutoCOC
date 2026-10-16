@@ -43,6 +43,129 @@ class EarnedStarShapeTests(unittest.TestCase):
         image[20:220, 430:845] = crop
         return image
 
+    def split_concavity_two_star_region(self, number: int) -> np.ndarray:
+        crop = cv2.imdecode(np.fromfile(
+            self.root / f"tests/fixtures/settlement-two-stars-233306-{number:05d}.png",
+            dtype=np.uint8), cv2.IMREAD_COLOR)
+        image = np.zeros((720, 1280, 3), np.uint8)
+        image[20:220, 430:845] = crop
+        return image
+
+    def test_current_two_star_split_concavity_is_one_complete_notch(self):
+        metadata = json.loads((self.root / "tests/fixtures/settlement-two-stars-233306.provenance.json")
+                              .read_text(encoding="utf-8"))
+        self.assertEqual(metadata["client_version"], "18.647.2")
+        self.assertFalse(metadata["human_ground_truth"])
+        self.assertFalse(metadata["formal_success"])
+        self.assertEqual(len(metadata["fixtures"]), 2)
+        for number, sample in zip((60, 61), metadata["fixtures"]):
+            with self.subTest(frame=number):
+                fixture = self.root / "tests/fixtures" / sample["fixture"]
+                self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(),
+                                 sample["fixture_sha256"])
+                image = self.split_concavity_two_star_region(number)
+                result = recognize_earned_stars(image)
+                self.assertEqual(result["count"], 2)
+                self.assertTrue(all(shape["verified"] for shape in result["evidence"]["shapes"]))
+                left = min(result["evidence"]["shapes"], key=lambda shape: shape["bbox_at_1280x720"][0])
+                self.assertEqual(len(left["concavity_depths"]), 6)
+                merge = left["merged_concavity_pair"]
+                self.assertIsNotNone(merge)
+                self.assertEqual(len(merge["raw_valleys_at_1280x720"]), 6)
+                self.assertEqual(len(merge["grouped_valleys_at_1280x720"]), 5)
+                self.assertEqual(len(merge["merged_valleys_at_1280x720"]), 2)
+                self.assertLess(merge["valley_gap_pixels"], 21.5)
+                cached = [OCRText(item["text"], item["confidence"], tuple(item["bbox"]))
+                          for item in sample["cached_result_ocr"]]
+                with TemporaryDirectory() as directory:
+                    path = Path(directory) / "masked-stars.png"
+                    cv2.imencode(".png", image)[1].tofile(path)
+                    observation = ScreenshotRecognizer(provider=Mock())._settlement_observation(
+                        path, cached, (1280, 720))
+                self.assertEqual(observation["stars"], 2)
+
+    def test_current_two_star_split_source_provenance_when_available(self):
+        metadata = json.loads((self.root / "tests/fixtures/settlement-two-stars-233306.provenance.json")
+                              .read_text(encoding="utf-8"))
+        sources = [(Path(sample["source_frame"]), Path(sample["source_events"]))
+                   for sample in metadata["fixtures"]]
+        if any(not original.is_file() or not event_path.is_file()
+               for original, event_path in sources):
+            self.skipTest("Original local live evidence is unavailable")
+        for sample, (original, event_path) in zip(metadata["fixtures"], sources):
+            with self.subTest(source=sample["source_frame"]):
+                self.assertEqual(hashlib.sha256(original.read_bytes()).hexdigest(),
+                                 sample["source_sha256"])
+                self.assertEqual(hashlib.sha256(event_path.read_bytes()).hexdigest(),
+                                 sample["source_events_sha256"])
+                native = cv2.imdecode(np.fromfile(original, dtype=np.uint8), cv2.IMREAD_COLOR)
+                baseline = cv2.resize(native, (1280, 720), interpolation=cv2.INTER_AREA)
+                fixture = self.root / "tests/fixtures" / sample["fixture"]
+                crop = cv2.imdecode(np.fromfile(fixture, dtype=np.uint8), cv2.IMREAD_COLOR)
+                expected = np.zeros((200, 415, 3), np.uint8)
+                for x0, y0, x1, y1 in metadata["retained_rectangles_at_1280x720"]:
+                    expected[y0 - 20:y1 - 20, x0 - 430:x1 - 430] = baseline[y0:y1, x0:x1]
+                self.assertTrue(np.array_equal(crop, expected))
+                observations = [json.loads(line) for line in event_path.read_text(encoding="utf-8").splitlines()
+                                if line.strip()]
+                matched = [row for row in observations if row.get("kind") == "observation"
+                           and row.get("frame") == str(original)]
+                self.assertEqual(len(matched), 1)
+                self.assertEqual([item for item in matched[0]["observations"]["ocr"]
+                                  if item.get("text") in {"胜利", "74%"}],
+                                 sample["cached_result_ocr"])
+
+    def test_split_concavity_does_not_accept_missing_tip_corner_or_six_point_shape(self):
+        source = self.split_concavity_two_star_region(60)
+        for name, box in (("missing_top_tip", (492, 78, 574, 140)),
+                          ("missing_left_tip", (455, 127, 485, 156)),
+                          ("missing_inner_corner", (470, 145, 530, 190)),
+                          ("partial_occlusion", (498, 124, 546, 163))):
+            with self.subTest(name=name):
+                image = source.copy()
+                x0, y0, x1, y1 = box
+                image[y0:y1, x0:x1] = 0
+                self.assertIsNone(recognize_earned_stars(image)["count"])
+        image = np.zeros_like(source)
+        vertices = []
+        for index in range(12):
+            angle = -math.pi / 2 + index * math.pi / 6
+            radius = 65 if index % 2 == 0 else 27
+            vertices.append([round(640 + radius * math.cos(angle)),
+                             round(125 + radius * math.sin(angle))])
+        cv2.fillPoly(image, [np.array(vertices, np.int32)], (240, 240, 240))
+        mask = cv2.inRange(cv2.cvtColor(image[20:220, 430:845], cv2.COLOR_BGR2HSV),
+                           np.array([0, 0, 140]), np.array([180, 75, 255]))
+        contour = max(cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0],
+                      key=cv2.contourArea)
+        polygon = cv2.approxPolyDP(contour, .02 * cv2.arcLength(contour, True), True)
+        defects = cv2.convexityDefects(polygon, cv2.convexHull(polygon, returnPoints=False))
+        self.assertEqual(len(defects), 6)
+        self.assertTrue(all(float(row[3]) / 256 >= 10 for row in defects[:, 0]))
+        self.assertIsNone(recognize_earned_stars(image)["count"])
+
+        # Two separately forked tips create seven deep notches. They cannot be
+        # explained by the one-short-tip animation seen in the source frames.
+        vertices = []
+        for index in range(5):
+            angle = -math.pi / 2 + index * 2 * math.pi / 5
+            tips = ((angle - math.radians(12), 60), (angle, 27),
+                    (angle + math.radians(12), 60)) if index in (0, 2) else ((angle, 60),)
+            for tip_angle, radius in (*tips, (angle + math.pi / 5, 27)):
+                vertices.append([round(640 + radius * math.cos(tip_angle)),
+                                 round(125 + radius * math.sin(tip_angle))])
+        image = np.zeros_like(source)
+        cv2.fillPoly(image, [np.array(vertices, np.int32)], (240, 240, 240))
+        mask = cv2.inRange(cv2.cvtColor(image[20:220, 430:845], cv2.COLOR_BGR2HSV),
+                           np.array([0, 0, 140]), np.array([180, 75, 255]))
+        contour = max(cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0],
+                      key=cv2.contourArea)
+        polygon = cv2.approxPolyDP(contour, .02 * cv2.arcLength(contour, True), True)
+        defects = cv2.convexityDefects(polygon, cv2.convexHull(polygon, returnPoints=False))
+        self.assertEqual(len(defects), 7)
+        self.assertTrue(all(float(row[3]) / 256 >= 10 for row in defects[:, 0]))
+        self.assertIsNone(recognize_earned_stars(image)["count"])
+
     def test_current_real_three_star_animation_keeps_all_complete_shapes(self):
         for number in range(43, 49):
             with self.subTest(frame=number):

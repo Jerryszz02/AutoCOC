@@ -1,0 +1,93 @@
+{
+  "client_version": "18.647.2",
+  "crop_xyxy_at_1280x720": [
+    430,
+    20,
+    845,
+    220
+  ],
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "human_ground_truth": false,
+  "formal_success": false,
+  "role": "development_star_silhouette_regression_only",
+  "transform": "cv2.resize native to 1280x720 INTER_AREA; black 415x200 star-ROI canvas; copy two fixed star rectangles; PNG lossless",
+  "fixtures": [
+    {
+      "fixture": "settlement-two-stars-233306-00060.png",
+      "fixture_sha256": "b28e0c9fd283a5e00d8a9b6000616a60898f7e16609bc2549e55db6a6850184a",
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-233306-977594-e53b9d92\\frames\\00060-battle-settlement-reread.png",
+      "source_sha256": "5212e67496e37f6166f6244c231a6cc6676750c25440816c755775a4e94736b7",
+      "source_events": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-233306-977594-e53b9d92\\events.jsonl",
+      "source_events_sha256": "781eb8531d86b1d90b79d9f006c7b07440f8aae166b9f9e8f2c9329f7be0de37",
+      "cached_result_ocr": [
+        {
+          "text": "74%",
+          "confidence": 0.99371,
+          "bbox": [
+            610,
+            100,
+            672,
+            134
+          ]
+        },
+        {
+          "text": "胜利",
+          "confidence": 0.9997,
+          "bbox": [
+            608,
+            194,
+            671,
+            237
+          ]
+        }
+      ]
+    },
+    {
+      "fixture": "settlement-two-stars-233306-00061.png",
+      "fixture_sha256": "45da17da4611d5ad7969cc1e87e9db41b75ccdd54b0ad37cf1aed5dd7e6fa087",
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-233306-977594-e53b9d92\\frames\\00061-battle-settlement-reread.png",
+      "source_sha256": "e52a18258bfa3981294f99a2c9c159e24c7d30ab4abd17a7587218a526143d2b",
+      "source_events": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-233306-977594-e53b9d92\\events.jsonl",
+      "source_events_sha256": "781eb8531d86b1d90b79d9f006c7b07440f8aae166b9f9e8f2c9329f7be0de37",
+      "cached_result_ocr": [
+        {
+          "text": "74%",
+          "confidence": 0.99371,
+          "bbox": [
+            610,
+            100,
+            672,
+            134
+          ]
+        },
+        {
+          "text": "胜利",
+          "confidence": 0.9997,
+          "bbox": [
+            608,
+            194,
+            671,
+            237
+          ]
+        }
+      ]
+    }
+  ],
+  "retained_rectangles_at_1280x720": [
+    [
+      453,
+      83,
+      591,
+      212
+    ],
+    [
+      552,
+      22,
+      730,
+      189
+    ]
+  ]
+}

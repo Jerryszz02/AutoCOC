@@ -1,6 +1,6 @@
 # AutoCOC 规划文档索引
 
-状态核对日期：2026-10-15。工作模式：执行全部未完成计划并同步真实证据；开发基线 `1a06d1a8cb9c2db6d86fb52517a055de496c1fb7`，本轮实现位于尚未合并的 `agent/complete-daily-vision` 分支。项目根为 `E:/projects/AutoCOC`。本目录维护目标与实施规格；全部剩余工作统一见[当前进度](../PROGRESS.md)，使用与历史验收入口见[文档导航](../README.md)。
+状态核对日期：2026-10-16。工作模式：执行全部未完成计划并同步真实证据；开发基线 `1a06d1a8cb9c2db6d86fb52517a055de496c1fb7`，本轮实现位于尚未合并的 `agent/complete-daily-vision` 分支。项目根为 `E:/projects/AutoCOC`。本目录维护目标与实施规格；全部剩余工作统一见[当前进度](../PROGRESS.md)，使用与历史验收入口见[文档导航](../README.md)。
 
 首版运行时、模型加载、Jev 适配、GUI 和报告已有代码。本轮补充数据/训练/导出、独立评估和证据绑定的发布工具，S/B 均已运行真实 32 图冒烟和开发训练，并适配新版日常入口；原型精度、正式模型及新模式实战尚未通过。战中“截图到完整动作 ≤0.5 秒”仍是增强阶段验收目标。
 
@@ -12,7 +12,7 @@ S/R 训练配方现固定为版本 2：头部阶段冻结主干参数和 BatchNo
 | --- | --- | --- |
 | [VISION_AGENT_PLAN.md](VISION_AGENT_PLAN.md) | 产品执行边界、准备/连续投放时间契约、M0–M7 里程碑 | 首版非训练实现及 M2 工具已有；正式数据、M5/M6 和 M7 仍有未完成项 |
 | [VISION_DATA_COLLECTION_PLAN.md](VISION_DATA_COLLECTION_PLAN.md) | 素材矩阵、标签、时序、分组拆分、D0–D4 和跨机交接 | 146 张历史候选图保留；另有版本明确的新采集和 agent_visual 原型快照，正式人工复核、覆盖及冻结未完成 |
-| [VISION_MODEL_TRAINING_PLAN.md](VISION_MODEL_TRAINING_PLAN.md) | S/B 必训模型、R/U 增强模型、训练/导出/评估、T0–T6 | S/B、R-card 原型实际训练/导出已有实录；R-card val 事件仍漏检，U 尚无真实权重；正式数据、质量准入和实战未完成 |
+| [VISION_MODEL_TRAINING_PLAN.md](VISION_MODEL_TRAINING_PLAN.md) | S/B 必训模型、R/U 增强模型、训练/导出/评估、T0–T6 | S/B、R-card 原型实际训练/导出已有实录；R-card v1 val 事件仍漏检，v2 train/val-only 原型快照已独立冻结待训练，U 尚无真实权重；正式数据、质量准入和实战未完成 |
 
 配置与已实现的接口分别以[战前视觉规划说明](../VISION_AGENT.md)、[模型包接口](../MODEL_PACKAGE.md)、[连续投放运行契约](../VISION_AGENT_RUNTIME.md)为准。数据与训练的实际命令见[工具说明](../../training/vision/README.md)；计划目标不等于正式验收结果。
 
@@ -29,6 +29,8 @@ S/R 训练配方现固定为版本 2：头部阶段冻结主干参数和 BatchNo
 动态素材从 D3 同步积累，动态执行不提前启用。训练已使用本机 Windows CUDA 环境，Mac 不再是首轮训练的先决条件。正式范围、数据复核、真实质量和运行证据仍阻塞相应发布与验收。
 
 ## 本次核对与证据边界
+
+- 无模型连续部署已有受约束的单场完整胜局；新快扫在 233306 实机完成部署、技能与回村，但自动结算被星形识别阻断，原失败保留。它不替代正式模型或连续十场/六十分钟验收，当前结果以[进度](../PROGRESS.md)和[日常证据](../DAILY_ACCEPTANCE.md)为准。
 
 - 大本营 Agent 原型扩充为 17 张、16 组，保持旧 val/test，新增 6 张仅用于 train；两个架构的训练、导出与 val 对照均已完成，但仍有漏检且缺正式人工数据。原件和数量以[训练工具说明](../../training/vision/README.md)与[当前进度](../PROGRESS.md)为准，不更改正式准入条件。
 - 对照上述计划、[模型加载器](../../src/autococ/model_vision.py)、[评估脚本](../../scripts/evaluate_model_package.py)、[战前执行器](../../src/autococ/prepared_battle.py)、[Jev 适配器](../../src/autococ/jev.py)及已有测试，区分首版代码和后续目标。
