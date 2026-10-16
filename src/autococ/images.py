@@ -12,7 +12,7 @@ def _key(path):
     return str(path), stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size
 
 
-@lru_cache(maxsize=2)
+@lru_cache(maxsize=4)
 def _frame(path, modified, changed, size):
     return cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
 

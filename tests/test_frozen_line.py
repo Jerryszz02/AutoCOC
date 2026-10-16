@@ -685,7 +685,7 @@ def test_dragon_current_header_negative_evidence(tmp_path, variant):
     if variant == "neighbor":
         box = (238, 595, 327, 711)
     if variant in {"missing_digit", "nonzero"}:
-        image = read_frame(post)
+        image = read_frame(post).copy()
         if variant == "missing_digit":
             image[1184:1246, 370:456] = 0
         else:
