@@ -19,7 +19,7 @@ from uuid import uuid4
 from .errors import DeploymentError, FlowError
 from .prepared_battle import FramePacket, PreparedInput
 from .scene import SceneSnapshot
-from .strategies import BattleContext, EdragLineStrategy
+from .strategies import BattleContext, EdragLineStrategy, TwoEdgeSplitStrategy
 
 
 _CLIENT_VERSION = "18.647.2"
@@ -51,6 +51,7 @@ class FrozenLinePlan:
     hero_manifest_frame_id: str | None
     hero_manifest_frame_sha256: str | None
     minimum_zoom_sha256: str
+    line_tactics: str
     plan_sha256: str
 
 
@@ -398,10 +399,13 @@ def freeze_model_free_line(session: Any, selected: SceneSnapshot, *,
                            army_manifest: dict, minimum_zoom: dict,
                            battle_id: str, latest_start: float, burst_limit_sec: float,
                            hero_ids: Sequence[str] = (), hero_manifest: dict | None = None,
+                            line_tactics: str = "single_edge",
                            clock: Callable[[], float] = time.monotonic) -> FrozenLinePlan:
     """Freeze the existing line roster, optionally with a bounded archer filler row."""
     if getattr(getattr(session.config, "vision_agent", None), "enabled", False):
         raise FlowError("Model-free line cannot replace vision-mode model release")
+    if line_tactics not in {"single_edge", "two_edge_split"}:
+        raise FlowError("Frozen line tactics are unsupported")
     if getattr(session, "client_version", None) != _CLIENT_VERSION or not isinstance(battle_id, str) or not battle_id:
         raise FlowError("Frozen line requires a current-version battle identity")
     if selected is not session.last_snapshot:
@@ -531,8 +535,9 @@ def freeze_model_free_line(session: Any, selected: SceneSnapshot, *,
                 type(score) not in (int, float) or not math.isfinite(score) or score < .94):
             raise FlowError("Frozen line hero lacks current-frame identity")
         selected_heroes.append(prior)
-    placement = EdragLineStrategy().build_plan(BattleContext(tuple(current_troops),
-                                                              tuple(selected_heroes), tuple(terrain)))
+    planner = EdragLineStrategy() if line_tactics == "single_edge" else TwoEdgeSplitStrategy()
+    placement = planner.build_plan(BattleContext(tuple(current_troops),
+                                                 tuple(selected_heroes), tuple(terrain)))
     actions = []
     troop_steps = placement.troops
     if len(current_troops) == 5:
@@ -573,7 +578,7 @@ def freeze_model_free_line(session: Any, selected: SceneSnapshot, *,
                           tuple(actions), budgets, troop_cards, tuple(hero_ids), hero_cards,
                           _digest(hero_manifest) if hero_manifest is not None else None,
                           hero_manifest["frame"] if hero_manifest is not None else None, hero_frame_hash,
-                          _digest(minimum_zoom), "")
+                          _digest(minimum_zoom), line_tactics, "")
     return FrozenLinePlan(**{**asdict(plan), "frame": frame, "actions": plan.actions,
                              "troop_budgets": plan.troop_budgets, "troop_cards": plan.troop_cards,
                              "hero_ids": plan.hero_ids, "hero_cards": plan.hero_cards,
@@ -613,6 +618,7 @@ def execute_frozen_line(session: Any, plan: FrozenLinePlan, *,
     deadline = min(start + plan.burst_limit_sec, session.deadline, session.task_deadline)
     receipts = []
     receipt = {"mode": "model_free_line_continuous", "plan_id": plan.plan_id,
+               "line_tactics": plan.line_tactics,
                "plan_sha256": plan.plan_sha256, "battle_id": plan.battle_id,
                "frame": plan.frame.frame_id, "input_count": len(plan.actions),
                "scope": "troops_and_heroes" if plan.hero_ids else "troops_only",

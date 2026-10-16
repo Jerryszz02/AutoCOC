@@ -26,10 +26,12 @@ def setup_line():
 
 def test_continuous_line_uses_capture_time_and_preserves_preparation_evidence():
     session, frame, before, heroes, receipt = setup_line()
+    session.config.battle.line_tactics = "two_edge_split"
     post = SceneSnapshot("battle", .99, Path("post.png"), {"deployment": {
         "verified": True, "completed": True, "deployed_units": 14,
         "evidence": ["selected.png", "post.png"]}})
-    plan = SimpleNamespace(plan_id="plan", plan_sha256="hash", actions=(1, 2), burst_limit_sec=10)
+    plan = SimpleNamespace(plan_id="plan", plan_sha256="hash", actions=(1, 2),
+                           burst_limit_sec=10, line_tactics="two_edge_split")
     with patch("autococ.frozen_line.freeze_model_free_line", return_value=plan) as freeze, \
             patch("autococ.frozen_line.execute_frozen_line", return_value=post) as execute:
         result = _deploy_continuous_line(session, frame, receipt, {"toolbar_before": before}, heroes, 200)
@@ -38,6 +40,7 @@ def test_continuous_line_uses_capture_time_and_preserves_preparation_evidence():
     assert kwargs["toolbar_before"] is before
     assert kwargs["hero_manifest"] is heroes
     assert kwargs["hero_ids"] == ["archer_queen"]
+    assert kwargs["line_tactics"] == "two_edge_split"
     execute.assert_called_once_with(session, plan)
     assert result.observations["deployment"]["evidence"] == ["scout.png", "toolbar.png", "selected.png", "post.png"]
 

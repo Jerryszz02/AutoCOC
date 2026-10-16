@@ -85,7 +85,7 @@ class Session:
         return self.post
 
 
-def freeze(session, selected, before, *, heroes=()):
+def freeze(session, selected, before, *, heroes=(), line_tactics="single_edge"):
     hero_manifest = None
     if heroes:
         hero_manifest = {"complete": True, "unknowns": [], "frame": str(before.screenshot_path),
@@ -101,6 +101,7 @@ def freeze(session, selected, before, *, heroes=()):
                                                            "inliers": 95, "affine": [[1, 0, 0], [0, 1, 0]]}},
                                   battle_id="battle-one",
                                   latest_start=105., burst_limit_sec=15.,
+                                  line_tactics=line_tactics,
                                   hero_ids=heroes, hero_manifest=hero_manifest, clock=lambda: 101.)
 
 
@@ -620,3 +621,72 @@ def test_saved_real_full_plan_freezes_without_any_input():
     assert plan.burst_limit_sec == 7.25
     assert len(plan.hero_cards) == 4
     assert plan.troop_budgets == tuple((unit_id, "army", count) for unit_id, count in TROOPS)
+
+
+@pytest.mark.parametrize("root,army_name,before_name,selected_name", (
+    (Path(r"E:\projects\AutoCOC\reports\completion-20261015\probes\20261016-012515-manual-skill"),
+     "00009-battle-army-roster-reread.png", "00014-line-zoom-verified.png", "00016-line-boundary.png"),
+    (Path(r"E:\projects\AutoCOC\reports\completion-20261015\live\20261016-001038-401680-d5107440"),
+     "00010-battle-army-roster-reread.png", "00017-line-zoom-verified.png", "00019-line-boundary.png"),
+    (Path(r"E:\projects\AutoCOC\reports\completion-20261015\live\20261016-005304-767109-058a9bfa"),
+     "00006-battle-army-confirmation.png", "00011-line-zoom-verified.png", "00013-line-boundary.png"),
+))
+def test_real_five_card_windows_freeze_explicit_two_edge_split_without_input(
+        root, army_name, before_name, selected_name):
+    from collections import Counter
+
+    from autococ.terrain import find_line_deployment_edges
+
+    events = root / "events.jsonl"
+    if not events.exists():
+        pytest.skip("local real-battle evidence unavailable")
+    rows = [json.loads(line) for line in events.open(encoding="utf-8")]
+
+    def snapshot(name):
+        row = next(item for item in rows if item.get("kind") == "observation" and
+                   Path(item.get("frame", "")).name == name)
+        return SceneSnapshot(row["scene"], row["confidence"], Path(row["frame"]),
+                             row["observations"])
+
+    army = snapshot(army_name).observations["army"]
+    before, selected = snapshot(before_name), snapshot(selected_name)
+    zoom = next(item for item in rows if item.get("kind") == "line_minimum_zoom")
+    minimum_zoom = {key: zoom[key] for key in ("verified", "frame", "motion")}
+    current_terrain = find_line_deployment_edges(selected.screenshot_path)
+    session = SimpleNamespace(
+        config=SimpleNamespace(vision_agent=SimpleNamespace(enabled=False),
+                               game=SimpleNamespace(baseline_resolution=(1280, 720))),
+        client_version="18.647.2", last_snapshot=selected,
+        capture=SimpleNamespace(input_display_id=2),
+        context=SimpleNamespace(screen_resolution=(2560, 1440)))
+    now = selected.observations["observed_at_monotonic"] + .05
+    hero_manifest = army["hero_evidence"]
+    plan = freeze_model_free_line(
+        session, selected, toolbar_before=before, terrain=current_terrain,
+        army_manifest=army["manifest"], minimum_zoom=minimum_zoom,
+        battle_id="two-edge-offline-replay", latest_start=now + 2,
+        burst_limit_sec=15, line_tactics="two_edge_split",
+        hero_ids=[card["unit_id"] for card in hero_manifest["cards"]],
+        hero_manifest=hero_manifest, clock=lambda: now)
+    placements = [action for action in plan.actions if action.kind == "deploy"]
+    counts = Counter(action.unit_id for action in placements)
+    assert counts == {**{row["unit_id"]: row["count"] for row in army["manifest"]["troops"]},
+                      **{row["unit_id"]: 1 for row in hero_manifest["cards"]}}
+    assert plan.line_tactics == "two_edge_split"
+    assert len(plan.actions) == 30 and len(placements) == 21
+    assert plan.burst_limit_sec == 8.5
+    assert sum(action.delay_after_sec for action in plan.actions) < plan.burst_limit_sec
+    assert [action.unit_id for action in placements[:2]] == ["baby_dragon", "dragon"]
+    assert [action.unit_id for action in placements[-4:]] == [
+        "grand_warden", "archer_queen", "dragon_duke", "minion_prince"]
+    y_bounds = {edge: (min(row["point"][1] for row in current_terrain if row["edge"] == edge),
+                       max(row["point"][1] for row in current_terrain if row["edge"] == edge))
+                for edge in (0, 1)}
+    def on_edge(action, edge):
+        return y_bounds[edge][0] <= action.point[1] <= y_bounds[edge][1]
+    assert all(on_edge(action, 0) or on_edge(action, 1) for action in placements)
+    assert sum(on_edge(action, 0) for action in placements if action.unit_id == "electro_dragon") == 7
+    assert sum(on_edge(action, 1) for action in placements if action.unit_id == "electro_dragon") == 3
+    assert sum(on_edge(action, 0) for action in placements if action.unit_id == "archer") == 2
+    assert sum(on_edge(action, 1) for action in placements if action.unit_id == "archer") == 1
+    assert not any(action.kind in {"spell", "siege", "skill"} for action in plan.actions)

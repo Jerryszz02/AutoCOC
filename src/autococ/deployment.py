@@ -731,10 +731,12 @@ def _deploy_continuous_line(session, current, receipt, context, hero_manifest, d
         terrain=receipt["terrain_evidence"], army_manifest=receipt["expected_army_manifest"],
         minimum_zoom=receipt["minimum_zoom"], battle_id=uuid4().hex,
         latest_start=latest_start, burst_limit_sec=10,
+        line_tactics=getattr(session.config.battle, "line_tactics", "single_edge"),
         hero_ids=[row.get("unit_id") for row in rows], hero_manifest=hero_manifest)
     session.event("model_free_line_plan", plan_id=plan.plan_id, plan_sha256=plan.plan_sha256,
                   frame=str(current.screenshot_path), latest_start=latest_start,
-                  input_count=len(plan.actions), burst_limit_sec=plan.burst_limit_sec)
+                  input_count=len(plan.actions), burst_limit_sec=plan.burst_limit_sec,
+                  line_tactics=plan.line_tactics)
     post = execute_frozen_line(session, plan)
     frames = receipt["evidence"]
     receipt.update(post.observations["deployment"])
