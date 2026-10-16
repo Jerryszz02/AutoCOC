@@ -1,0 +1,81 @@
+{
+  "client_version": "18.647.2",
+  "source_kind": "agent_visual_prototype",
+  "human_ground_truth": false,
+  "dynamic_event_validation": false,
+  "note": "Alternate visible ready-card art phase. Source battle had no ability tap; independent 035742 ready frames 21/22/23 precede one verified manual ability tap. The 035742 used frame 27 and transition 26 must not be classified ready. This is a static visual template, not a dynamic-model event claim.",
+  "derivation": "Decode native 2560x1440 source PNG; resize to 1280x720 with cv2.INTER_AREA. Crop the template at source_bbox_1280. Fixture pixels at baseline y=0..514 are zero; y=515..719 match the resized source exactly.",
+  "assets": {
+    "hero_warden_18_647_2_ready_card_phase.png": {
+      "source_frame": "reports/completion-20261015/live/20261016-053200-457276-365d1d63/frames/00028-post-deployment-skill-before.png",
+      "source_sha256": "942cb9798922a9886c34bb897474fdcb5e169057d713d0a41097e18b1514c689",
+      "source_bbox_1280": [
+        680,
+        626,
+        734,
+        675
+      ],
+      "asset_sha256": "9e033bc465e30775c9b8e387bc7944adaed6799372e1896b85595e082ff99214",
+      "independent_battle_ready_holdouts": [
+        "035742/00021",
+        "035742/00022",
+        "035742/00023"
+      ],
+      "manual_used_negatives": [
+        "035742/00026",
+        "035742/00027"
+      ]
+    }
+  },
+  "fixtures": {
+    "hero_skill_phase_053200_00025_18_647_2.png": {
+      "source_frame": "reports/completion-20261015/live/20261016-053200-457276-365d1d63/frames/00025-frozen-line-post.png",
+      "source_sha256": "9c73120c6df7f091e35fc1208954cb6ca3fbd1125880824f6ce66f2d25650c9a",
+      "fixture_sha256": "c937c7eeaa5104973f813635871aad6d309346e79cc6b57485b88d4f32a31dcc",
+      "retained_roi_1280": [
+        0,
+        515,
+        1280,
+        720
+      ],
+      "purpose": "same_battle_ready_phase_holdout"
+    },
+    "hero_skill_phase_053200_00028_18_647_2.png": {
+      "source_frame": "reports/completion-20261015/live/20261016-053200-457276-365d1d63/frames/00028-post-deployment-skill-before.png",
+      "source_sha256": "942cb9798922a9886c34bb897474fdcb5e169057d713d0a41097e18b1514c689",
+      "fixture_sha256": "4cb40a6339b1f1bdc9d2186cfabd95eae7e022f27ddd59c9886cecdd33e298fe",
+      "retained_roi_1280": [
+        0,
+        515,
+        1280,
+        720
+      ],
+      "purpose": "phase_template_source"
+    },
+    "hero_skill_phase_035742_00021_18_647_2.png": {
+      "source_frame": "reports/completion-20261015/probes/20261016-035742-manual-probed-skill/frames/00021-frozen-line-post.png",
+      "source_sha256": "4f782c85aab491fab766b919e29361bb3515091b06473f776ca23bdd6165b99a",
+      "fixture_sha256": "1714404b51e48d9ccab98995e621928c3768cb4d32fff18e71746695c776630b",
+      "retained_roi_1280": [
+        0,
+        515,
+        1280,
+        720
+      ],
+      "purpose": "independent_battle_ready_holdout"
+    },
+    "hero_skill_phase_035742_00022_18_647_2.png": {
+      "source_frame": "reports/completion-20261015/probes/20261016-035742-manual-probed-skill/frames/00022-frozen-line-post-recheck.png",
+      "source_sha256": "2da663a507940d3ccb548ab696118c89d146621ccebdc91673e9480c5a543c5a",
+      "fixture_sha256": "1e87ac517d7984050e921726b247ac9b74187a4e652ebcc0e74a732c65d89209",
+      "retained_roi_1280": [
+        0,
+        515,
+        1280,
+        720
+      ],
+      "purpose": "independent_battle_ready_holdout"
+    }
+  },
+  "new_template_source_capture_code_commit": "58ea45e"
+}

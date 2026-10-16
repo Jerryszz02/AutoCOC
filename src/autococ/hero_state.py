@@ -44,6 +44,10 @@ HERO_PHASE_TEMPLATE_IDS = {
     "minion_prince": "minion_prince", "archer_queen": "archer_queen",
 }
 CURRENT_WARDEN_SKILL_SOURCE = "reports/completion-20261015/probes/20261016-035742-manual-probed-skill/frames"
+CURRENT_WARDEN_READY_CARD_PHASE_SOURCE = (
+    "reports/completion-20261015/live/20261016-053200-457276-365d1d63/"
+    "frames/00028-post-deployment-skill-before.png"
+)
 
 
 def recognize_siege_state(
@@ -198,11 +202,15 @@ def recognize_hero_state(
         if located is None or tuple(located["bbox"]) != box:
             evidence["ability_phase_reason"] = "current_warden_card_not_independently_closed"
             return result
+        ready_card_roi = (left + 28, 621, right - 2, 685)
+        ready_cards = [_match(image, TEMPLATES / name, ready_card_roi)
+                       for name in ("hero_warden_18_647_2_ready_card.png",
+                                    "hero_warden_18_647_2_ready_card_phase.png")]
         anchors = {
             "ready_book": _match(image, TEMPLATES / "hero_warden_18_647_2_ready_book.png",
                                  (left + 1, 525, left + 48, 572)),
-            "ready_card": _match(image, TEMPLATES / "hero_warden_18_647_2_ready_card.png",
-                                 (left + 28, 621, right - 2, 685)),
+            "ready_card": max((match for match in ready_cards if match is not None),
+                              key=lambda match: match["confidence"], default=None),
             "used_book": _match(image, TEMPLATES / "hero_warden_18_647_2_used_book.png",
                                 (left + 1, 525, left + 48, 572)),
             "used_card": _match(image, TEMPLATES / "hero_warden_18_647_2_used_card.png",
@@ -215,10 +223,16 @@ def recognize_hero_state(
                  and (anchors["used_book"] is not None or anchors["used_card"] is not None))
         if ready and not mixed:
             result.update(state="ability_ready", ability_ready=True, ability_used=False)
+            ready_template = Path(anchors["ready_card"]["template"]).name
+            ready_source = (CURRENT_WARDEN_READY_CARD_PHASE_SOURCE
+                            if ready_template == "hero_warden_18_647_2_ready_card_phase.png"
+                            else f"{CURRENT_WARDEN_SKILL_SOURCE}/00025-manual-skill-fresh-action-check.png")
             evidence["ability_ready"] = {"hero": unit_id, "equipment_layout": "current_gold_book",
                                          "active_equipment": anchors["ready_book"],
                                          "ready_card": anchors["ready_card"],
-                                         "template_source": f"{CURRENT_WARDEN_SKILL_SOURCE}/00025-manual-skill-fresh-action-check.png",
+                                         "ready_book_source": f"{CURRENT_WARDEN_SKILL_SOURCE}/00025-manual-skill-fresh-action-check.png",
+                                         "ready_card_source": ready_source,
+                                         "template_source": ready_source,
                                          "source_kind": "agent_visual_prototype"}
         elif used and not mixed and "battle_used_035742" in str(identity["evidence"][0]["template"]):
             result.update(state="ability_used", ability_ready=False, ability_used=True)

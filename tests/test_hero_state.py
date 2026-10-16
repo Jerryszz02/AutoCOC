@@ -8,7 +8,7 @@ import json
 import cv2
 import numpy as np
 
-from autococ.hero_state import locate_current_deployed_hero_card, recognize_hero_state
+from autococ.hero_state import _match, locate_current_deployed_hero_card, recognize_hero_state
 
 
 class HeroStateTests(unittest.TestCase):
@@ -19,6 +19,111 @@ class HeroStateTests(unittest.TestCase):
 
     def current_skill_fixture(self, number: int) -> Path:
         return self.root / f"tests/fixtures/hero_skill_035742_{number:05d}_18_647_2.png"
+
+    def current_skill_phase_fixture(self, battle: str, number: int) -> Path:
+        return self.root / f"tests/fixtures/hero_skill_phase_{battle}_{number:05d}_18_647_2.png"
+
+    def test_current_warden_ready_card_animation_phase_has_independent_battle_proof(self) -> None:
+        for battle, number in (("053200", 25), ("053200", 28),
+                               ("035742", 21), ("035742", 22)):
+            with self.subTest(battle=battle, frame=number):
+                path = self.current_skill_phase_fixture(battle, number)
+                located = locate_current_deployed_hero_card(path, "grand_warden",
+                                                            client_version="18.647.2")
+                self.assertIsNotNone(located)
+                state = recognize_hero_state(path, located["bbox"], unit_id="grand_warden",
+                                             client_version="18.647.2")
+                self.assertEqual(state["state"], "ability_ready")
+                self.assertTrue(state["ability_ready"])
+                self.assertFalse(state["ability_used"])
+                self.assertIsNotNone(state["evidence"]["health_bar"])
+                self.assertIsNotNone(state["evidence"]["closed_card"])
+                self.assertEqual(state["evidence"]["ability_ready"]["hero"], "grand_warden")
+                if (battle, number) in (("053200", 28), ("035742", 21)):
+                    proof = state["evidence"]["ability_ready"]
+                    self.assertEqual(Path(proof["ready_card"]["template"]).name,
+                                     "hero_warden_18_647_2_ready_card_phase.png")
+                    self.assertTrue(proof["template_source"].endswith(
+                        "053200-457276-365d1d63/frames/00028-post-deployment-skill-before.png"))
+        self.assertTrue(recognize_hero_state(self.current_skill_fixture(23),
+                                             [647, 595, 736, 711], unit_id="grand_warden",
+                                             client_version="18.647.2")["ability_ready"])
+        for number in (26, 27):
+            with self.subTest(used_or_transition=number):
+                state = recognize_hero_state(self.current_skill_fixture(number),
+                                             [647, 595, 736, 711], unit_id="grand_warden",
+                                             client_version="18.647.2")
+                self.assertIsNot(state["ability_ready"], True)
+        phase_template = self.root / "assets/templates/hero_warden_18_647_2_ready_card_phase.png"
+        for path in (self.current_skill_phase_fixture("035742", 21),
+                     self.current_skill_phase_fixture("035742", 22), self.current_skill_fixture(23)):
+            with self.subTest(phase_template_ready=path.name):
+                image = cv2.imdecode(np.fromfile(path, np.uint8), cv2.IMREAD_COLOR)
+                self.assertIsNotNone(_match(image, phase_template, (675, 621, 734, 685)))
+        for number in (26, 27):
+            with self.subTest(phase_template_used=number):
+                image = cv2.imdecode(np.fromfile(self.current_skill_fixture(number), np.uint8),
+                                     cv2.IMREAD_COLOR)
+                self.assertIsNone(_match(image, phase_template, (675, 621, 734, 685)))
+
+    def test_current_warden_ready_card_phase_requires_book_hp_closed_card_and_identity(self) -> None:
+        path = self.current_skill_phase_fixture("053200", 28)
+        source = cv2.imdecode(np.fromfile(path, np.uint8), cv2.IMREAD_COLOR)
+        with TemporaryDirectory() as directory:
+            modified = Path(directory) / "modified.png"
+            for name, box in {"book": (650, 530, 690, 567),
+                              "card_art": (680, 626, 734, 675),
+                              "hp": (654, 573, 731, 586),
+                              "bottom_border": (655, 709, 728, 711)}.items():
+                with self.subTest(missing=name):
+                    frame = source.copy()
+                    left, top, right, bottom = box
+                    if name == "bottom_border":
+                        # The bottom edge is outside the ready-art template.
+                        frame[top:bottom, left:right] = source[712:713, left:right]
+                    else:
+                        frame[top:bottom, left:right] = 0
+                    cv2.imencode(".png", frame)[1].tofile(modified)
+                    state = recognize_hero_state(modified, [647, 595, 736, 711],
+                                                 unit_id="grand_warden", client_version="18.647.2")
+                    self.assertIsNot(state["ability_ready"], True)
+            for hero, version, box in (("archer_queen", "18.647.2", [647, 595, 736, 711]),
+                                       ("grand_warden", "18.600.7", [647, 595, 736, 711]),
+                                       ("grand_warden", "18.647.2", [744, 595, 833, 711])):
+                with self.subTest(hero=hero, version=version, bbox=box):
+                    state = recognize_hero_state(path, box, unit_id=hero, client_version=version)
+                    self.assertIsNot(state["ability_ready"], True)
+
+    def test_current_warden_ready_card_phase_source_and_anonymized_pixels_are_bound(self) -> None:
+        metadata = json.loads((self.root / "tests/fixtures/hero_skill_ready_card_phase_18_647_2.provenance.json")
+                              .read_text(encoding="utf-8"))
+        self.assertFalse(metadata["human_ground_truth"])
+        self.assertFalse(metadata["dynamic_event_validation"])
+        for name, record in metadata["assets"].items():
+            target = self.root / "assets/templates" / name
+            self.assertEqual(hashlib.sha256(target.read_bytes()).hexdigest(), record["asset_sha256"])
+            original = Path("E:/projects/AutoCOC") / record["source_frame"]
+            if original.is_file():
+                self.assertEqual(hashlib.sha256(original.read_bytes()).hexdigest(),
+                                 record["source_sha256"])
+                raw = cv2.imdecode(np.fromfile(original, np.uint8), cv2.IMREAD_COLOR)
+                baseline = cv2.resize(raw, (1280, 720), interpolation=cv2.INTER_AREA)
+                left, top, right, bottom = record["source_bbox_1280"]
+                saved = cv2.imdecode(np.fromfile(target, np.uint8), cv2.IMREAD_COLOR)
+                self.assertTrue(np.array_equal(saved, baseline[top:bottom, left:right]))
+        for name, record in metadata["fixtures"].items():
+            target = self.root / "tests/fixtures" / name
+            self.assertEqual(hashlib.sha256(target.read_bytes()).hexdigest(), record["fixture_sha256"])
+            original = Path("E:/projects/AutoCOC") / record["source_frame"]
+            if original.is_file():
+                self.assertEqual(hashlib.sha256(original.read_bytes()).hexdigest(),
+                                 record["source_sha256"])
+                raw = cv2.imdecode(np.fromfile(original, np.uint8), cv2.IMREAD_COLOR)
+                baseline = cv2.resize(raw, (1280, 720), interpolation=cv2.INTER_AREA)
+                reconstructed = np.zeros_like(baseline)
+                reconstructed[515:720, :] = baseline[515:720, :]
+                saved = cv2.imdecode(np.fromfile(target, np.uint8), cv2.IMREAD_COLOR)
+                self.assertTrue(np.array_equal(saved, reconstructed))
 
     def test_current_warden_ready_and_used_have_separate_same_frame_proofs(self) -> None:
         for number, phase in ((23, "ability_ready"), (24, "ability_ready"),
