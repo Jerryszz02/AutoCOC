@@ -60,6 +60,12 @@ def run_battle(session: GameSession) -> TaskResult:
     vision_mode = bool(getattr(session.config, "vision_agent", None) and session.config.vision_agent.enabled)
     custom_mode = bool(session.config.battle.strategy_file)
     line_mode = vision_mode or custom_mode or is_line_strategy(session.config.battle.strategy)
+    # Freeze the opt-in skill choice before any search or deployment input.
+    hero_skill_id = getattr(session.config.battle, "post_deployment_hero_skill", "")
+    hero_skill_delay = getattr(session.config.battle, "hero_skill_delay_sec", 20)
+    if hero_skill_id:
+        metrics["hero_skill_plan"] = {"hero_id": hero_skill_id, "delay_sec": hero_skill_delay}
+        session.post_deployment_skill_receipt = None
     vision_model = None
     vision_decider = None
     vision_guides = ()
@@ -94,6 +100,10 @@ def run_battle(session: GameSession) -> TaskResult:
             callback(phase)
     metrics["strategy"] = session.config.battle.strategy
     try:
+        if hero_skill_id and (vision_mode or custom_mode
+                              or session.config.battle.strategy != "edrag_line"
+                              or session.config.battle.line_execution_mode != "continuous"):
+            raise CapabilityUnavailable("Post-deployment hero skill requires built-in model-free continuous edrag_line")
         if vision_mode:
             if session.config.vision_agent.mode != "continuous":
                 raise CapabilityUnavailable("Battle enhancement mode has not passed action-specific acceptance")
@@ -513,10 +523,45 @@ def run_battle(session: GameSession) -> TaskResult:
             raise FlowError("Deployment receipt has no screenshot evidence")
         evidence.extend(Path(path) for path in deployment_evidence)
 
+        skill_failure_needs_settlement_wait = False
+        if hero_skill_id:
+            if not cleanup_only and deployment.get("completed") is True:
+                progress("核验并使用英雄技能")
+                try:
+                    from .post_deployment_skill import execute_post_deployment_hero_skill
+                    deployed, skill_receipt = execute_post_deployment_hero_skill(
+                        session, deployed, hero_id=hero_skill_id, delay_sec=hero_skill_delay)
+                except Exception as exc:
+                    # A failed optional skill cannot abandon an already deployed
+                    # army. StopRequested derives from KeyboardInterrupt and
+                    # bypasses this handler; account conflicts also stop inputs.
+                    previous = getattr(session, "post_deployment_skill_receipt", None)
+                    skill_receipt = dict(previous) if isinstance(previous, dict) else {}
+                    skill_receipt.update(hero_id=hero_skill_id, verified=False, completed=False,
+                                         status="failed", reason="unexpected_skill_error",
+                                         error=f"{type(exc).__name__}: {exc}")
+                    skill_receipt.setdefault("evidence", [])
+                    session.post_deployment_skill_receipt = skill_receipt
+                    metrics["hero_skill"] = skill_receipt
+                    latest = session.last_snapshot
+                    if "account_in_use" in str(exc) or (latest is not None and latest.scene == "account_in_use"):
+                        skill_receipt.update(reason="account_in_use", interruption="account_in_use")
+                        raise FlowError("Game interruption: account_in_use") from exc
+                    session.check_deadline()
+                    # Capture failure may have cleared last_snapshot. Never use
+                    # an old settlement frame to authorize the return input.
+                    skill_failure_needs_settlement_wait = True
+                metrics["hero_skill"] = skill_receipt
+                evidence.extend(Path(path) for path in skill_receipt.get("evidence", []))
+            else:
+                metrics["hero_skill"] = {"hero_id": hero_skill_id, "verified": False,
+                                         "completed": False, "status": "skipped",
+                                         "reason": "deployment_incomplete", "evidence": []}
+
         progress("等待结算" if deployment.get("completed") is True
                  else "投放核验失败，等待结算")
         settlement_timeout = session.config.battle.settlement_timeout_sec or session.config.battle.deploy_timeout_sec
-        settlement_frame = deployed if deployed.scene == "settlement" else session.wait_for(
+        settlement_frame = deployed if deployed.scene == "settlement" and not skill_failure_needs_settlement_wait else session.wait_for(
             {"settlement"}, timeout_sec=settlement_timeout + (35 if cleanup_only else 0), label="battle-settlement",
             **({"purpose": "settlement", "poll_interval_sec": 5} if line_mode else {}))
         settlement = None
@@ -663,6 +708,10 @@ def run_battle(session: GameSession) -> TaskResult:
                            victory=stars > 0 if type(stars) is int else None)
             if deployment.get("completed") is not True:
                 raise FlowError(metrics.get("deployment_error") or "Line troop/hero deployment is incomplete")
+            if hero_skill_id and (metrics["hero_skill"].get("verified") is not True
+                                  or metrics["hero_skill"].get("completed") is not True):
+                raise FlowError("Configured post-deployment hero skill was not verified: "
+                                + str(metrics["hero_skill"].get("reason", "unknown")))
             if vision_mode:
                 metrics["vision_agent"]["status"] = "battle_completed"
             session.event("battle_round_verified", settlement_frame=str(settlement_frame.screenshot_path),

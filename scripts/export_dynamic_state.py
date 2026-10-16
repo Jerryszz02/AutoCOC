@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from training.vision.dynamic_export import export_dynamic_state
 from training.vision.snapshot import TrainingError
 

@@ -319,6 +319,7 @@ def _current_picker(path: Path, image: np.ndarray, provider: OCRProvider | None,
                     baseline_resolution: tuple[int, int]) -> dict[str, object]:
     kind, boxes = _picker_row(image)
     capacities = _capacities(texts, edit=False)
+    spell_capacity_conflict = False
     if kind == "spell":
         shifted_troop = [item for item in texts if item.confidence >= .88 and item.bbox is not None
                          and _inside(item, (550, 55, 710, 110))
@@ -331,16 +332,22 @@ def _current_picker(path: Path, image: np.ndarray, provider: OCRProvider | None,
         shifted = [item for item in texts if item.confidence >= .88 and item.bbox is not None
                    and _inside(item, (560, 235, 675, 275))
                    and _CAPACITY.fullmatch(item.text.strip())]
-        if len(shifted) == 1:
-            match = _CAPACITY.fullmatch(shifted[0].text.strip())
-            used, total = int(match.group(1)), int(match.group(2))
+        spell_values = {(int(match.group(1)), int(match.group(2))) for item in shifted
+                        if (match := _CAPACITY.fullmatch(item.text.strip())) is not None}
+        spell_capacity_conflict = len(spell_values) > 1
+        if spell_capacity_conflict:
+            capacities.pop("spell", None)
+        elif len(spell_values) == 1:
+            used, total = next(iter(spell_values))
             if 0 <= used <= total <= 20:
                 capacities["spell"] = {"used": used, "total": total}
     rows = ({"troop": ((560, 145, 680, 185), 500),
              "spell": ((560, 325, 670, 365), 20)} if kind == "troop" else
             {"troop": ((560, 55, 680, 100), 500),
-             "spell": ((560, 235, 670, 275), 20)})
+            "spell": ((560, 235, 680, 275), 20)})
     for name, (roi, maximum) in rows.items():
+        if name == "spell" and spell_capacity_conflict:
+            continue  # A narrow OCR read cannot erase strong full-frame disagreement.
         if name not in capacities:
             observed = _local_capacity(path, provider, native_resolution, roi, maximum)
             if observed is not None:
@@ -352,6 +359,8 @@ def _current_picker(path: Path, image: np.ndarray, provider: OCRProvider | None,
                                  "complete_kinds": {"troop": False, "spell": False},
                                  "unit_availability": {}, "unit_housing_space": {},
                                  "unknowns": [], "complete": False}
+    if spell_capacity_conflict:
+        result["unknowns"].append("picker_spell_capacity_conflict")
     if kind is None:
         result["unknowns"].append("picker_editing_kind_unverified")
         return result

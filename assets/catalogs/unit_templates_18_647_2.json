@@ -717,6 +717,19 @@
       "client_version": "18.647.2",
       "source_sha256": "65d611e23b0151a72ef8b6b3711d81b0f41325697c749ec9d4e4b68c783df68b",
       "template_sha256": "2821147b3d5b0354af98cedf6cf4c0282e4ea03610981de4a56ad048c61f3e98"
+    },
+    {
+      "unit_id": "grand_warden",
+      "surface": "battle",
+      "path": "units/grand_warden_battle_used_035742_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261016-035742-manual-probed-skill/frames/00027-manual-skill-after-2.png",
+      "source_bbox_1280": [676, 632, 713, 673],
+      "source_card_bbox_1280": [647, 595, 736, 711],
+      "state": "deployed",
+      "ability_phase_asset": "used_portrait_only_not_ability_proof",
+      "client_version": "18.647.2",
+      "source_sha256": "07b28a38a067d27d9e5ab90a08cca182ff71a600062a9daea84f7bf0e0ea3979",
+      "template_sha256": "a795790cf761cacef62e5d38661f097efdede804a05b1479bed8309caafabbba"
     }
   ]
 }

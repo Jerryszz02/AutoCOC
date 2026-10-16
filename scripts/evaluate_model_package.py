@@ -19,6 +19,7 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from autococ.model_vision import BuildingModel, ModelUnavailable, SceneModel
 from training.vision.evaluation import compare_stability, evaluate_independent, load_config

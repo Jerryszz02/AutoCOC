@@ -37,11 +37,13 @@ class UnitCatalogTests(unittest.TestCase):
             if source.is_file():
                 self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(),
                                  frame["source_sha256"])
-                image = cv2.resize(cv2.imdecode(np.fromfile(source, dtype=np.uint8),
-                                                cv2.IMREAD_COLOR), (1280, 720),
-                                   interpolation=cv2.INTER_AREA)
+                image = cv2.imdecode(np.fromfile(source, dtype=np.uint8), cv2.IMREAD_COLOR)
+                native = frame.get("fixture_resolution") == [2560, 1440]
+                if not native:
+                    image = cv2.resize(image, (1280, 720), interpolation=cv2.INTER_AREA)
                 anonymous = np.zeros_like(image)
-                for left, top, right, bottom in frame["retained_rois_1280"]:
+                rois = frame["retained_rois_native"] if native else frame["retained_rois_1280"]
+                for left, top, right, bottom in rois:
                     anonymous[top:bottom, left:right] = image[top:bottom, left:right]
                 observed = cv2.imdecode(np.fromfile(fixture, dtype=np.uint8), cv2.IMREAD_COLOR)
                 self.assertTrue(np.array_equal(anonymous, observed))
@@ -56,6 +58,8 @@ class UnitCatalogTests(unittest.TestCase):
                         image[t:b, l:r]))
             if frame["kind"] == "picker":
                 image = cv2.imdecode(np.fromfile(fixture, dtype=np.uint8), cv2.IMREAD_COLOR)
+                if frame.get("fixture_resolution") == [2560, 1440]:
+                    image = cv2.resize(image, (1280, 720), interpolation=cv2.INTER_AREA)
                 identity = recognize_card_identity(image, (33, 431, 157, 555), "spell",
                                                    surface="current_picker",
                                                    client_version="18.647.2")

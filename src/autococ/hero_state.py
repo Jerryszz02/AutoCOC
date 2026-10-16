@@ -43,6 +43,7 @@ HERO_PHASE_TEMPLATE_IDS = {
     "grand_warden": "warden", "barbarian_king": "barbarian_king",
     "minion_prince": "minion_prince", "archer_queen": "archer_queen",
 }
+CURRENT_WARDEN_SKILL_SOURCE = "reports/completion-20261015/probes/20261016-035742-manual-probed-skill/frames"
 
 
 def recognize_siege_state(
@@ -184,6 +185,51 @@ def recognize_hero_state(
         result.update(state="deployed", deployed=True, defeated=False)
     elif selected is not None:
         result["state"] = "selected"
+    if client_version == "18.647.2":
+        # The current equipped book has its own paired ready/used samples.
+        # A gray face by itself is only an identity candidate, never an ability
+        # transition. Require the live HP frame and the independently closed
+        # card located again in this same screenshot.
+        if unit_id != "grand_warden" or health is None:
+            evidence["ability_phase_reason"] = "current_warden_equipment_or_live_hp_unverified"
+            return result
+        located = locate_current_deployed_hero_card(path, unit_id, client_version=client_version)
+        evidence["closed_card"] = located
+        if located is None or tuple(located["bbox"]) != box:
+            evidence["ability_phase_reason"] = "current_warden_card_not_independently_closed"
+            return result
+        anchors = {
+            "ready_book": _match(image, TEMPLATES / "hero_warden_18_647_2_ready_book.png",
+                                 (left + 1, 525, left + 48, 572)),
+            "ready_card": _match(image, TEMPLATES / "hero_warden_18_647_2_ready_card.png",
+                                 (left + 28, 621, right - 2, 685)),
+            "used_book": _match(image, TEMPLATES / "hero_warden_18_647_2_used_book.png",
+                                (left + 1, 525, left + 48, 572)),
+            "used_card": _match(image, TEMPLATES / "hero_warden_18_647_2_used_card.png",
+                                (left + 28, 621, right - 2, 685)),
+        }
+        evidence["current_equipment_matches"] = anchors
+        ready = anchors["ready_book"] is not None and anchors["ready_card"] is not None
+        used = anchors["used_book"] is not None and anchors["used_card"] is not None
+        mixed = ((anchors["ready_book"] is not None or anchors["ready_card"] is not None)
+                 and (anchors["used_book"] is not None or anchors["used_card"] is not None))
+        if ready and not mixed:
+            result.update(state="ability_ready", ability_ready=True, ability_used=False)
+            evidence["ability_ready"] = {"hero": unit_id, "equipment_layout": "current_gold_book",
+                                         "active_equipment": anchors["ready_book"],
+                                         "ready_card": anchors["ready_card"],
+                                         "template_source": f"{CURRENT_WARDEN_SKILL_SOURCE}/00025-manual-skill-fresh-action-check.png",
+                                         "source_kind": "agent_visual_prototype"}
+        elif used and not mixed and "battle_used_035742" in str(identity["evidence"][0]["template"]):
+            result.update(state="ability_used", ability_ready=False, ability_used=True)
+            evidence["ability_used"] = {"hero": unit_id, "equipment_layout": "current_gold_book",
+                                        "gray_equipment": anchors["used_book"],
+                                        "gray_card": anchors["used_card"],
+                                        "template_source": f"{CURRENT_WARDEN_SKILL_SOURCE}/00027-manual-skill-after-2.png",
+                                        "source_kind": "agent_visual_prototype"}
+        else:
+            evidence["ability_phase_reason"] = "current_warden_book_card_or_identity_conflict"
+        return result
     if client_version != "18.600.7":
         # The ability portraits and equipment below were sampled only on the
         # older client. Current-card identity/HP may be known independently,
@@ -314,15 +360,27 @@ def locate_current_deployed_hero_card(
                      for shift in (-2, -1, 0, 1, 2)) for edge in (left, right - 3)]
         bottom_contrast = float(gray[709:711, left + 8:right - 8].mean() -
                                 gray[712, left + 8:right - 8].mean())
-        if min(sides) < .5 or bottom_contrast < 40:
+        gray_used_border = None
+        if (unit_id == "grand_warden" and "battle_used_035742" in template_path.name):
+            # The used card loses its purple side colour. Its opposite dark
+            # outline gradients and closed bottom remain visible in 27-29.
+            direction = np.median(cv2.Sobel(gray[625:695], cv2.CV_32F, 1, 0, ksize=3), axis=0)
+            gray_used_border = [float(max(direction[left - 2:left + 3])),
+                                float(min(direction[right - 4:right]))]
+            closed = gray_used_border[0] >= 250 and gray_used_border[1] <= -250
+        else:
+            closed = min(sides) >= .5
+        if not closed or bottom_contrast < 40:
             continue
-        candidates.append((score, (left, top, right, bottom), sides, bottom_contrast, str(template_path)))
+        candidates.append((score, (left, top, right, bottom), sides, bottom_contrast,
+                           str(template_path), gray_used_border))
     if not candidates:
         return None
-    score, box, sides, bottom_contrast, template_path = max(candidates)
+    score, box, sides, bottom_contrast, template_path, gray_used_border = max(candidates, key=lambda row: row[0])
     return {"bbox": list(box), "portrait_score": round(score, 5), "template": template_path,
             "template_client_version": client_version, "frame": str(screenshot_path),
-            "card_sides": sides, "bottom_contrast": bottom_contrast,
+            "card_sides": sides, "gray_used_border": gray_used_border,
+            "bottom_contrast": bottom_contrast,
             "method": "current_versioned_deployed_portrait_and_closed_card"}
 
 

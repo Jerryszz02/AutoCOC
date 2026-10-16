@@ -128,6 +128,52 @@ class CurrentPickerTests(TestCase):
                     self.assertFalse(any(item["action"] == "open_info"
                                          for item in observed["controls"]))
 
+    def test_live_spell_capacity_local_roi_recovers_info_but_never_overrides_conflict(self):
+        source = (Path(__file__).parent / "fixtures" /
+                  "lightning_info_spell_picker_failed_capacity_18_647_2.png")
+        provider = RapidOCRProvider()
+        texts = provider.recognize(source)
+        self.assertFalse(any(item.text.strip() == "11/11" and item.confidence >= .88
+                             for item in texts))  # Real full OCR saw LL/LL.
+        recognizer = ScreenshotRecognizer(provider=provider)
+        recognizer.client_version = "18.647.2"
+        observed = recognizer.recognize(source)
+        editor = observed.observations["army_editor"]
+        self.assertEqual((observed.scene, editor["surface"], editor["editing_kind"]),
+                         ("training", "current_picker", "spell"))
+        self.assertEqual(editor["capacities"]["spell"], {"used": 11, "total": 11})
+        self.assertEqual([item["unit_id"] for item in editor["controls"]
+                          if item["action"] == "open_info"], ["lightning_spell"])
+        self.assertFalse(any(item["action"] == "increment" and item["enabled"]
+                             for item in editor["controls"]))
+
+        image = cv2.imdecode(np.fromfile(source, dtype=np.uint8), cv2.IMREAD_COLOR)
+        image[488:548, 1176:1296] = 0
+        blank = Path(self.directory.name) / "capacity-blank.png"
+        cv2.imencode(".png", image)[1].tofile(blank)
+        unreadable = recognizer.recognize(blank).observations["army_editor"]
+        self.assertFalse(any(item["action"] == "open_info"
+                             for item in unreadable["controls"]))
+
+        read_line = provider.recognize_line
+        def wrong_capacity(path, roi):
+            if tuple(roi) == (1120, 470, 1360, 550):
+                return [OCRText("10/11", .99, tuple(roi))]
+            return read_line(path, roi)
+        with patch.object(provider, "recognize_line", side_effect=wrong_capacity):
+            partial = recognizer.recognize(source).observations["army_editor"]
+        self.assertEqual(partial["capacities"]["spell"], {"used": 10, "total": 11})
+        self.assertFalse(any(item["action"] == "open_info" for item in partial["controls"]))
+
+        conflict = texts + [OCRText("11/11", .99, (1170, 490, 1250, 540)),
+                            OCRText("10/11", .99, (1170, 490, 1250, 540))]
+        with patch.object(provider, "recognize", return_value=conflict):
+            contradictory = recognizer.recognize(source).observations["army_editor"]
+        self.assertIn("picker_spell_capacity_conflict", contradictory["unknowns"])
+        self.assertNotIn("spell", contradictory["capacities"])
+        self.assertFalse(any(item["action"] == "open_info"
+                             for item in contradictory["controls"]))
+
     def test_conflicting_ocr_counts_cannot_be_overridden_by_x1_sample(self):
         sample = cv2.imread(str(Path(__file__).resolve().parents[1] /
                                "assets/catalogs/current_picker_x1_full_18_600_7.png"),

@@ -12,6 +12,8 @@ from pathlib import Path
 import sys
 from uuid import uuid4
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
 from autococ import scene as scene_types
 from autococ.config import load_config
 from autococ.vision import ScreenshotRecognizer

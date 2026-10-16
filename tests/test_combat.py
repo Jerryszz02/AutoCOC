@@ -139,6 +139,164 @@ class CombatTests(unittest.TestCase):
         self.scout_ready = patcher.start()
         self.addCleanup(patcher.stop)
 
+    def _skill_session(self, *, enabled=True):
+        session = FakeSession(complete_frames())
+        session.config.battle = replace(session.config.battle, strategy="edrag_line",
+                                        line_execution_mode="continuous",
+                                        post_deployment_hero_skill="grand_warden" if enabled else "",
+                                        hero_skill_delay_sec=20)
+        return session
+
+    def _run_with_skill(self, session, handler):
+        with patch("autococ.combat._read_continuous_line_army",
+                   side_effect=lambda active, current, evidence: (current, _read_army(current))), \
+             patch.dict("sys.modules", {"autococ.post_deployment_skill": SimpleNamespace(
+                 execute_post_deployment_hero_skill=handler)}):
+            return battle(session)
+
+    def test_skill_disabled_leaves_existing_battle_untouched(self):
+        session = self._skill_session(enabled=False)
+        skill = Mock(side_effect=AssertionError("Disabled skill must not observe or act"))
+        result = self._run_with_skill(session, skill)
+        self.assertEqual(result.status, "succeeded")
+        skill.assert_not_called()
+        self.assertNotIn("hero_skill", result.metrics)
+        self.assertNotIn("hero_skill_plan", result.metrics)
+
+    def test_skill_called_once_after_deployment_with_frozen_choice(self):
+        session = self._skill_session()
+        def deploy(active, scout):
+            active.config.battle = replace(active.config.battle, hero_skill_delay_sec=0)
+            return active.observe("deployment-confirmed")
+        session.deploy = deploy
+        receipt = {"hero_id": "grand_warden", "verified": True, "completed": True,
+                   "evidence": ["skill-before.png", "skill-after.png"]}
+        skill = Mock(side_effect=lambda active, deployed, **options: (deployed, receipt))
+        result = self._run_with_skill(session, skill)
+        self.assertEqual(result.status, "succeeded")
+        skill.assert_called_once_with(session, session.frames[4], hero_id="grand_warden", delay_sec=20)
+        self.assertEqual(result.metrics["hero_skill_plan"], {"hero_id": "grand_warden", "delay_sec": 20})
+        self.assertEqual(result.metrics["hero_skill"], receipt)
+        self.assertIn(Path("skill-after.png"), result.evidence)
+        self.assertTrue(result.metrics["inventory_reconciled"])
+
+    def test_unverified_skill_still_settles_returns_and_keeps_actual_win(self):
+        for reason in ("ability_not_ready", "input_uncertain", "used_state_unverified"):
+            with self.subTest(reason=reason):
+                session = self._skill_session()
+                receipt = {"hero_id": "grand_warden", "verified": False, "completed": False,
+                           "reason": reason, "evidence": ["skill-check.png"]}
+                skill = Mock(side_effect=lambda active, deployed, **options: (deployed, receipt))
+                result = self._run_with_skill(session, skill)
+                self.assertEqual(result.status, "failed")
+                self.assertIn(reason, result.reason)
+                self.assertTrue(result.metrics["victory"])
+                self.assertTrue(result.metrics["inventory_reconciled"])
+                self.assertTrue(result.metrics["returned_home"])
+                self.assertEqual(result.metrics["resources_after"], AFTER)
+                self.assertEqual(skill.call_count, 1)
+
+    def test_skill_can_return_fresh_settlement_without_discarding_it(self):
+        session = self._skill_session()
+        receipt = {"hero_id": "grand_warden", "verified": False, "completed": False,
+                   "reason": "battle_already_settled", "evidence": ["combat-5.png"]}
+        skill = Mock(side_effect=lambda active, deployed, **options:
+                     (active.observe("skill-already-settled"), receipt))
+        result = self._run_with_skill(session, skill)
+        self.assertEqual(result.status, "failed")
+        self.assertTrue(result.metrics["inventory_reconciled"])
+        self.assertNotIn("battle-settlement", session.observe_labels)
+
+    def test_unexpected_skill_error_keeps_attempt_and_finishes_battle_from_fresh_frames(self):
+        for error in (RuntimeError("template decode failed"), ValueError("invalid skill result"),
+                      CaptureError("skill capture failed")):
+            with self.subTest(error=type(error).__name__):
+                session = self._skill_session()
+                def fail(active, deployed, **options):
+                    active.post_deployment_skill_receipt = {"attempted": True, "input_count": 1,
+                                                           "evidence": ["skill-before.png"]}
+                    active.last_snapshot = None
+                    raise error
+                result = self._run_with_skill(session, fail)
+                self.assertEqual(result.status, "failed")
+                self.assertIn("unexpected_skill_error", result.reason)
+                self.assertTrue(result.metrics["hero_skill"]["attempted"])
+                self.assertEqual(result.metrics["hero_skill"]["input_count"], 1)
+                self.assertIn(type(error).__name__, result.metrics["hero_skill"]["error"])
+                self.assertTrue(result.metrics["returned_home"])
+                self.assertTrue(result.metrics["victory"])
+                self.assertTrue(result.metrics["inventory_reconciled"])
+                self.assertIn("battle-settlement", session.observe_labels)
+                self.assertEqual(session.deploy_calls, 1)
+
+    def test_incomplete_deployment_never_runs_skill(self):
+        session = self._skill_session()
+        session.frames[4].observations["deployment"]["completed"] = False
+        skill = Mock(side_effect=AssertionError("Incomplete deployment must not use skill"))
+        result = self._run_with_skill(session, skill)
+        skill.assert_not_called()
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.metrics["hero_skill"]["reason"], "deployment_incomplete")
+        self.assertTrue(result.metrics["inventory_reconciled"])
+
+    def test_skill_stop_and_account_conflict_do_not_continue_inputs(self):
+        for error in (StopRequested("user stopped"), FlowError("Game interruption: account_in_use")):
+            with self.subTest(error=type(error).__name__):
+                session = self._skill_session()
+                skill = Mock(side_effect=error)
+                if isinstance(error, StopRequested):
+                    with self.assertRaises(StopRequested):
+                        self._run_with_skill(session, skill)
+                else:
+                    result = self._run_with_skill(session, skill)
+                    self.assertEqual(result.status, "failed")
+                    self.assertIn("account_in_use", result.reason)
+                self.assertFalse(any("return_home" in reason for _, reason in session.taps))
+                self.assertEqual(session.last_snapshot, session.frames[4])
+
+    def test_skill_rejects_vision_combination_before_any_game_input(self):
+        session = self._skill_session()
+        session.config.vision_agent = VisionAgentConfig(enabled=True)
+        skill = Mock()
+        result = self._run_with_skill(session, skill)
+        self.assertEqual(result.status, "not_supported")
+        self.assertIn("model-free", result.reason)
+        self.assertEqual(session.taps, [])
+        self.assertEqual(session.observe_labels, [])
+        skill.assert_not_called()
+
+    def test_unexpected_skill_error_with_current_account_conflict_stops_inputs(self):
+        session = self._skill_session()
+        conflict = frame(12, "account_in_use")
+        def fail(active, deployed, **options):
+            active.post_deployment_skill_receipt = {"attempted": True, "input_count": 1,
+                                                   "evidence": ["skill-before.png"]}
+            active.last_snapshot = conflict
+            raise ValueError("skill recognition failed")
+        result = self._run_with_skill(session, fail)
+        self.assertEqual(result.status, "failed")
+        self.assertIn("account_in_use", result.reason)
+        self.assertTrue(result.metrics["hero_skill"]["attempted"])
+        self.assertEqual(result.metrics["hero_skill"]["input_count"], 1)
+        self.assertIs(session.last_snapshot, conflict)
+        self.assertNotIn("battle-settlement", session.observe_labels)
+        self.assertFalse(any("return_home" in reason for _, reason in session.taps))
+
+    def test_unexpected_skill_error_at_deadline_keeps_attempt_without_more_inputs(self):
+        session = self._skill_session()
+        def fail(active, deployed, **options):
+            active.post_deployment_skill_receipt = {"attempted": True, "input_count": 1,
+                                                   "evidence": ["skill-before.png"]}
+            active.check_deadline = Mock(side_effect=FlowError("Session or task deadline exceeded"))
+            raise RuntimeError("post-skill observation failed")
+        result = self._run_with_skill(session, fail)
+        self.assertEqual(result.status, "failed")
+        self.assertIn("deadline exceeded", result.reason)
+        self.assertTrue(result.metrics["hero_skill"]["attempted"])
+        self.assertEqual(result.metrics["hero_skill"]["input_count"], 1)
+        self.assertNotIn("battle-settlement", session.observe_labels)
+        self.assertFalse(any("return_home" in reason for _, reason in session.taps))
+
     @staticmethod
     def _probed_boundary_error(**updates):
         receipt = {"phase": "boundary_scan", "deployed_units": 0,

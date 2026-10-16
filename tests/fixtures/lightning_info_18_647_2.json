@@ -137,6 +137,43 @@
         ]
       ],
       "kind": "detail"
+    },
+    {
+      "fixture": "lightning_info_spell_picker_failed_capacity_18_647_2.png",
+      "fixture_sha256": "802485fc5e0f1f273476ab4ba5c8012a7f0aac29c21c4843d57dd57482a8e766",
+      "source_frame": "reports/completion-20261015/probes/20261016-035607-lightning-info-flow/frames/00006-lightning-picker-before-info.png",
+      "source_sha256": "2ef3fc539d41ad7bc5ad7761cd57957c641242c364cdf25a9ec41aa172dc1652",
+      "kind": "picker",
+      "fixture_resolution": [
+        2560,
+        1440
+      ],
+      "retained_rois_native": [
+        [
+          40,
+          84,
+          224,
+          210
+        ],
+        [
+          870,
+          10,
+          2500,
+          210
+        ],
+        [
+          860,
+          220,
+          2180,
+          690
+        ],
+        [
+          0,
+          770,
+          2560,
+          1440
+        ]
+      ]
     }
   ],
   "fixture_derivation": {
@@ -152,7 +189,8 @@
       0
     ],
     "retained_roi_order": "frames[].retained_rois_1280 copied in listed order from resized source",
-    "encode": "cv2.imencode PNG"
+    "encode": "cv2.imencode PNG",
+    "native_frame_exception": "frames with fixture_resolution retain source resolution and copy retained_rois_native without resize"
   },
   "blue_info_source_frame": "reports/completion-20261015/probes/20261016-032115-readonly-picker-pages/frames/00008-spell-picker-first-page.png",
   "blue_info_source_sha256": "4b913255bbfccac2b15d6aea610d9b43778ad66630270a3efb74470ace6d73a4",

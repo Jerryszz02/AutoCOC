@@ -137,6 +137,27 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(ConfigError):
             BattleConfig(strategy="edrag_line", line_execution_mode="continuous", line_tactics="unknown")
 
+    def test_post_deployment_skill_is_explicit_scoped_and_bounded(self):
+        self.assertEqual(BattleConfig().post_deployment_hero_skill, "")
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text('[battle]\nstrategy="edrag_line"\nline_execution_mode="continuous"\n'
+                            'post_deployment_hero_skill="grand_warden"\nhero_skill_delay_sec=20\n', encoding="utf-8")
+            config = load_config(path).battle
+            self.assertEqual(config.post_deployment_hero_skill, "grand_warden")
+            self.assertEqual(config.hero_skill_delay_sec, 20)
+        for changes in ({"strategy": "verified", "line_execution_mode": "verified"},
+                        {"line_execution_mode": "verified"}, {"strategy_file": "custom.toml"},
+                        {"post_deployment_hero_skill": "archer_queen"},
+                        {"post_deployment_hero_skill": None}, {"post_deployment_hero_skill": []},
+                        {"hero_skill_delay_sec": -1}, {"hero_skill_delay_sec": 31},
+                        {"hero_skill_delay_sec": True}, {"hero_skill_delay_sec": 1.5}):
+            values = {"strategy": "edrag_line", "line_execution_mode": "continuous",
+                      "post_deployment_hero_skill": "grand_warden"}
+            values.update(changes)
+            with self.subTest(changes=changes), self.assertRaises(ConfigError):
+                BattleConfig(**values)
+
     def test_legacy_weights_are_explicitly_ignored_for_existing_local_configs(self) -> None:
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.toml"

@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import cv2
+import numpy as np
 import pytest
 
 from autococ.frozen_line import _post_troop_reading
@@ -41,11 +42,38 @@ def test_real_toolbar_provenance_and_current_deployed_templates_are_hash_bound()
         assert row["retained_roi_native"] == [0, 1090, 2560, 1440]
     new_queen = current["_queen_template"]
     later = json.loads((FIXTURES / "current_post_hero_005304.provenance.json").read_text(encoding="utf-8"))
-    later_sources = {row["path"]: row["source_sha256"] for row in later["assets"]}
+    later_sources = {row["path"]: row for row in later["assets"]}
+    skill = json.loads((FIXTURES / "hero_skill_035742_18_647_2.provenance.json").read_text(encoding="utf-8"))
+    skill_path = "units/grand_warden_battle_used_035742_18_647_2.png"
+    skill_asset = skill["assets"][Path(skill_path).name]
+    skill_fixture = skill["fixtures"]["hero_skill_035742_00027_18_647_2.png"]
+    assert skill_fixture["source_sha256"] == skill_asset["source_sha256"]
+    assert skill_fixture["source_frame"] == skill_asset["source_frame"]
+    assert skill_fixture["retained_roi_1280"] == [0, 515, 1280, 720]
+    skill_toolbar = FIXTURES / "hero_skill_035742_00027_18_647_2.png"
+    assert sha256(skill_toolbar.read_bytes()).hexdigest() == skill_fixture["fixture_sha256"]
     for row in entries:
-        expected_source = (later_sources[row["path"]] if row["path"] in later_sources
-                           else new_queen["source_sha256"] if row["path"].endswith("001038_18_647_2.png")
-                           else evidence[toolbar(16).name]["source_sha256"])
+        if row["path"] in later_sources:
+            provenance = later_sources[row["path"]]
+            assert row["source_frame"] == provenance["source_frame"]
+            expected_source = provenance["source_sha256"]
+        elif row["path"] == skill_path:
+            assert row["source_frame"] == skill_asset["source_frame"]
+            assert row["source_bbox_1280"] == skill_asset["source_bbox_1280"]
+            assert row["template_sha256"] == skill_asset["asset_sha256"]
+            expected_source = skill_asset["source_sha256"]
+            image = cv2.imdecode(np.fromfile(skill_toolbar, np.uint8), cv2.IMREAD_COLOR)
+            left, top, right, bottom = row["source_bbox_1280"]
+            template = cv2.imdecode(np.fromfile(CATALOG_ROOT / row["path"], np.uint8), cv2.IMREAD_COLOR)
+            assert np.array_equal(template, image[top:bottom, left:right])
+        elif row["path"].endswith("001038_18_647_2.png"):
+            assert Path(new_queen["source"]).as_posix().endswith(row["source_frame"])
+            expected_source = new_queen["source_sha256"]
+        else:
+            # Only the four original 215245 deployed portraits may use this
+            # original source; a newly added sample must declare provenance.
+            assert Path(evidence[toolbar(16).name]["source"]).as_posix().endswith(row["source_frame"])
+            expected_source = evidence[toolbar(16).name]["source_sha256"]
         assert row["source_sha256"] == expected_source
         assert sha256((CATALOG_ROOT / row["path"]).read_bytes()).hexdigest() == row["template_sha256"]
     assert new_queen["template_sha256"] == next(row["template_sha256"] for row in entries
