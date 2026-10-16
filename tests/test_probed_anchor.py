@@ -1,5 +1,7 @@
-"""Synthetic safety contracts; these tests do not constitute live deployment proof."""
+"""Probe safety contracts and lower-toolbar replay; no live deployment proof."""
 
+import hashlib
+import json
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +14,7 @@ from autococ.errors import DeploymentError, FlowError, StopRequested
 from autococ.frozen_line import FrozenLinePlan, _file_sha256, _plan_digest
 from autococ.prepared_battle import FramePacket, PreparedInput
 from autococ.probed_anchor import (_balloon_count, _current_frame, _remaining_roster_checkpoint,
+                                   _current_card_edges,
                                    execute_probed_anchor_line,
                                    freeze_probed_anchor_line, remainder_burst_limit,
                                    verify_exact_anchor_camera)
@@ -24,13 +27,16 @@ TERRAIN = ({"edge": 0, "point": (400, 200)}, {"edge": 0, "point": (350, 300)},
 TROOPS = (("electro_dragon", 10), ("dragon", 1), ("baby_dragon", 1),
           ("balloon", 2), ("archer", 3))
 HEROES = ("grand_warden", "archer_queen", "dragon_duke", "minion_prince")
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
-def image_frame(tmp_path, name, scene, observed):
+def image_frame(tmp_path, name, scene, observed, *, fast=False):
     path = tmp_path / f"{name}.png"
     path.write_bytes(f"frame {name}".encode())
     return SceneSnapshot(scene, .99, path, {"observed_at_monotonic": observed,
         "source_resolution": (2560, 1440), "baseline_resolution": (1280, 720),
+        **({"recognition_scope": "troop_count", "fast_fallback": False,
+            "matched_reasons": ["two_current_hud_anchors"]} if fast else {}),
         "battle": {"slots": []}})
 
 
@@ -38,7 +44,8 @@ def frozen_base(tmp_path):
     source = image_frame(tmp_path, "source", "enemy_village", 9.)
     before = image_frame(tmp_path, "before", "enemy_village", 8.)
     troop_cards = tuple((unit_id, "army", count, (150 + index * 90, 650),
-                         (110 + index * 90, 595, 190 + index * 90, 710))
+                         ((108, 589, 193, 708) if index == 0 else
+                          (110 + index * 90, 595, 190 + index * 90, 711)))
                         for index, (unit_id, count) in enumerate(TROOPS))
     heroes = tuple((hero_id, (600 + index * 80, 595, 680 + index * 80, 710))
                   for index, hero_id in enumerate(HEROES))
@@ -97,7 +104,7 @@ class Session:
         assert self._active_frozen_plan == (plan_id, self._active_frozen_plan[1], point)
         self.inputs.append(("frozen", tuple(point)))
 
-    def observe(self, label):
+    def observe(self, label, **_kwargs):
         self.last_snapshot = None  # GameSession invalidates old frame before capture.
         next_frame = next(self.observations)
         if isinstance(next_frame, BaseException):
@@ -109,16 +116,24 @@ class Session:
 def make_plan(monkeypatch, tmp_path):
     base, source = frozen_base(tmp_path)
     monkeypatch.setattr("autococ.probed_anchor.freeze_model_free_line", lambda *_a, **_kw: base)
+    monkeypatch.setattr("autococ.probed_anchor._cards", lambda *_a, **_kw: tuple(
+        {"kind": "troop", "unit_id": unit_id, "source": source_kind,
+         "count": count, "point": point,
+         "bbox": (110, 595, 190, 711) if index == 0 else bbox}
+        for index, (unit_id, source_kind, count, point, bbox) in enumerate(base.troop_cards)))
     monkeypatch.setattr("autococ.probed_anchor._foreground_now", lambda _session: None)
     monkeypatch.setattr("autococ.probed_anchor._remaining_roster_checkpoint",
                         lambda _session, _plan, snapshot: {"frame": str(snapshot.screenshot_path)})
     session = Session(source, [])
-    plan = freeze_probed_anchor_line(session, source, terrain=list(TERRAIN))
+    before = SceneSnapshot("enemy_village", .99, Path(base.toolbar_before_frame_id),
+                           {"observed_at_monotonic": 8., "source_resolution": (2560, 1440),
+                            "baseline_resolution": (1280, 720), "battle": {"slots": []}})
+    plan = freeze_probed_anchor_line(session, source, terrain=list(TERRAIN), toolbar_before=before)
     return plan, source
 
 
 def test_frozen_plan_uses_only_two_precompiled_points_and_preserves_21_deployments(monkeypatch, tmp_path):
-    plan, _ = make_plan(monkeypatch, tmp_path)
+    plan, source = make_plan(monkeypatch, tmp_path)
     assert plan.anchors == ((375, 250), (525, 450))
     assert len([a for a in plan.remaining if a.kind == "deploy"]) == 19
     assert {a.point for a in plan.remaining if a.kind == "deploy"} == set(plan.anchors)
@@ -126,6 +141,11 @@ def test_frozen_plan_uses_only_two_precompiled_points_and_preserves_21_deploymen
     assert [a.unit_id for a in plan.remaining if a.kind == "deploy"].count("balloon") == 0
     assert len(plan.base.actions) == 30  # Existing two-edge split order is unchanged.
     assert remainder_burst_limit(plan) == 7.75
+    assert plan.base.troop_cards[0][4] != plan.checkpoint_cards[0][2]
+    assert plan.checkpoint_cards[0][2] == (110, 595, 190, 711)
+    with pytest.raises(FlowError, match="permission"):
+        execute_probed_anchor_line(Session(source, []),
+                                   replace(plan, checkpoint_cards=()), clock=lambda: 10.)
 
 
 def test_probed_plan_rejects_unsupported_baseline_before_freezing(monkeypatch, tmp_path):
@@ -136,9 +156,18 @@ def test_probed_plan_rejects_unsupported_baseline_before_freezing(monkeypatch, t
         freeze_probed_anchor_line(session, source, terrain=list(TERRAIN))
 
 
+def test_checkpoint_geometry_must_come_from_the_frozen_before_frame(monkeypatch, tmp_path):
+    plan, source = make_plan(monkeypatch, tmp_path)
+    other = image_frame(tmp_path, "unrelated-toolbar", "enemy_village", 8.)
+    with pytest.raises(FlowError, match="frozen toolbar frame"):
+        freeze_probed_anchor_line(Session(source, []), source, terrain=list(TERRAIN),
+                                  toolbar_before=other)
+    assert plan.checkpoint_cards[0][2] != plan.base.troop_cards[0][4]
+
+
 def test_two_probes_once_then_frozen_remainder_and_complete_receipt(monkeypatch, tmp_path):
     plan, source = make_plan(monkeypatch, tmp_path)
-    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1)
+    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1, fast=True)
     first = image_frame(tmp_path, "first", "battle", 10.2)
     second = image_frame(tmp_path, "second", "battle", 10.3)
     session = Session(source, [selected, first, second])
@@ -146,7 +175,7 @@ def test_two_probes_once_then_frozen_remainder_and_complete_receipt(monkeypatch,
                         lambda _s, _p, snapshot, **_kw: {"frame": str(snapshot.screenshot_path),
                             "sha256": _file_sha256(snapshot.screenshot_path)})
     monkeypatch.setattr("autococ.probed_anchor._balloon_count",
-                        lambda _s, _p, _frame, expected: {"count": expected})
+                        lambda _s, _p, _frame, expected, **_kw: {"count": expected})
     monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_a: plan.balloon_bbox)
     def verify(_session, _base, receipt, _when, *, sleep):
         receipt["verified"] = receipt["completed"] = True
@@ -167,13 +196,141 @@ def test_two_probes_once_then_frozen_remainder_and_complete_receipt(monkeypatch,
     assert len(session.inputs) == receipt["input_count"]
 
 
+def test_selection_waits_for_fresh_border_without_repeating_select(monkeypatch, tmp_path):
+    plan, source = make_plan(monkeypatch, tmp_path)
+    unselected = image_frame(tmp_path, "unselected", "enemy_village", 10.1, fast=True)
+    selected = image_frame(tmp_path, "selected", "enemy_village", 10.2, fast=True)
+    first = image_frame(tmp_path, "first", "battle", 10.3)
+    second = image_frame(tmp_path, "second", "battle", 10.4)
+    session = Session(source, [unselected, selected, first, second])
+    monkeypatch.setattr("autococ.probed_anchor._current_frame",
+                        lambda _s, _p, snapshot, **_kw: {"frame": str(snapshot.screenshot_path),
+                            "sha256": _file_sha256(snapshot.screenshot_path)})
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox",
+                        lambda path, *_a: None if path == unselected.screenshot_path else plan.balloon_bbox)
+    readings = []
+    def count(_session, _plan, snapshot, expected, **kwargs):
+        readings.append((snapshot.screenshot_path.name, expected, kwargs))
+        return {"count": expected}
+    monkeypatch.setattr("autococ.probed_anchor._balloon_count", count)
+    monkeypatch.setattr("autococ.probed_anchor._verify_frozen_line_post",
+                        lambda _s, _p, receipt, _when, *, sleep: second)
+    assert execute_probed_anchor_line(session, plan, clock=lambda: 10., sleep=lambda _: None) is second
+    assert [point for kind, point in session.inputs if kind == "tap" and point == plan.balloon_point] == [plan.balloon_point]
+    assert [item[:2] for item in readings] == [("unselected.png", 2), ("selected.png", 2),
+                                                ("first.png", 1), ("second.png", 0)]
+    assert readings[0][2]["selected"] is False and readings[1][2]["selected"] is True
+
+
+@pytest.mark.parametrize("failure", ("three_unselected", "fast_scene", "fast_conflict", "three_seconds"))
+def test_selected_fast_gate_fails_with_one_select_and_no_probe(monkeypatch, tmp_path, failure):
+    plan, source = make_plan(monkeypatch, tmp_path)
+    frames = [image_frame(tmp_path, f"wait-{index}", "enemy_village", 10.1 + index * .1,
+                          fast=True) for index in range(3)]
+    if failure == "fast_scene":
+        frames[0].observations["matched_reasons"] = ["inherited_preview"]
+    if failure == "fast_conflict":
+        frames[0].observations["deployment_count_conflict"] = {"counts": [1, 2]}
+        frames[0] = replace(frames[0], scene="unknown")
+    session = Session(source, frames)
+    monkeypatch.setattr("autococ.probed_anchor._current_frame",
+                        lambda _s, _p, snapshot, **_kw: {"sha256": _file_sha256(snapshot.screenshot_path)})
+    monkeypatch.setattr("autococ.probed_anchor._balloon_count",
+                        lambda *_a, **_kw: {"count": 2})
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_a: None)
+    now = [10.]
+    if failure == "three_seconds":
+        old_observe = session.observe
+        def slow_observe(label, **kwargs):
+            snapshot = old_observe(label, **kwargs)
+            now[0] = 13.1
+            return snapshot
+        session.observe = slow_observe
+    with pytest.raises(DeploymentError) as raised:
+        execute_probed_anchor_line(session, plan, clock=lambda: now[0])
+    assert raised.value.partial_receipt["issued_placements"] == 0
+    assert session.inputs == [("tap", plan.balloon_point)]
+    assert len(raised.value.partial_receipt["evidence"]) == (4 if failure == "three_unselected" else 2)
+    if failure == "fast_conflict":
+        assert "strong_count_conflict" in str(raised.value)
+
+
+def test_first_probe_pending_count_uses_second_frame_without_replaying(monkeypatch, tmp_path):
+    plan, source = make_plan(monkeypatch, tmp_path)
+    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1, fast=True)
+    pending = image_frame(tmp_path, "pending", "battle", 10.2)
+    consumed = image_frame(tmp_path, "consumed", "battle", 10.3)
+    second = image_frame(tmp_path, "second", "battle", 10.4)
+    session = Session(source, [selected, pending, consumed, second])
+    monkeypatch.setattr("autococ.probed_anchor._current_frame",
+                        lambda _s, _p, snapshot, **_kw: {"frame": str(snapshot.screenshot_path),
+                            "sha256": _file_sha256(snapshot.screenshot_path)})
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_a: plan.balloon_bbox)
+    def count(_session, _plan, snapshot, expected, **kwargs):
+        return {"count": 2 if snapshot is pending else expected}
+    monkeypatch.setattr("autococ.probed_anchor._balloon_count", count)
+    monkeypatch.setattr("autococ.probed_anchor._verify_frozen_line_post",
+                        lambda _s, _p, receipt, _when, *, sleep: second)
+    assert execute_probed_anchor_line(session, plan, clock=lambda: 10., sleep=lambda _: None) is second
+    receipt = session.frozen_line_receipt
+    assert receipt["probe_events"][0]["after"]["frame"] == str(consumed.screenshot_path)
+    assert receipt["attempted_placements"] == receipt["issued_placements"] == 21
+    assert [point for kind, point in session.inputs if kind == "tap" and point in plan.anchors] == list(plan.anchors)
+
+
+def test_two_pending_probe_frames_never_authorize_second_input(monkeypatch, tmp_path):
+    plan, source = make_plan(monkeypatch, tmp_path)
+    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1, fast=True)
+    pending1 = image_frame(tmp_path, "pending-1", "battle", 10.2)
+    pending2 = image_frame(tmp_path, "pending-2", "battle", 10.3)
+    session = Session(source, [selected, pending1, pending2])
+    monkeypatch.setattr("autococ.probed_anchor._current_frame",
+                        lambda _s, _p, snapshot, **_kw: {"frame": str(snapshot.screenshot_path),
+                            "sha256": _file_sha256(snapshot.screenshot_path)})
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_a: plan.balloon_bbox)
+    monkeypatch.setattr("autococ.probed_anchor._balloon_count",
+                        lambda _s, _p, _snapshot, expected, **_kw: {"count": 2})
+    with pytest.raises(DeploymentError, match="complete battle/count/camera proof") as raised:
+        execute_probed_anchor_line(session, plan, clock=lambda: 10.)
+    assert raised.value.partial_receipt["issued_placements"] == 1
+    assert raised.value.partial_receipt["probe_events"][0]["status"] == "input_sent"
+    assert session.inputs == [("tap", plan.balloon_point), ("tap", plan.anchors[0])]
+
+
+@pytest.mark.parametrize("when", ("before_select", "before_first_probe"))
+def test_stop_arriving_during_foreground_proof_prevents_next_input(monkeypatch, tmp_path, when):
+    plan, source = make_plan(monkeypatch, tmp_path)
+    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1, fast=True)
+    session = Session(source, [selected])
+    stopped = [False]
+    checks = [0]
+    def foreground(_session):
+        checks[0] += 1
+        if when == "before_select" and checks[0] == 1 or when == "before_first_probe" and checks[0] == 2:
+            stopped[0] = True
+    def check_deadline():
+        if stopped[0]:
+            raise StopRequested("stopped after foreground observation")
+    session.check_deadline = check_deadline
+    monkeypatch.setattr("autococ.probed_anchor._foreground_now", foreground)
+    monkeypatch.setattr("autococ.probed_anchor._current_frame",
+                        lambda _s, _p, snapshot, **_kw: {"frame": str(snapshot.screenshot_path),
+                            "sha256": _file_sha256(snapshot.screenshot_path)})
+    monkeypatch.setattr("autococ.probed_anchor._balloon_count", lambda *_a, **_kw: {"count": 2})
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_a: plan.balloon_bbox)
+    with pytest.raises(StopRequested):
+        execute_probed_anchor_line(session, plan, clock=lambda: 10.)
+    assert session.inputs == ([] if when == "before_select" else [("tap", plan.balloon_point)])
+    assert session.frozen_line_receipt["issued_placements"] == 0
+
+
 def test_failed_probe_capture_has_partial_receipt_and_never_replays(monkeypatch, tmp_path):
     plan, source = make_plan(monkeypatch, tmp_path)
-    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1)
+    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1, fast=True)
     session = Session(source, [selected, FlowError("capture failed")])
     monkeypatch.setattr("autococ.probed_anchor._current_frame",
                         lambda _s, _p, snapshot, **_kw: {"sha256": _file_sha256(snapshot.screenshot_path)})
-    monkeypatch.setattr("autococ.probed_anchor._balloon_count", lambda *_a: {"count": 2})
+    monkeypatch.setattr("autococ.probed_anchor._balloon_count", lambda *_a, **_kw: {"count": 2})
     monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_a: plan.balloon_bbox)
     with pytest.raises(DeploymentError) as raised:
         execute_probed_anchor_line(session, plan, clock=lambda: 10.)
@@ -203,12 +360,12 @@ def test_selected_card_capture_failure_records_selection_input_not_full_batch(mo
 @pytest.mark.parametrize("mutation", ("before_select", "before_probe"))
 def test_foreground_check_cannot_authorize_pixels_changed_before_input(monkeypatch, tmp_path, mutation):
     plan, source = make_plan(monkeypatch, tmp_path)
-    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1)
+    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1, fast=True)
     session = Session(source, [selected])
     monkeypatch.setattr("autococ.probed_anchor._current_frame",
                         lambda _s, _p, snapshot, **_kw: {"frame": str(snapshot.screenshot_path),
                             "sha256": _file_sha256(snapshot.screenshot_path)})
-    monkeypatch.setattr("autococ.probed_anchor._balloon_count", lambda *_a: {"count": 2})
+    monkeypatch.setattr("autococ.probed_anchor._balloon_count", lambda *_a, **_kw: {"count": 2})
     monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_a: plan.balloon_bbox)
     checks = [0]
     def foreground(_session):
@@ -225,14 +382,14 @@ def test_foreground_check_cannot_authorize_pixels_changed_before_input(monkeypat
 
 def test_strong_count_conflict_stops_probe_without_next_frame_or_replay(monkeypatch, tmp_path):
     plan, source = make_plan(monkeypatch, tmp_path)
-    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1)
+    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1, fast=True)
     first = image_frame(tmp_path, "first", "battle", 10.2)
     second = image_frame(tmp_path, "second", "battle", 10.3)
     session = Session(source, [selected, first, second])
     monkeypatch.setattr("autococ.probed_anchor._current_frame",
                         lambda _s, _p, snapshot, **_kw: {"frame": str(snapshot.screenshot_path),
                             "sha256": _file_sha256(snapshot.screenshot_path)})
-    def conflicting_count(_session, _plan, snapshot, expected):
+    def conflicting_count(_session, _plan, snapshot, expected, **_kw):
         if snapshot is first:
             raise FlowError("Probe strong_count_conflict between full card and local OCR")
         return {"count": expected}
@@ -249,14 +406,14 @@ def test_strong_count_conflict_stops_probe_without_next_frame_or_replay(monkeypa
 
 def test_completed_probe_proof_after_six_second_budget_cannot_send_next_input(monkeypatch, tmp_path):
     plan, source = make_plan(monkeypatch, tmp_path)
-    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1)
+    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1, fast=True)
     first = image_frame(tmp_path, "first", "battle", 10.2)
     session = Session(source, [selected, first])
     now = [10.]
     monkeypatch.setattr("autococ.probed_anchor._current_frame",
                         lambda _s, _p, snapshot, **_kw: {"frame": str(snapshot.screenshot_path),
                             "sha256": _file_sha256(snapshot.screenshot_path)})
-    def slow_count(_session, _plan, snapshot, expected):
+    def slow_count(_session, _plan, snapshot, expected, **_kw):
         if snapshot is first:
             now[0] = 16.1
         return {"count": expected}
@@ -271,7 +428,7 @@ def test_completed_probe_proof_after_six_second_budget_cannot_send_next_input(mo
 @pytest.mark.parametrize("changed", ("budget", "source_pixels", "probe_pixels"))
 def test_final_checkpoint_rechecks_total_budget_and_all_source_pixels(monkeypatch, tmp_path, changed):
     plan, source = make_plan(monkeypatch, tmp_path)
-    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1)
+    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1, fast=True)
     first = image_frame(tmp_path, "first", "battle", 10.2)
     second = image_frame(tmp_path, "second", "battle", 10.3)
     session = Session(source, [selected, first, second])
@@ -280,7 +437,7 @@ def test_final_checkpoint_rechecks_total_budget_and_all_source_pixels(monkeypatc
                         lambda _s, _p, snapshot, **_kw: {"frame": str(snapshot.screenshot_path),
                             "sha256": _file_sha256(snapshot.screenshot_path)})
     monkeypatch.setattr("autococ.probed_anchor._balloon_count",
-                        lambda _s, _p, _frame, expected: {"count": expected})
+                        lambda _s, _p, _frame, expected, **_kw: {"count": expected})
     monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_a: plan.balloon_bbox)
     def checkpoint(_session, _plan, snapshot):
         if changed == "budget":
@@ -301,11 +458,11 @@ def test_final_checkpoint_rechecks_total_budget_and_all_source_pixels(monkeypatc
 
 def test_probe_stop_propagates_without_replay(monkeypatch, tmp_path):
     plan, source = make_plan(monkeypatch, tmp_path)
-    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1)
+    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1, fast=True)
     session = Session(source, [selected, StopRequested("stop")])
     monkeypatch.setattr("autococ.probed_anchor._current_frame",
                         lambda _s, _p, snapshot, **_kw: {"sha256": _file_sha256(snapshot.screenshot_path)})
-    monkeypatch.setattr("autococ.probed_anchor._balloon_count", lambda *_a: {"count": 2})
+    monkeypatch.setattr("autococ.probed_anchor._balloon_count", lambda *_a, **_kw: {"count": 2})
     monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_a: plan.balloon_bbox)
     with pytest.raises(StopRequested):
         execute_probed_anchor_line(session, plan, clock=lambda: 10.)
@@ -314,11 +471,11 @@ def test_probe_stop_propagates_without_replay(monkeypatch, tmp_path):
 
 def test_uncertain_probe_transport_records_exact_attempt_without_retry(monkeypatch, tmp_path):
     plan, source = make_plan(monkeypatch, tmp_path)
-    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1)
+    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1, fast=True)
     session = Session(source, [selected])
     monkeypatch.setattr("autococ.probed_anchor._current_frame",
                         lambda _s, _p, snapshot, **_kw: {"sha256": _file_sha256(snapshot.screenshot_path)})
-    monkeypatch.setattr("autococ.probed_anchor._balloon_count", lambda *_a: {"count": 2})
+    monkeypatch.setattr("autococ.probed_anchor._balloon_count", lambda *_a, **_kw: {"count": 2})
     monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_a: plan.balloon_bbox)
     original_tap = session.tap
     def uncertain_tap(snapshot, point, *, reason):
@@ -350,6 +507,16 @@ def test_current_count_refuses_conflict_wrong_version_and_missing_border(monkeyp
                "readings": [{"text": "x1", "confidence": .99}]}
     monkeypatch.setattr("autococ.probed_anchor._post_troop_reading", lambda *_a, **_kw: reading)
     assert _balloon_count(session, plan, image, 1) is reading
+    image.observations["recognition_scope"] = "troop_count"
+    image.observations["deployment_count_reads"] = [{"frame": str(image.screenshot_path),
+        "slot_bbox": list(plan.balloon_bbox), "count": 2, "confidence": .99}]
+    with pytest.raises(FlowError, match="strong_count_conflict between fast"):
+        _balloon_count(session, plan, image, 1)
+    image.observations["deployment_count_reads"] = []
+    with pytest.raises(FlowError, match="fast current-card count lacks"):
+        _balloon_count(session, plan, image, 1)
+    del image.observations["recognition_scope"]
+    del image.observations["deployment_count_reads"]
     reading["readings"].append({"text": "x0", "confidence": .99})
     with pytest.raises(FlowError):
         _balloon_count(session, plan, image, 1)
@@ -366,6 +533,88 @@ def test_current_count_refuses_conflict_wrong_version_and_missing_border(monkeyp
     monkeypatch.setattr("autococ.probed_anchor._closed_card_border",
                         lambda _image, _box: {"left_edge": 300, "right_edge": -200, "bottom_contrast": 50})
     assert _balloon_count(session, plan, image, 0) is reading
+
+
+def test_selected_positive_count_rebinds_frozen_source_and_current_border(monkeypatch, tmp_path):
+    plan, source = make_plan(monkeypatch, tmp_path)
+    image = image_frame(tmp_path, "selected-balloon", "enemy_village", 10.2)
+    session = Session(image, [])
+    reading = {"count": 2, "confidence": .99, "portrait_score": .935,
+               "portrait_source": "current_frame_saved_battle_portrait",
+               "frame": str(image.screenshot_path), "slot_bbox": list(plan.balloon_bbox),
+               "readings": [{"text": "x2", "confidence": .99}]}
+    monkeypatch.setattr("autococ.probed_anchor._post_troop_reading", lambda *_a, **_kw: reading)
+    monkeypatch.setattr("autococ.images.read_frame", lambda _path: np.zeros((720, 1280, 3), dtype=np.uint8))
+    identity = {"unit_id": "balloon", "confidence": .967, "version_verified": True,
+                "template_client_version": "18.647.2"}
+    monkeypatch.setattr("autococ.unit_catalog.recognize_card_identity", lambda *_a, **_kw: identity)
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_a: plan.balloon_bbox)
+    assert _balloon_count(session, plan, image, 2, source_bound=True, selected=True)["selected_card_border"] == list(plan.balloon_bbox)
+    assert reading["source_identity_frame"] == str(source.screenshot_path)
+    image.observations["battle"]["slots"] = [{"unit_id": "electro_dragon",
+        "bbox": list(plan.balloon_bbox), "count": 2, "confidence": .99}]
+    with pytest.raises(FlowError, match="current-card identity conflicts"):
+        _balloon_count(session, plan, image, 2, source_bound=True, selected=True)
+    image.observations["battle"]["slots"] = []
+    identity["template_client_version"] = "18.600.7"
+    with pytest.raises(FlowError, match="source balloon versioned identity"):
+        _balloon_count(session, plan, image, 2, source_bound=True, selected=True)
+    identity["template_client_version"] = "18.647.2"
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_a: None)
+    with pytest.raises(FlowError, match="closed current card border"):
+        _balloon_count(session, plan, image, 2, source_bound=True, selected=True)
+    source.screenshot_path.write_bytes(b"source pixels changed")
+    with pytest.raises(FlowError, match="source pixels changed"):
+        _balloon_count(session, plan, image, 2, source_bound=True, selected=False)
+
+
+def test_real_current_balloon_selected_fixture_binds_source_and_ordinary_ed_geometry(tmp_path):
+    """Real 021021 lower toolbar pixels; no simulated x1 or probe success."""
+    from autococ.battle_vision import selected_card_bbox
+    from autococ.images import read_frame
+    from autococ.vision import ScreenshotRecognizer
+
+    paths = {name: FIXTURES / f"probed_balloon_021021_{name}.png"
+             for name in ("before", "source", "unselected", "selected")}
+    for name, path in paths.items():
+        provenance = json.loads(path.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+        assert provenance["client_version"] == "18.647.2"
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == provenance["fixture_sha256"]
+        assert provenance["retained_native_xyxy"] == [0, 1090, 2560, 1440]
+    image_before = cv2.resize(read_frame(paths["before"]), (1280, 720), interpolation=cv2.INTER_AREA)
+    image_source = cv2.resize(read_frame(paths["source"]), (1280, 720), interpolation=cv2.INTER_AREA)
+    image_selected = cv2.resize(read_frame(paths["selected"]), (1280, 720), interpolation=cv2.INTER_AREA)
+    ordinary_ed = (45, 595, 133, 711)
+    selected_ed = (44, 591, 135, 708)
+    assert _current_card_edges(image_before, ordinary_ed) is not None
+    assert _current_card_edges(image_source, selected_ed) is None
+    assert _current_card_edges(image_selected, ordinary_ed) is not None
+
+    balloon_bbox = (335, 595, 423, 711)
+    base, _ = frozen_base(tmp_path)
+    frame = replace(base.frame, frame_id=str(paths["source"]), screenshot_path=paths["source"])
+    base = replace(base, frame=frame, frame_sha256=_file_sha256(paths["source"]),
+                   toolbar_before_frame_id=str(paths["before"]),
+                   toolbar_before_sha256=_file_sha256(paths["before"]))
+    plan = SimpleNamespace(base=base, balloon_point=(379, 653), balloon_bbox=balloon_bbox)
+    recognizer = ScreenshotRecognizer()
+    recognizer.client_version = "18.647.2"
+    for name, expected_selected in (("unselected", False), ("selected", True)):
+        path = paths[name]
+        snapshot = SceneSnapshot("enemy_village", .99, path,
+                                 {"ocr": [], "battle": {"slots": []},
+                                  "source_resolution": (2560, 1440),
+                                  "baseline_resolution": (1280, 720)})
+        session = SimpleNamespace(last_snapshot=snapshot, recognizer=recognizer,
+                                  client_version="18.647.2")
+        border = selected_card_bbox(path, balloon_bbox)
+        assert (border is not None) is expected_selected
+        reading = _balloon_count(session, plan, snapshot, 2, source_bound=True,
+                                 selected=expected_selected)
+        assert reading["count"] == 2 and reading["confidence"] >= .9
+        assert reading["portrait_score"] >= .92
+        assert reading["source_portrait_identity"]["unit_id"] == "balloon"
+        assert ("selected_card_border" in reading) is expected_selected
 
 
 def test_exact_camera_rejects_shift_and_occlusion(tmp_path):
@@ -426,10 +675,13 @@ def test_checkpoint_requires_all_other_troops_and_initial_four_heroes_on_one_fra
     session.recognizer = object()
     monkeypatch.setattr("autococ.images.read_frame",
                         lambda _path: np.zeros((720, 1280, 3), dtype=np.uint8))
-    monkeypatch.setattr("autococ.probed_anchor._current_card_edges",
-                        lambda _image, _bbox: {"left_edge": 300, "right_edge": -300, "bottom_contrast": 50})
+    inspected = []
+    def edges(_image, bbox):
+        inspected.append(bbox)
+        return {"left_edge": 300, "right_edge": -300, "bottom_contrast": 50}
+    monkeypatch.setattr("autococ.probed_anchor._current_card_edges", edges)
     from autococ.unit_catalog import CATALOG_ROOT
-    cards = {tuple(row[4]): row[0] for row in plan.base.troop_cards}
+    cards = {tuple(bbox): unit_id for unit_id, _, bbox in plan.checkpoint_cards}
     cards.update({tuple(box): name for name, box in plan.base.hero_cards})
     wrong = {"unit_id": None, "deployed": False, "count": None}
     def identity(_image, box, kind, **_kwargs):
@@ -456,6 +708,9 @@ def test_checkpoint_requires_all_other_troops_and_initial_four_heroes_on_one_fra
     monkeypatch.setattr("autococ.probed_anchor._post_troop_reading", count)
     proof = _remaining_roster_checkpoint(session, plan, frame)
     assert len(proof["troops"]) == 4 and len(proof["heroes"]) == 4
+    assert proof["troops"][0]["unit_id"] == "electro_dragon"
+    assert inspected[0] == plan.checkpoint_cards[0][2]
+    assert plan.base.troop_cards[0][4] not in inspected
     frame.observations["battle"]["slots"] = [{"unit_id": "electro_dragon",
         "bbox": list(plan.base.troop_cards[0][4]), "count": 9, "confidence": .99}]
     with pytest.raises(FlowError, match="strong full-card quantity conflict"):

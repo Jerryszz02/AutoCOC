@@ -181,3 +181,5 @@ resource_changes{gold, elixir, dark_elixir, costs, uncertainty}
 2026-09-24 的[历史审查](../reports/idle-disconnect-audit-20260924.json)证实 00:58、02:38、03:11 三次启动成功标记是闲置断线弹窗假阳性，不能计入 DEV-01 成功证据；原始报告保留并附纠正说明。03:39 原生 SDK 正式运行的 20 张截图及开发滑动样本只验证部分传输能力，未完成对战。详见[原始统计](../reports/native-transport-status-20260924.json)。
 
 04:24 正式运行已验证云层/入场镜头等待及草地起点平移，实际落兵后因批量中间回执和结算超时失败。新批量回执修复通过全量测试，仍待实战；[运行检查点](../reports/runtime-checkpoint-20260924.json)区分原收据的 2 个已验证单位与后图看到的实际 3 个，不更新 BAT-01/02 为通过。
+
+2026-10-16 02:12（本机时间）的 `fe4762f` 实机探针已通过 REL-01 的一个有限子场景：生产 `DesktopController.stop()` 在点击编辑军队后的检查等待中取消任务，约 99.6 毫秒记录取消，控制器线程退出，随后 5.0216 秒无新输入事件。原始触发帧仍为搜索菜单，未点击 GUI 按钮，也未覆盖战斗、ADB 超时或其它故障，REL-01 整体继续未验收。可复算证据为本地 `reports/completion-20261015/desktop-stop-021255-review.json`，包含原报告、事件、配置及截图哈希；原 `triggered_pending_review` 探针文件保持不变。

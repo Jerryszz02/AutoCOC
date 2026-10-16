@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 from .errors import DeploymentError, FlowError, StopRequested
 from .frozen_line import (FrozenLinePlan, _COUNT, _closed_card_border, _digest, _file_sha256, _plan_digest,
-                          _count_proves, _post_troop_reading, _verify_frozen_line_post,
+                          _cards, _count_proves, _post_troop_reading, _verify_frozen_line_post,
                           freeze_model_free_line)
 from .prepared_battle import PreparedInput
 
@@ -25,6 +25,7 @@ class ProbedAnchorPlan:
     anchors: tuple[tuple[int, int], tuple[int, int]]
     balloon_point: tuple[int, int]
     balloon_bbox: tuple[int, int, int, int]
+    checkpoint_cards: tuple[tuple[str, tuple[int, int], tuple[int, int, int, int]], ...]
     remaining: tuple[PreparedInput, ...]
     digest: str
 
@@ -32,6 +33,7 @@ class ProbedAnchorPlan:
 def _digest_plan(plan: ProbedAnchorPlan) -> str:
     return _digest({"base": plan.base.plan_sha256, "anchors": plan.anchors,
                     "balloon_point": plan.balloon_point, "balloon_bbox": plan.balloon_bbox,
+                    "checkpoint_cards": plan.checkpoint_cards,
                     "remaining": [asdict(action) for action in plan.remaining]})
 
 
@@ -84,8 +86,31 @@ def freeze_probed_anchor_line(session: Any, selected: Any, *, terrain: list[dict
     if len(deployments) != sum(row[2] for row in base.troop_budgets) - 2 + len(base.hero_ids):
         raise FlowError("Probed anchor remainder does not preserve the frozen army")
     _, _, _, balloon_point, balloon_bbox = balloons[0]
-    plan = ProbedAnchorPlan(base, anchors, balloon_point, balloon_bbox, tuple(remaining), "")
-    return ProbedAnchorPlan(base, anchors, balloon_point, balloon_bbox, tuple(remaining), _digest_plan(plan))
+    # The first troop is selected in base.frame, so its expanded selected-card
+    # bbox is not the ordinary geometry it will have after selecting balloon.
+    # base.toolbar_before was independently verified by freeze_model_free_line.
+    toolbar_before = kwargs.get("toolbar_before")
+    if (toolbar_before is None or
+            str(toolbar_before.screenshot_path) != base.toolbar_before_frame_id or
+            _file_sha256(toolbar_before.screenshot_path) != base.toolbar_before_sha256):
+        raise FlowError("Probe checkpoint ordinary card source is not the frozen toolbar frame")
+    previous = {card["unit_id"]: card for card in
+                _cards(toolbar_before, client_version=base.client_version,
+                       expected={(unit_id, source): count for unit_id, source, count in base.troop_budgets})
+                if card["kind"] == "troop"}
+    checkpoint_cards = []
+    for unit_id, source, count, point, bbox in base.troop_cards:
+        if unit_id == "balloon":
+            continue
+        card = previous.get(unit_id)
+        if (card is None or card["source"] != source or card["count"] != count or
+                any(abs(card["point"][axis] - point[axis]) > 4 for axis in (0, 1))):
+            raise FlowError("Probe checkpoint lacks independently verified ordinary card geometry")
+        checkpoint_cards.append((unit_id, tuple(card["point"]), tuple(card["bbox"])))
+    plan = ProbedAnchorPlan(base, anchors, balloon_point, balloon_bbox,
+                            tuple(checkpoint_cards), tuple(remaining), "")
+    return ProbedAnchorPlan(base, anchors, balloon_point, balloon_bbox,
+                            tuple(checkpoint_cards), tuple(remaining), _digest_plan(plan))
 
 
 def verify_exact_anchor_camera(source_path: Any, current_path: Any,
@@ -211,9 +236,15 @@ def _remaining_roster_checkpoint(session: Any, plan: ProbedAnchorPlan, snapshot:
     if not isinstance(slots, list):
         raise FlowError("Probe checkpoint battle cards are unavailable")
     positive = []
+    ordinary = {unit_id: (point, bbox) for unit_id, point, bbox in plan.checkpoint_cards}
+    if len(ordinary) != len(base.troop_cards) - 1:
+        raise FlowError("Probe checkpoint ordinary card geometry is incomplete")
     for unit_id, source, initial, point, bbox in base.troop_cards:
         if unit_id == "balloon":
             continue
+        if unit_id not in ordinary:
+            raise FlowError(f"Probe checkpoint {unit_id} ordinary card geometry is missing")
+        point, bbox = ordinary[unit_id]
         border = _current_card_edges(image, bbox)
         identity = recognize_card_identity(image, bbox, "troop", surface="battle",
                                            client_version=base.client_version)
@@ -273,7 +304,7 @@ def _remaining_roster_checkpoint(session: Any, plan: ProbedAnchorPlan, snapshot:
             raise FlowError(f"Probe checkpoint {unit_id} is not one current undeployed hero card")
         heroes.append({"unit_id": unit_id, "identity": identity, "border": border,
                        "state": state.get("state")})
-    boxes = [row[4] for row in base.troop_cards] + [row[1] for row in base.hero_cards]
+    boxes = [bbox for _, _, bbox in plan.checkpoint_cards] + [plan.balloon_bbox] + [row[1] for row in base.hero_cards]
     if any(left[0] < right[2] and right[0] < left[2]
            for index, left in enumerate(boxes) for right in boxes[index + 1:]):
         raise FlowError("Probe checkpoint cards overlap the spent balloon")
@@ -281,7 +312,9 @@ def _remaining_roster_checkpoint(session: Any, plan: ProbedAnchorPlan, snapshot:
             "troops": positive, "heroes": heroes}
 
 
-def _balloon_count(session: Any, plan: ProbedAnchorPlan, snapshot: Any, expected: int) -> dict:
+def _balloon_count(session: Any, plan: ProbedAnchorPlan, snapshot: Any, expected: int, *,
+                   source_bound: bool = False, selected: bool = False,
+                   pending: int | None = None) -> dict:
     base = plan.base
     reading = _post_troop_reading(session, snapshot.screenshot_path, base.toolbar_before_frame_id,
                                   plan.balloon_point, plan.balloon_bbox, unit_id="balloon")
@@ -301,24 +334,75 @@ def _balloon_count(session: Any, plan: ProbedAnchorPlan, snapshot: Any, expected
              type(item.get("confidence")) in (int, float) and item["confidence"] >= .9 and
              (match := _COUNT.fullmatch(str(item.get("text", "")).strip())) is not None} != {actual}):
         raise FlowError("Probe balloon count lacks one strong same-frame portrait-bound value")
-    if actual != expected:
+    if actual not in ({expected, pending} if pending is not None else {expected}):
         raise FlowError(f"Probe balloon consumption differs from frozen {expected} count")
+    if snapshot.observations.get("recognition_scope") == "troop_count":
+        fast_reads = snapshot.observations.get("deployment_count_reads")
+        if (not isinstance(fast_reads, list) or len(fast_reads) != 1 or
+                not isinstance(fast_reads[0], dict) or
+                fast_reads[0].get("frame") != str(snapshot.screenshot_path) or
+                fast_reads[0].get("slot_bbox") != list(plan.balloon_bbox) or
+                type(fast_reads[0].get("count")) is not int or
+                type(fast_reads[0].get("confidence")) not in (int, float) or
+                not math.isfinite(fast_reads[0]["confidence"]) or
+                fast_reads[0]["confidence"] < .9):
+            raise FlowError("Probe fast current-card count lacks one strong bound value")
+        if fast_reads[0]["count"] != actual:
+            raise FlowError("Probe strong_count_conflict between fast and portrait-bound OCR")
     slots = (snapshot.observations.get("battle") or {}).get("slots") or []
     competing = [row for row in slots if isinstance(row, dict) and
                  (row.get("unit_id") == "balloon" or row.get("bbox") == list(plan.balloon_bbox))]
-    if any(type(row.get("count")) is int and row["count"] != expected and
+    if any(type(row.get("count")) is int and row["count"] != actual and
            type(row.get("confidence")) in (int, float) and row["confidence"] >= .9 for row in competing):
         raise FlowError("Probe strong_count_conflict between full card and local OCR")
-    if expected > 0:
+    for row in competing:
+        score = row.get("confidence")
+        if type(score) not in (int, float) or not math.isfinite(score) or score < .9:
+            continue
+        identity = ((row.get("evidence") or {}).get("identity") or {})
+        if (row.get("unit_id") not in (None, "balloon") or
+                row.get("unit_id") == "balloon" and
+                (identity.get("unit_id") not in (None, "balloon") or
+                 identity.get("version_verified") is False or
+                 identity.get("template_client_version") not in (None, base.client_version))):
+            raise FlowError("Probe strong current-card identity conflicts with frozen balloon")
+    if actual > 0:
         identity = [row for row in competing if row.get("unit_id") == "balloon" and
-                    row.get("bbox") == list(plan.balloon_bbox) and row.get("count") == expected and
+                    row.get("bbox") == list(plan.balloon_bbox) and row.get("count") == actual and
                     row.get("source") == "army" and
                     type(row.get("confidence")) in (int, float) and row["confidence"] >= .9 and
                     ((row.get("evidence") or {}).get("identity") or {}).get("unit_id") == "balloon" and
                     ((row.get("evidence") or {}).get("identity") or {}).get("version_verified") is True and
                     ((row.get("evidence") or {}).get("identity") or {}).get("template_client_version") == base.client_version]
-        if len(identity) != 1:
+        if len(identity) != 1 and not source_bound:
             raise FlowError("Probe positive balloon card has no current-frame versioned identity")
+        if source_bound:
+            from .images import read_frame
+            from .unit_catalog import recognize_card_identity
+            from .battle_vision import selected_card_bbox
+            import cv2
+
+            if _file_sha256(base.frame.screenshot_path) != base.frame_sha256:
+                raise FlowError("Probe versioned balloon source pixels changed")
+            source = cv2.resize(read_frame(base.frame.screenshot_path), (1280, 720),
+                                interpolation=cv2.INTER_AREA)
+            source_identity = recognize_card_identity(source, plan.balloon_bbox, "troop",
+                                                      surface="battle", client_version=base.client_version)
+            if (source_identity.get("unit_id") != "balloon" or
+                    source_identity.get("version_verified") is not True or
+                    source_identity.get("template_client_version") != base.client_version or
+                    type(source_identity.get("confidence")) not in (int, float) or
+                    not math.isfinite(source_identity["confidence"]) or
+                    source_identity["confidence"] < .94):
+                raise FlowError("Probe source balloon versioned identity is unverified")
+            reading["source_portrait_identity"] = source_identity
+            reading["source_identity_frame"] = base.frame.frame_id
+            if selected:
+                border = selected_card_bbox(snapshot.screenshot_path, plan.balloon_bbox,
+                                            base.frame.resolution)
+                if border is None:
+                    raise FlowError("Probe selected balloon lacks the closed current card border")
+                reading["selected_card_border"] = list(border)
     else:
         from .images import read_frame
         import cv2
@@ -383,6 +467,9 @@ def execute_probed_anchor_line(session: Any, plan: ProbedAnchorPlan, *,
         _foreground_now(session)
         if _file_sha256(current.screenshot_path) != first_source["sha256"] or clock() >= base.latest_start:
             raise FlowError("Probe selection proof consumed the preview deadline")
+        session.check_deadline()
+        if clock() >= base.latest_start:
+            raise FlowError("Probe selection stopped before the preview input deadline")
         selection = {"action_id": "select-probe-balloon", "status": "attempted",
                      "kind": "select", "point": plan.balloon_point}
         receipt["actions"].append(selection)
@@ -394,13 +481,40 @@ def execute_probed_anchor_line(session: Any, plan: ProbedAnchorPlan, *,
         selection.update(status="input_sent", done_at=clock())
         receipt["any_input_sent"] = True
         select_done = receipt["actions"][-1]["done_at"]
-        current = session.observe("probed-anchor-balloon-selected")
-        receipt["evidence"].append(str(current.screenshot_path))
-        selected_proof = _current_frame(session, plan, current, after=select_done, scene="enemy_village")
-        _balloon_count(session, plan, current, 2)
         from .battle_vision import selected_card_bbox
-        if selected_card_bbox(current.screenshot_path, plan.balloon_bbox, base.frame.resolution) is None:
-            raise FlowError("Probe balloon card is not selected on the fresh preview")
+        selection_deadline = min(select_done + 3, started + 12, base.latest_start,
+                                 session.deadline, session.task_deadline)
+        selected_proof = None
+        for observation in range(3):
+            if clock() >= selection_deadline:
+                break
+            current = session.observe("probed-anchor-balloon-selected", purpose="troop_count",
+                                      slot={"point": list(plan.balloon_point),
+                                            "bbox": list(plan.balloon_bbox)})
+            receipt["evidence"].append(str(current.screenshot_path))
+            if current.scene == "account_in_use":
+                raise FlowError("Game interruption: account_in_use")
+            if current.observations.get("deployment_count_conflict") is not None:
+                raise FlowError("Probe strong_count_conflict in the fast selected-card frame")
+            # Fast recognition must prove both HUD anchors on this image. It
+            # must not inherit an enemy-preview scene from the prior full OCR.
+            if (current.observations.get("recognition_scope") != "troop_count" or
+                    current.observations.get("fast_fallback") is not False or
+                    current.observations.get("matched_reasons") != ["two_current_hud_anchors"]):
+                raise FlowError("Probe selected frame lacks independent fast-scene guard")
+            proof = _current_frame(session, plan, current, after=select_done, scene="enemy_village")
+            selected_border = selected_card_bbox(current.screenshot_path, plan.balloon_bbox,
+                                                 base.frame.resolution)
+            reading = _balloon_count(session, plan, current, 2, source_bound=True,
+                                     selected=selected_border is not None)
+            if clock() >= selection_deadline:
+                raise FlowError("Probe selected-card proof exceeded its preview budget")
+            if selected_border is not None:
+                selected_proof = proof
+                receipt["selection_reading"] = reading
+                break
+        if selected_proof is None:
+            raise FlowError("Probe balloon card is not selected on a fresh guarded preview")
         for index, anchor in enumerate(plan.anchors):
             stage_start = clock()
             stage_deadline = min(stage_start + 6, started + 12, session.deadline, session.task_deadline)
@@ -416,6 +530,9 @@ def execute_probed_anchor_line(session: Any, plan: ProbedAnchorPlan, *,
             if (_file_sha256(current.screenshot_path) != pre["sha256"] or
                     clock() >= stage_deadline or index == 0 and clock() >= base.latest_start):
                 raise FlowError("Probe proof consumed its input deadline")
+            session.check_deadline()
+            if clock() >= stage_deadline or index == 0 and clock() >= base.latest_start:
+                raise FlowError("Probe stopped before its input deadline")
             receipt["attempted_placements"] += 1
             receipt["probe_events"].append({"edge": index, "point": anchor,
                                             "before_count": 2 - index, "before": pre,
@@ -452,12 +569,17 @@ def execute_probed_anchor_line(session: Any, plan: ProbedAnchorPlan, *,
                     continue
                 post = _current_frame(session, plan, current, after=done, scene="battle")
                 try:
-                    reading = _balloon_count(session, plan, current, 1 - index)
+                    reading = _balloon_count(session, plan, current, 1 - index,
+                                             source_bound=True, selected=True,
+                                             pending=2 - index)
                 except FlowError as count_error:
                     if ("strong_count_conflict" in str(count_error) or
-                            "differs from frozen" in str(count_error)):
+                            "differs from frozen" in str(count_error) or
+                            "source balloon versioned identity" in str(count_error)):
                         raise
                     continue  # One more new frame, never one more input.
+                if reading["count"] == 2 - index:
+                    continue  # Game has not consumed this one tap yet; never replay it.
                 verified_at = clock()
                 if verified_at >= stage_deadline:
                     raise FlowError("Probe complete same-frame proof exceeded its deadline")

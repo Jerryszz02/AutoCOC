@@ -1,0 +1,19 @@
+{
+  "client_version": "18.647.2",
+  "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-021021-768621-9236d757\\frames\\00018-line-boundary.png",
+  "source_sha256": "c7f90a0c1d2889d9b61c9ec087d01490a234fcedcd49db60c1f8300940908116",
+  "fixture_sha256": "025a7253013708f786f1e699a80453889c216faa062cfd038f2aba496adc0692",
+  "transform": "Decode BGR with OpenCV IMREAD_COLOR; overwrite native rows y=0..1089 inclusive with BGR (50,115,77); retain x=0..2559,y=1090..1439; encode PNG with cv2.imwrite.",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "retained_native_xyxy": [
+    0,
+    1090,
+    2560,
+    1440
+  ],
+  "purpose": "Current-version lower battle toolbar evidence only; upper game/player scene deliberately anonymized, not a full-scene fixture.",
+  "card_states": "electro_dragon selected; balloon x2 unselected and versioned"
+}

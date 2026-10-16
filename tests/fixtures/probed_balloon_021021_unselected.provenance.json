@@ -1,0 +1,19 @@
+{
+  "client_version": "18.647.2",
+  "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-021021-768621-9236d757\\frames\\00019-probed-anchor-balloon-selected.png",
+  "source_sha256": "58b47893762c77b1e0476da9c20d007e8c9cb2936da55bc4838174e25f5a5c4d",
+  "fixture_sha256": "14930c7e96807295d19913ae34181a43d5906c095d8f6ef413d7e4b7a1bb8f64",
+  "transform": "Decode BGR with OpenCV IMREAD_COLOR; overwrite native rows y=0..1089 inclusive with BGR (50,115,77); retain x=0..2559,y=1090..1439; encode PNG with cv2.imwrite.",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "retained_native_xyxy": [
+    0,
+    1090,
+    2560,
+    1440
+  ],
+  "purpose": "Current-version lower battle toolbar evidence only; upper game/player scene deliberately anonymized, not a full-scene fixture.",
+  "card_states": "62ms after select input; electro_dragon still selected, balloon x2"
+}
