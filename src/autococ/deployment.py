@@ -224,12 +224,24 @@ def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, 
     line_context = {}
     continuous_line = getattr(session.config.battle, "line_execution_mode", "verified") == "continuous"
     if line_mode:
+        probed_boundary_scan = (continuous_line and
+                                getattr(session.config.battle, "line_tactics", "single_edge") ==
+                                "two_edge_probed_anchors")
+        if probed_boundary_scan:
+            # This phase contains zoom and card selection, but no field tap or
+            # probe. These explicit zeroes are scoped to this phase only.
+            receipt.update(phase="boundary_scan", attempted_placements=0,
+                           issued_placements=0, offensive_actions=0)
         if continuous_line:
             if strategy != "edrag_line" or session.config.vision_agent.enabled:
                 raise FlowError("Continuous line requires model-free edrag_line")
             current, terrain = _prepare_two_edge_view(session, current, receipt, capture_context=line_context)
         else:
             current, terrain = _prepare_two_edge_view(session, current, receipt)
+        if probed_boundary_scan:
+            receipt["phase"] = "boundary_verified"
+            for field in ("attempted_placements", "issued_placements", "offensive_actions"):
+                receipt.pop(field)
     else:
         terrain = find_west_deployment_points(current.screenshot_path,
                                               baseline_resolution=session.config.game.baseline_resolution)

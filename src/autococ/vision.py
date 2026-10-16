@@ -280,10 +280,14 @@ class ScreenshotRecognizer:
             SCENE_UNKNOWN, SCENE_TRAINING, SCENE_POPUP} else None
         unit_detail = self._unit_detail_close(path, texts) if hero_detail is None and scene in {
             SCENE_UNKNOWN, SCENE_TRAINING, SCENE_POPUP} else None
+        spell_detail = self._lightning_detail_close(path, texts) if hero_detail is None and unit_detail is None and scene in {
+            SCENE_UNKNOWN, SCENE_TRAINING, SCENE_POPUP} else None
         if hero_detail is not None:
             scene, confidence, reasons = SCENE_POPUP, .95, ["hero_detail_title_stats_and_close"]
         elif unit_detail is not None:
             scene, confidence, reasons = SCENE_POPUP, .95, ["unit_detail_title_stats_and_close"]
+        elif spell_detail is not None:
+            scene, confidence, reasons = SCENE_POPUP, .95, ["lightning_detail_title_stats_and_close"]
         village_type_evidence = None
         if scene == SCENE_UNKNOWN and not account_claim_visible and all(
             any(normalize_label(item.text) == label and self._in_observed_roi(item, roi)
@@ -360,7 +364,7 @@ class ScreenshotRecognizer:
         )
         buttons = []
         for result in texts:
-            if hero_detail is not None or unit_detail is not None or event_panel is not None:
+            if hero_detail is not None or unit_detail is not None or spell_detail is not None or event_panel is not None:
                 # Background My Army controls and upgrade text are inert under the dialog.
                 continue
             if result.bbox is None:
@@ -418,6 +422,8 @@ class ScreenshotRecognizer:
             buttons.append(hero_detail["button"])
         if unit_detail is not None and scene == SCENE_POPUP:
             buttons.append(unit_detail["button"])
+        if spell_detail is not None and scene == SCENE_POPUP:
+            buttons.append(spell_detail["button"])
         if (scene == SCENE_VILLAGE and village_type_evidence is not None
                 and village_type_evidence.get("type") == "home"
                 and not any(button["name"] == "attack" for button in buttons)):
@@ -457,6 +463,7 @@ class ScreenshotRecognizer:
             "startup_logo": startup_logo,
             "hero_detail": hero_detail,
             "unit_detail": unit_detail,
+            "spell_detail": spell_detail,
             "scene_model": model_scene_evidence,
         }
         if scene == SCENE_VILLAGE:
@@ -791,6 +798,50 @@ class ScreenshotRecognizer:
                   "confidence": round(score, 5), "bbox": list(box),
                   "point": [(box[0] + box[2]) // 2, (box[1] + box[3]) // 2]}
         return {"title": asdict(titles[0]), "close_score": round(score, 5), "button": button}
+
+    def _lightning_detail_close(self, path: Path, texts: list[OCRText]) -> dict[str, object] | None:
+        """Recognize only the sampled 18.647.2 lightning detail; expose its X."""
+        if self.client_version != "18.647.2":
+            return None
+        anchors = (
+            ("12级雷电法术", (530, 15, 750, 95)),
+            ("总伤害", (650, 105, 790, 155)),
+            ("680", (650, 140, 790, 190)),
+            ("击晕/瘫痪时间（秒）", (900, 105, 1140, 155)),
+            ("0.1", (900, 140, 1050, 190)),
+        )
+        evidence = []
+        for label, roi in anchors:
+            hits = [item for item in texts if math.isfinite(item.confidence)
+                    and .9 <= item.confidence <= 1
+                    and (item.text.strip() == label if label in {"680", "0.1"}
+                         else normalize_label(item.text) == normalize_label(label))
+                    and self._in_observed_roi(item, roi)]
+            if len(hits) != 1:
+                return None
+            evidence.append(asdict(hits[0]))
+        import cv2
+
+        image = read_frame(path, cv2.IMREAD_COLOR)
+        template = read_template(Path(__file__).resolve().parents[2] /
+                                 "assets/catalogs/hero_detail_close_18_647_2.png")
+        if image is None or template is None:
+            return None
+        image = cv2.resize(image, (1280, 720), interpolation=cv2.INTER_AREA)
+        region = image[15:100, 1080:1170]
+        minimum, _, position, _ = cv2.minMaxLoc(cv2.matchTemplate(region, template, cv2.TM_SQDIFF_NORMED))
+        score = 1.0 - minimum
+        if not math.isfinite(score) or score < .92:
+            return None
+        left, top = position[0] + 1080, position[1] + 15
+        box = scale_box((left, top, left + template.shape[1], top + template.shape[0]),
+                        from_resolution=(1280, 720), to_resolution=self.baseline_resolution)
+        button = {"name": "close_spell_details", "text": "雷电法术详情关闭图标",
+                  "confidence": round(score, 5), "bbox": list(box),
+                  "point": [(box[0] + box[2]) // 2, (box[1] + box[3]) // 2]}
+        return {"unit_id": "lightning_spell", "title": evidence[0],
+                "damage": evidence[2], "stun_seconds": evidence[4],
+                "anchors": evidence, "close_score": round(score, 5), "button": button}
 
     def _unit_detail_close(self, path: Path, texts: list[OCRText]) -> dict[str, object] | None:
         """Expose only the close icon on a sampled current siege detail dialog."""

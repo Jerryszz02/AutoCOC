@@ -50,8 +50,10 @@ def run_battle(session: GameSession) -> TaskResult:
     searches: list[dict[str, object]] = []
     metrics: dict[str, object] = {
         "searches": searches, "search_count": 0,
-        "search_cost_gold": 0, "search_cost_elixir": 0, "search_cost_dark_elixir": 0,
+        "search_cost_gold": 0, "confirmed_search_cost_gold": 0,
+        "search_cost_elixir": 0, "search_cost_dark_elixir": 0,
         "deployment": None, "settlement_observed": None, "inventory_reconciled": False,
+        "preflight_rejections": [],
     }
     status, reason = "failed", "battle_verification_incomplete"
     settlement_error: str | None = None
@@ -207,6 +209,12 @@ def run_battle(session: GameSession) -> TaskResult:
         session.click(army_frame, "attack")
         progress("正在筛选对手")
         scout = _next_candidate(session)
+        probed_rescout = (not vision_mode and definition is None
+                          and session.config.battle.strategy == "edrag_line"
+                          and session.config.battle.line_execution_mode == "continuous"
+                          and session.config.battle.line_tactics == "two_edge_probed_anchors")
+        cached_deployment = None
+        cached_deployment_error = None
         while True:
             if definition is not None and prepared_army is not None:
                 targets = declared_building_targets(definition, session.config.battle.target_building,
@@ -230,6 +238,7 @@ def run_battle(session: GameSession) -> TaskResult:
             evidence.append(scout.screenshot_path)
             total_search_cost += pending_cost
             metrics["search_cost_gold"] = total_search_cost
+            metrics["confirmed_search_cost_gold"] = total_search_cost
             available = scout.observations.get("resources", {})
             if not isinstance(available, dict) or not line_mode and scout.observations.get("resource_source") != "enemy_available":
                 raise FlowError("Enemy available resources were not identified")
@@ -257,6 +266,49 @@ def run_battle(session: GameSession) -> TaskResult:
             session.event("battle_candidate", **search)
             if decision.should_attack:
                 metrics["selected_target"] = asdict(target)
+                if probed_rescout:
+                    # The paid search loop owns the bounded next-target action.
+                    # Invoke deployment once per candidate and retain its result
+                    # or error, so the shared cleanup path never repeats it.
+                    scout.observations["expected_army_manifest"] = army["recipe"]["manifest"]
+                    scout.observations["expected_hero_manifest"] = army["recipe"].get("hero_evidence")
+                    goal_progress = getattr(session, "goal_progress", None)
+                    scout.observations["target_progress"] = goal_progress if isinstance(goal_progress, dict) else {}
+                    progress("执行打法")
+                    from .deployment import deploy_army
+                    try:
+                        cached_deployment = deploy_army(session, scout)
+                    except DeploymentError as exc:
+                        cached_deployment_error = exc
+                        if not _retryable_boundary_preflight(session, exc):
+                            break
+                        rejection = {"candidate": len(searches), "frame": str(scout.screenshot_path),
+                                     "reason": str(exc), "phase": exc.partial_receipt["phase"],
+                                     "search_cost_gold": pending_cost,
+                                     "evidence": list(exc.partial_receipt.get("evidence", []))}
+                        search["preflight_rejection"] = rejection
+                        metrics["preflight_rejections"].append(rejection)
+                        session.event("battle_preflight_rejected", **rejection)
+                        if len(searches) >= session.config.battle.max_searches:
+                            break  # Keep the last deployment failure and its cleanup.
+                        try:
+                            fresh = _fresh_boundary_retry_preview(session, evidence)
+                            if fresh is None:
+                                break
+                            pending_cost = _search_price(fresh)
+                        except AutoCOCError as retry_error:
+                            metrics["preflight_retry_error"] = str(retry_error)
+                            if "account_in_use" in str(retry_error):
+                                raise
+                            break
+                        metrics["search_cost_gold"] = None
+                        metrics["next_search_cost_unconfirmed"] = True
+                        session.click(fresh, "next")
+                        scout = _next_candidate(session, previous=fresh)
+                        cached_deployment_error = None
+                        metrics["next_search_cost_unconfirmed"] = False
+                        metrics.pop("selected_target", None)
+                        continue
                 break
             if not decision.can_search_next:
                 _leave_scout(session, scout)
@@ -318,7 +370,9 @@ def run_battle(session: GameSession) -> TaskResult:
                     # StopRequested bypasses both handlers and sends no input.
                     raise
             elif definition is None:
-                deployed = deploy_army(session, scout)
+                if cached_deployment_error is not None:
+                    raise cached_deployment_error
+                deployed = cached_deployment if cached_deployment is not None else deploy_army(session, scout)
             else:
                 from .strategy_execution import execute_strategy
                 deployed = execute_strategy(session, scout, definition,
@@ -657,6 +711,48 @@ def run_battle(session: GameSession) -> TaskResult:
                     evidence.append(Path(path))
         _retain_last_frame(session, evidence)
     return TaskResult("battle", status, reason, started_at, time.monotonic() - started, evidence, metrics)
+
+
+def _retryable_boundary_preflight(session: GameSession, error: DeploymentError) -> bool:
+    """Only a failed boundary scan proves no probe or placement was attempted."""
+    receipt = error.partial_receipt
+    return (str(error) == "Two current deployment boundaries could not be verified"
+            and receipt.get("phase") == "boundary_scan"
+            and all(type(receipt.get(name)) is int and receipt[name] == 0 for name in
+                    ("attempted_placements", "issued_placements", "offensive_actions", "deployed_units"))
+            and receipt.get("consumption_events") == []
+            and receipt.get("terrain_evidence") == []
+            and getattr(session, "frozen_line_receipt", None) is None)
+
+
+def _fresh_boundary_retry_preview(session: GameSession, evidence: list[Path]) -> SceneSnapshot | None:
+    """A new full frame must still prove a live, unstarted preview and Next."""
+    session.check_deadline()
+    current = session.observe("boundary-rescout-check")
+    evidence.append(current.screenshot_path)
+    if current.scene == "account_in_use":
+        raise FlowError("Game interruption: account_in_use")
+    if current.scene != "enemy_village" or not math.isfinite(current.confidence) or current.confidence < .8:
+        return None
+    battle = current.observations.get("battle")
+    if not isinstance(battle, dict) or battle.get("phase") != "scout":
+        return None
+    from .prepared_battle import _remaining_seconds
+    try:
+        seconds = _remaining_seconds(current)
+    except FlowError:
+        return None
+    captured_at = current.observations.get("observed_at_monotonic")
+    if (type(captured_at) not in (int, float) or not math.isfinite(captured_at)
+            or time.monotonic() + 2 >= captured_at + seconds - 1):
+        return None
+    buttons = current.observations.get("buttons")
+    if (not isinstance(buttons, list) or
+            any(sum(isinstance(item, dict) and item.get("name") == name for item in buttons) != 1
+                for name in ("next", "end_battle"))):
+        return None
+    session.check_deadline()
+    return current
 
 
 def _leave_scout(session, scout):

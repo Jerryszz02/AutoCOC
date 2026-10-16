@@ -572,6 +572,82 @@ class SceneTests(unittest.TestCase):
         no_title.client_version = "18.647.2"
         self.assertIsNone(no_title.recognize(path).observations["hero_detail"])
 
+    def test_current_lightning_detail_exposes_only_verified_close(self) -> None:
+        import cv2
+        import numpy as np
+
+        root = Path(__file__).parent / "fixtures"
+        provider = RapidOCRProvider()
+        for name in ("lightning_detail_opened", "lightning_detail_before_close"):
+            path = root / f"lightning_info_{name}_18_647_2.png"
+            texts = provider.recognize(path)
+            recognizer = ScreenshotRecognizer(provider=provider)
+            recognizer.client_version = "18.647.2"
+            snapshot = recognizer.recognize(path)
+            self.assertEqual(snapshot.scene, "popup")
+            detail = snapshot.observations["spell_detail"]
+            self.assertEqual(detail["unit_id"], "lightning_spell")
+            self.assertEqual((detail["title"]["text"], detail["damage"]["text"],
+                              detail["stun_seconds"]["text"]),
+                             ("12级雷电法术", "680", "0.1"))
+            self.assertNotIn("housing_space", detail)  # The one-unit glyph was not OCR-confirmed.
+            self.assertEqual([item["name"] for item in snapshot.observations["buttons"]],
+                             ["close_spell_details"])
+            self.assertTrue(1104 <= snapshot.observations["buttons"][0]["point"][0] <= 1156)
+
+            wrong_version = ScreenshotRecognizer(provider=provider)
+            wrong_version.client_version = "18.647.3"
+            self.assertIsNone(wrong_version.recognize(path).observations["spell_detail"])
+
+            for missing in ("12级雷电法术", "总伤害：", "680", "击晕/瘫痪时间（秒）：", "0.1"):
+                with self.subTest(frame=name, missing=missing):
+                    mocked = Mock()
+                    mocked.recognize.return_value = [item for item in texts if item.text != missing]
+                    negative = ScreenshotRecognizer(provider=mocked)
+                    negative.client_version = "18.647.2"
+                    observed = negative.recognize(path)
+                    self.assertIsNone(observed.observations["spell_detail"])
+                    self.assertNotIn("close_spell_details",
+                                     {item["name"] for item in observed.observations["buttons"]})
+
+            for replacement in (OCRText("12级雷电法术", .99, (30, 30, 190, 75)),
+                                OCRText("13级雷电法术", .99, (562, 32, 718, 74))):
+                with self.subTest(frame=name, title=replacement):
+                    mocked = Mock()
+                    mocked.recognize.return_value = [replacement if item.text == "12级雷电法术"
+                                                     else item for item in texts]
+                    negative = ScreenshotRecognizer(provider=mocked)
+                    negative.client_version = "18.647.2"
+                    self.assertIsNone(negative.recognize(path).observations["spell_detail"])
+
+            for original, misread in (("0.1", "01"), ("680", "6.80")):
+                with self.subTest(frame=name, misread=misread):
+                    mocked = Mock()
+                    mocked.recognize.return_value = [OCRText(misread, item.confidence, item.bbox)
+                                                     if item.text == original else item for item in texts]
+                    negative = ScreenshotRecognizer(provider=mocked)
+                    negative.client_version = "18.647.2"
+                    self.assertIsNone(negative.recognize(path).observations["spell_detail"])
+
+            image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            image[25:83, 1104:1156] = 0
+            with TemporaryDirectory() as tmp:
+                hidden = Path(tmp) / "lightning-no-X.png"
+                cv2.imencode(".png", image)[1].tofile(hidden)
+                mocked = Mock()
+                mocked.recognize.return_value = texts
+                negative = ScreenshotRecognizer(provider=mocked)
+                negative.client_version = "18.647.2"
+                self.assertIsNone(negative.recognize(hidden).observations["spell_detail"])
+
+        # OCR from a prior detail cannot authorize a close on the current picker frame.
+        stale = Mock()
+        stale.recognize.return_value = texts
+        picker = root / "lightning_info_spell_picker_before_info_18_647_2.png"
+        negative = ScreenshotRecognizer(provider=stale)
+        negative.client_version = "18.647.2"
+        self.assertIsNone(negative.recognize(picker).observations["spell_detail"])
+
     def test_current_siege_barracks_detail_exposes_only_verified_close(self) -> None:
         import cv2
         import numpy as np

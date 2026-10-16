@@ -1,0 +1,160 @@
+{
+  "client_version": "18.647.2",
+  "coordinate_resolution": [
+    1280,
+    720
+  ],
+  "portrait_source_bbox_1280": [
+    40,
+    454,
+    80,
+    494
+  ],
+  "blue_info_source_bbox_1280": [
+    123,
+    436,
+    151,
+    464
+  ],
+  "blue_info_template_sha256": "4636e9d24f2377c85c5788cb9c42061ae1d80baed6657b81239f6df737045a9e",
+  "frames": [
+    {
+      "fixture": "lightning_info_spell_picker_pages_18_647_2.png",
+      "fixture_sha256": "c073f03b33de4c05e579a18517a7098e5a5e78a8d2ccd3e99de8621ecc81ae33",
+      "source_frame": "reports/completion-20261015/probes/20261016-032115-readonly-picker-pages/frames/00008-spell-picker-first-page.png",
+      "source_sha256": "4b913255bbfccac2b15d6aea610d9b43778ad66630270a3efb74470ace6d73a4",
+      "retained_rois_1280": [
+        [
+          20,
+          42,
+          112,
+          105
+        ],
+        [
+          435,
+          5,
+          1250,
+          105
+        ],
+        [
+          430,
+          110,
+          1090,
+          345
+        ],
+        [
+          0,
+          385,
+          1280,
+          720
+        ]
+      ],
+      "kind": "picker"
+    },
+    {
+      "fixture": "lightning_info_spell_picker_before_info_18_647_2.png",
+      "fixture_sha256": "18f03fc6673ccfcbec718704cc52d7f3de56519c1c6389cf4a24147337b2b7b2",
+      "source_frame": "reports/completion-20261015/probes/20261016-032543-tap/frames/00001-before.png",
+      "source_sha256": "be0bee47e167adaa2169039f5b5e98405ec326ff61e175605436a0991deafbd7",
+      "retained_rois_1280": [
+        [
+          20,
+          42,
+          112,
+          105
+        ],
+        [
+          435,
+          5,
+          1250,
+          105
+        ],
+        [
+          430,
+          110,
+          1090,
+          345
+        ],
+        [
+          0,
+          385,
+          1280,
+          720
+        ]
+      ],
+      "kind": "picker"
+    },
+    {
+      "fixture": "lightning_info_lightning_detail_opened_18_647_2.png",
+      "fixture_sha256": "ab0681306c7de45f57399f19bec3603b64cec627c98d93f9d3d7da0f9a9b319f",
+      "source_frame": "reports/completion-20261015/probes/20261016-032543-tap/frames/00002-after.png",
+      "source_sha256": "e122562a7d5076148dff6fa7aaf9dcef840acb075b7215edd543fbd164dcbb17",
+      "retained_rois_1280": [
+        [
+          93,
+          17,
+          1170,
+          92
+        ],
+        [
+          482,
+          95,
+          1150,
+          178
+        ],
+        [
+          482,
+          195,
+          940,
+          286
+        ]
+      ],
+      "kind": "detail"
+    },
+    {
+      "fixture": "lightning_info_lightning_detail_before_close_18_647_2.png",
+      "fixture_sha256": "d74a91eee115846b1ed510613d0827195d200192fc1f0d2500ba24b43b73f65b",
+      "source_frame": "reports/completion-20261015/probes/20261016-032858-close-inspected-lightning-detail-v2/frames/00001-inspected-detail-before.png",
+      "source_sha256": "de89a41b4a0a3c3623ca8153e71994e816536f0aff2a16c5ed68c2f0a147af23",
+      "retained_rois_1280": [
+        [
+          93,
+          17,
+          1170,
+          92
+        ],
+        [
+          482,
+          95,
+          1150,
+          178
+        ],
+        [
+          482,
+          195,
+          940,
+          286
+        ]
+      ],
+      "kind": "detail"
+    }
+  ],
+  "fixture_derivation": {
+    "source_decode": "cv2.IMREAD_COLOR",
+    "resize": [
+      1280,
+      720
+    ],
+    "interpolation": "cv2.INTER_AREA",
+    "initial_fill_bgr": [
+      0,
+      0,
+      0
+    ],
+    "retained_roi_order": "frames[].retained_rois_1280 copied in listed order from resized source",
+    "encode": "cv2.imencode PNG"
+  },
+  "blue_info_source_frame": "reports/completion-20261015/probes/20261016-032115-readonly-picker-pages/frames/00008-spell-picker-first-page.png",
+  "blue_info_source_sha256": "4b913255bbfccac2b15d6aea610d9b43778ad66630270a3efb74470ace6d73a4",
+  "blue_info_template": "assets/catalogs/current_picker_blue_info_18_647_2.png"
+}

@@ -371,6 +371,24 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(error.exception.partial_receipt["deployed_units"], 20)
         self.assertFalse(error.exception.partial_receipt["completed"])
 
+    def test_probed_boundary_failure_receipt_proves_no_probe_or_field_placement(self):
+        session, _ = self.line_session()
+        session.config.battle.strategy = "edrag_line"
+        session.config.battle.line_execution_mode = "continuous"
+        session.config.battle.line_tactics = "two_edge_probed_anchors"
+        session.config.vision_agent = SimpleNamespace(enabled=False)
+        with patch("autococ.deployment._prepare_two_edge_view",
+                   side_effect=FlowError("Two current deployment boundaries could not be verified")):
+            with self.assertRaisesRegex(DeploymentError, "Two current deployment boundaries") as raised:
+                deploy_army(session, session.scout)
+        receipt = raised.exception.partial_receipt
+        self.assertEqual(receipt["phase"], "boundary_scan")
+        self.assertEqual([receipt[name] for name in ("attempted_placements", "issued_placements",
+                                                     "offensive_actions", "deployed_units")], [0, 0, 0, 0])
+        self.assertEqual(receipt["terrain_evidence"], [])
+        self.assertEqual(receipt["consumption_events"], [])
+        self.assertEqual(session.placements, [])
+
     def test_line_stop_propagates_before_another_click(self):
         session, _ = self.line_session()
 
@@ -1553,6 +1571,8 @@ class DeploymentTests(unittest.TestCase):
         self.assertFalse(receipt["completed"])
         self.assertTrue(receipt["verified"])
         self.assertEqual(receipt["deployed_units"], 1)
+        self.assertNotIn("offensive_actions", receipt)  # Old verified partial path retains its fallback.
+        self.assertNotIn("phase", receipt)
         self.assertEqual(receipt["consumption_events"], confirmed)
         self.assertEqual(receipt["evidence"], [str(frame.screenshot_path) for frame in session.frames])
 

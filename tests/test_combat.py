@@ -4,12 +4,15 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
+import time
 import unittest
 from unittest.mock import Mock, patch
 
 import numpy as np
 
-from autococ.combat import _candidate_changed, _next_candidate, _read_army, _wait_for_clear_scout, inspect_army, run_battle
+from autococ.combat import (_candidate_changed, _fresh_boundary_retry_preview, _next_candidate,
+                            _read_army, _retryable_boundary_preflight, _wait_for_clear_scout,
+                            inspect_army, run_battle)
 from autococ.config import BattleConfig, VisionAgentConfig
 from autococ.errors import CaptureError, DeploymentError, FlowError, StopRequested
 from autococ.reporting import RunStats, resource_metrics
@@ -135,6 +138,143 @@ class CombatTests(unittest.TestCase):
         patcher = patch("autococ.combat._wait_for_clear_scout", side_effect=lambda session, snapshot, deadline: snapshot)
         self.scout_ready = patcher.start()
         self.addCleanup(patcher.stop)
+
+    @staticmethod
+    def _probed_boundary_error(**updates):
+        receipt = {"phase": "boundary_scan", "deployed_units": 0,
+                   "attempted_placements": 0, "issued_placements": 0,
+                   "offensive_actions": 0, "consumption_events": [],
+                   "terrain_evidence": [], "evidence": ["boundary.png"]}
+        receipt.update(updates)
+        return DeploymentError("Two current deployment boundaries could not be verified",
+                               partial_receipt=receipt)
+
+    @staticmethod
+    def _preview(index, *, count=15):
+        preview = frame(index, "enemy_village", resources={"gold": 150, "elixir": 100,
+                                                            "dark_elixir": 10})
+        preview.observations["battle"] = {"phase": "scout", "countdown_seconds": count,
+                                          "countdown_evidence": {
+                                              "frame": str(preview.screenshot_path), "confidence": .99,
+                                              "source": "current_frame_ocr"}}
+        preview.observations["observed_at_monotonic"] = time.monotonic()
+        return preview
+
+    def test_probed_boundary_rejection_searches_next_once_and_keeps_both_costs(self):
+        frames = complete_frames()[:3] + [self._preview(3), self._preview(4),
+                  frame(5, "enemy_village", resources={"gold": 170, "elixir": 100,
+                                                       "dark_elixir": 10}),
+                  frame(6, "battle", deployment=deepcopy(DEPLOYMENT)),
+                  frame(7, "settlement", settlement=deepcopy(SETTLEMENT)),
+                  frame(8, "village", resources={**BEFORE, "gold": 1100,
+                                                  "elixir": 2055, "dark_elixir": 310})]
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle, strategy="edrag_line",
+                                        line_execution_mode="continuous",
+                                        line_tactics="two_edge_probed_anchors", max_searches=2)
+        def deploy(active, scout):
+            active.deploy_calls += 1
+            if active.deploy_calls == 1:
+                raise self._probed_boundary_error()
+            return active.observe("deployment-confirmed")
+        session.deploy = deploy
+        with patch("autococ.combat._read_continuous_line_army",
+                   side_effect=lambda active, current, evidence: (current, _read_army(current))):
+            result = battle(session)
+        self.assertEqual(result.status, "succeeded")
+        self.assertEqual(session.deploy_calls, 2)
+        self.assertEqual(result.metrics["search_count"], 2)
+        self.assertEqual(result.metrics["search_cost_gold"], 20)
+        self.assertEqual(len(result.metrics["preflight_rejections"]), 1)
+        self.assertEqual(result.metrics["preflight_rejections"][0]["phase"], "boundary_scan")
+        self.assertEqual(sum("Recognized next" in reason for _, reason in session.taps), 1)
+        self.assertEqual([path for path, reason in session.taps if "Recognized next" in reason],
+                         [frames[4].screenshot_path])
+        self.assertTrue(result.metrics["inventory_reconciled"])
+
+    def test_only_explicit_zero_action_boundary_phase_can_rescout(self):
+        active = SimpleNamespace(frozen_line_receipt=None)
+        self.assertTrue(_retryable_boundary_preflight(active, self._probed_boundary_error()))
+        for changes in ({"phase": "boundary_verified"}, {"attempted_placements": 1},
+                        {"issued_placements": 1}, {"offensive_actions": 1},
+                        {"deployed_units": 1}, {"terrain_evidence": [{"edge": 0}]},
+                        {"consumption_events": [{}]}, {"issued_placements": None}):
+            with self.subTest(changes=changes):
+                self.assertFalse(_retryable_boundary_preflight(
+                    active, self._probed_boundary_error(**changes)))
+        active.frozen_line_receipt = {"attempted_placements": 1}
+        self.assertFalse(_retryable_boundary_preflight(active, self._probed_boundary_error()))
+
+    def test_rescout_requires_fresh_positive_preview_timer_and_navigation(self):
+        good = self._preview(31)
+        variations = [frame(32, "unknown"), frame(33, "battle"),
+                      replace(self._preview(34), confidence=.7)]
+        for change in (lambda p: p.observations["battle"].update(phase="active"),
+                       lambda p: p.observations["battle"].update(countdown_seconds=0),
+                       lambda p: p.observations["battle"]["countdown_evidence"].update(frame="old.png"),
+                       lambda p: p.observations["battle"]["countdown_evidence"].update(confidence=.5),
+                       lambda p: p.observations["battle"]["countdown_evidence"].update(source="cached"),
+                       lambda p: p.observations["battle"].update(countdown_seconds=121),
+                       lambda p: p.observations.update(observed_at_monotonic=time.monotonic() - 20),
+                       lambda p: p.observations["buttons"].pop(0)):
+            bad = deepcopy(good)
+            change(bad)
+            variations.append(bad)
+        for bad in variations:
+            with self.subTest(scene=bad.scene, observations=bad.observations):
+                session = FakeSession([bad])
+                self.assertIsNone(_fresh_boundary_retry_preview(session, []))
+                self.assertEqual(session.taps, [])
+        session = FakeSession([good])
+        evidence = []
+        self.assertIs(_fresh_boundary_retry_preview(session, evidence), good)
+        self.assertEqual(evidence, [good.screenshot_path])
+
+    def test_account_conflict_during_rescout_does_not_authorize_navigation(self):
+        conflict = frame(39, "account_in_use")
+        session = FakeSession([conflict])
+        with self.assertRaisesRegex(FlowError, "account_in_use"):
+            _fresh_boundary_retry_preview(session, [])
+        self.assertEqual(session.taps, [])
+
+    def test_probed_boundary_at_search_limit_preserves_original_failure_without_next(self):
+        frames = complete_frames()[:4] + [self._preview(7), frame(8, "village"),
+                                            frame(9, "village", resources=deepcopy(BEFORE))]
+        session = FakeSession(frames, max_searches=1)
+        session.config.battle = replace(session.config.battle, strategy="edrag_line",
+                                        line_execution_mode="continuous",
+                                        line_tactics="two_edge_probed_anchors")
+        def fail(active, scout):
+            active.deploy_calls += 1
+            raise self._probed_boundary_error()
+        session.deploy = fail
+        with patch("autococ.combat._read_continuous_line_army",
+                   side_effect=lambda active, current, evidence: (current, _read_army(current))):
+            result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "Two current deployment boundaries could not be verified")
+        self.assertEqual(result.metrics["search_count"], 1)
+        self.assertEqual(result.metrics["confirmed_search_cost_gold"], 10)
+        self.assertEqual(len(result.metrics["preflight_rejections"]), 1)
+        self.assertEqual(session.deploy_calls, 1)
+        self.assertFalse(any("Recognized next" in reason for _, reason in session.taps))
+
+    def test_unknown_after_boundary_rejection_never_authorizes_next(self):
+        frames = complete_frames()[:4] + [frame(7, "unknown"), self._preview(8),
+                  frame(9, "village"), frame(10, "village", resources=deepcopy(BEFORE))]
+        session = FakeSession(frames, max_searches=2)
+        session.config.battle = replace(session.config.battle, strategy="edrag_line",
+                                        line_execution_mode="continuous",
+                                        line_tactics="two_edge_probed_anchors")
+        session.deploy = lambda active, scout: (_ for _ in ()).throw(self._probed_boundary_error())
+        with patch("autococ.combat._read_continuous_line_army",
+                   side_effect=lambda active, current, evidence: (current, _read_army(current))):
+            result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "Two current deployment boundaries could not be verified")
+        self.assertEqual(result.metrics["confirmed_search_cost_gold"], 10)
+        self.assertEqual(len(result.metrics["preflight_rejections"]), 1)
+        self.assertFalse(any("Recognized next" in reason for _, reason in session.taps))
 
     def test_line_round_records_verified_storage_overflow_without_inventing_bonus(self):
         frames = complete_frames()

@@ -273,6 +273,46 @@ def _bottom_picker_controls(image: np.ndarray, kind: str,
     return controls, availability
 
 
+def _lightning_info_control(image: np.ndarray, controls: list[dict[str, object]],
+                            capacity: dict[str, int] | None,
+                            baseline_resolution: tuple[int, int]) -> dict[str, object] | None:
+    """Bind the observed blue i to a separately identified gray lightning card."""
+    box = (33, 431, 157, 555)
+    card_box = list(scale_box(box, from_resolution=_BASE,
+                              to_resolution=baseline_resolution))
+    hits = [control for control in controls if control.get("action") == "increment"
+            and control.get("unit_id") == "lightning_spell"
+            and control.get("evidence", {}).get("card_bbox") == card_box
+            and control.get("evidence", {}).get("state") == "capacity_gray"
+            and control.get("identity_verified") is True
+            and control.get("enabled") is False]
+    if (len(hits) != 1 or not isinstance(capacity, dict)
+            or capacity.get("used") != capacity.get("total")):
+        return None
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    border = {"top": float(np.mean(gray[432:438, 65:116] > 140)),
+              "left": float(np.mean(gray[459:525, 33:40] > 140)),
+              "right": float(np.mean(gray[465:525, 150:157] > 140))}
+    if border["top"] < .35 or border["left"] < .35 or border["right"] < .30:
+        return None
+    icon_path = CATALOG_ROOT / "current_picker_blue_info_18_647_2.png"
+    icon = cv2.imdecode(np.fromfile(icon_path, dtype=np.uint8), cv2.IMREAD_COLOR) if icon_path.is_file() else None
+    if icon is None or icon.shape[:2] != (28, 28):
+        return None
+    score = float(cv2.matchTemplate(image[436:464, 123:151], icon,
+                                    cv2.TM_CCOEFF_NORMED)[0, 0])
+    if not np.isfinite(score) or score < .94:
+        return None
+    return {"action": "open_info", "unit_id": "lightning_spell",
+            "point": _scale_point(138, 450, baseline_resolution),
+            "confidence": round(min(float(hits[0]["confidence"]), score), 5),
+            "enabled": True, "cost_free": True, "identity_verified": True,
+            "evidence": {"identity": hits[0]["evidence"]["identity"],
+                         "card_bbox": card_box, "card_border": border,
+                         "blue_info_score": round(score, 5),
+                         "blue_info_template": str(icon_path)}}
+
+
 def _current_picker(path: Path, image: np.ndarray, provider: OCRProvider | None,
                     texts: Sequence[OCRText], native_resolution: tuple[int, int],
                     client_version: str | None,
@@ -372,6 +412,11 @@ def _current_picker(path: Path, image: np.ndarray, provider: OCRProvider | None,
         image, kind, client_version, baseline_resolution, seen,
         result["capacities"].get(kind))
     result["controls"].extend(bottom_controls)
+    if kind == "spell" and client_version == "18.647.2":
+        info = _lightning_info_control(image, bottom_controls,
+                                       result["capacities"].get("spell"), baseline_resolution)
+        if info is not None:
+            result["controls"].append(info)
     result["unit_availability"].update(availability)
     for control in bottom_controls:
         unit = get_unit(control["unit_id"])

@@ -16,13 +16,63 @@ from autococ.vision import ScreenshotRecognizer
 
 
 class UnitCatalogTests(unittest.TestCase):
+    def test_current_gray_lightning_picker_sample_and_anonymous_frames(self):
+        root = Path(__file__).parents[1]
+        metadata = json.loads((root / "tests/fixtures/lightning_info_18_647_2.json")
+                              .read_text(encoding="utf-8"))
+        entry = next(entry for entry in template_manifest(client_version="18.647.2")["templates"]
+                     if entry["surface"] == "current_picker" and entry["unit_id"] == "lightning_spell")
+        self.assertEqual(entry["state"], "capacity_gray")
+        self.assertEqual(entry["source_bbox_1280"], metadata["portrait_source_bbox_1280"])
+        portrait = root / "assets/catalogs" / entry["path"]
+        icon = root / metadata["blue_info_template"]
+        self.assertEqual(hashlib.sha256(portrait.read_bytes()).hexdigest(), entry["template_sha256"])
+        self.assertEqual(hashlib.sha256(icon.read_bytes()).hexdigest(),
+                         metadata["blue_info_template_sha256"])
+        for frame in metadata["frames"]:
+            fixture = root / "tests/fixtures" / frame["fixture"]
+            self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(),
+                             frame["fixture_sha256"])
+            source = Path(r"E:\projects\AutoCOC") / frame["source_frame"]
+            if source.is_file():
+                self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(),
+                                 frame["source_sha256"])
+                image = cv2.resize(cv2.imdecode(np.fromfile(source, dtype=np.uint8),
+                                                cv2.IMREAD_COLOR), (1280, 720),
+                                   interpolation=cv2.INTER_AREA)
+                anonymous = np.zeros_like(image)
+                for left, top, right, bottom in frame["retained_rois_1280"]:
+                    anonymous[top:bottom, left:right] = image[top:bottom, left:right]
+                observed = cv2.imdecode(np.fromfile(fixture, dtype=np.uint8), cv2.IMREAD_COLOR)
+                self.assertTrue(np.array_equal(anonymous, observed))
+                if frame["source_frame"] == entry["source_frame"]:
+                    l, t, r, b = entry["source_bbox_1280"]
+                    self.assertTrue(np.array_equal(
+                        cv2.imdecode(np.fromfile(portrait, dtype=np.uint8), cv2.IMREAD_COLOR),
+                        image[t:b, l:r]))
+                    l, t, r, b = metadata["blue_info_source_bbox_1280"]
+                    self.assertTrue(np.array_equal(
+                        cv2.imdecode(np.fromfile(icon, dtype=np.uint8), cv2.IMREAD_COLOR),
+                        image[t:b, l:r]))
+            if frame["kind"] == "picker":
+                image = cv2.imdecode(np.fromfile(fixture, dtype=np.uint8), cv2.IMREAD_COLOR)
+                identity = recognize_card_identity(image, (33, 431, 157, 555), "spell",
+                                                   surface="current_picker",
+                                                   client_version="18.647.2")
+                self.assertEqual(identity["unit_id"], "lightning_spell")
+                self.assertGreaterEqual(identity["confidence"], .94)
+                self.assertIsNone(recognize_card_identity(
+                    image, (33, 431, 157, 555), "spell", surface="current_picker",
+                    client_version="18.647.3")["unit_id"])
+
     def test_current_picker_samples_and_housing_are_source_bound(self):
         root = Path(__file__).parents[1]
         metadata = json.loads((root / "tests/fixtures/troop_picker_18_647_2.json")
                               .read_text(encoding="utf-8"))
         entries = [entry for entry in
                    template_manifest(client_version="18.647.2")["templates"]
-                   if entry.get("surface") == "current_picker"]
+                   if entry.get("surface") == "current_picker"
+                   and get_unit(entry["unit_id"]).kind == "troop"]
         boxes = {"archer": (293, 568, 417, 692),
                  "balloon": (684, 431, 808, 555),
                  "dragon": (814, 568, 938, 692),

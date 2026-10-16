@@ -90,6 +90,44 @@ class CurrentPickerTests(TestCase):
                          ["close_picker", "decrement", "decrement"])
         self.assertEqual(editor["controls"][0]["point"], [1050, 240])
 
+    def test_current_gray_lightning_info_requires_its_own_portrait_icon_and_border(self):
+        root = Path(__file__).resolve().parent / "fixtures"
+        provider = RapidOCRProvider()
+        for name in ("spell_picker_pages", "spell_picker_before_info"):
+            source = root / f"lightning_info_{name}_18_647_2.png"
+            texts = provider.recognize(source)
+            editor = recognize_army_editor(source, provider, texts,
+                                           client_version="18.647.2")
+            info = [item for item in editor["controls"] if item["action"] == "open_info"]
+            self.assertEqual((editor["surface"], editor["editing_kind"]),
+                             ("current_picker", "spell"))
+            self.assertEqual(len(info), 1)
+            self.assertEqual((info[0]["unit_id"], info[0]["point"]),
+                             ("lightning_spell", [138, 450]))
+            self.assertTrue(info[0]["identity_verified"])
+            self.assertGreaterEqual(info[0]["confidence"], .94)
+            self.assertFalse(any(item["action"] in {"upgrade", "buy"}
+                                 for item in editor["controls"]))
+            wrong = recognize_army_editor(source, provider, texts,
+                                          client_version="18.647.3")
+            self.assertFalse(any(item["action"] == "open_info"
+                                 for item in wrong["controls"]))
+
+            image = cv2.imdecode(np.fromfile(source, dtype=np.uint8), cv2.IMREAD_COLOR)
+            for label, roi in (("portrait", (40, 454, 80, 494)),
+                               ("blue_info", (123, 436, 151, 464)),
+                               ("border", (33, 459, 40, 525))):
+                with self.subTest(frame=name, missing=label):
+                    altered = image.copy()
+                    l, t, r, b = roi
+                    altered[t:b, l:r] = 0
+                    path = Path(self.directory.name) / f"{name}-{label}.png"
+                    cv2.imencode(".png", altered)[1].tofile(path)
+                    observed = recognize_army_editor(path, provider, texts,
+                                                     client_version="18.647.2")
+                    self.assertFalse(any(item["action"] == "open_info"
+                                         for item in observed["controls"]))
+
     def test_conflicting_ocr_counts_cannot_be_overridden_by_x1_sample(self):
         sample = cv2.imread(str(Path(__file__).resolve().parents[1] /
                                "assets/catalogs/current_picker_x1_full_18_600_7.png"),

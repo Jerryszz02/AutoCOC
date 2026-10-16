@@ -178,6 +178,17 @@
       "client_version": "18.647.2"
     },
     {
+      "unit_id": "lightning_spell",
+      "surface": "current_picker",
+      "path": "units/lightning_spell_picker_capacity_gray_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261016-032115-readonly-picker-pages/frames/00008-spell-picker-first-page.png",
+      "source_bbox_1280": [40, 454, 80, 494],
+      "state": "capacity_gray",
+      "client_version": "18.647.2",
+      "source_sha256": "4b913255bbfccac2b15d6aea610d9b43778ad66630270a3efb74470ace6d73a4",
+      "template_sha256": "7463b553e68e4cfb4583a10bec3866ba58ef40695ef78c1b699857f90e37b76a"
+    },
+    {
       "unit_id": "grand_warden",
       "surface": "army_hero",
       "role": "face",
