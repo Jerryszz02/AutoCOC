@@ -99,6 +99,39 @@ def preparation_countdown_retry_candidate(snapshot: SceneSnapshot,
             "frame": str(snapshot.screenshot_path)}
 
 
+def preparation_label_line_recovery_candidate(snapshot: SceneSnapshot,
+                                              baseline_resolution: tuple[int, int] = (1280, 720)) -> dict | None:
+    """Locate one weak merged heading beside a strong timer; grant no countdown."""
+    battle = snapshot.observations.get("battle")
+    if (snapshot.scene != "enemy_village" or not isinstance(battle, dict)
+            or battle.get("phase") != "scout"):
+        return None
+    items = _preparation_countdown_items(snapshot, baseline_resolution, 0)
+    anchors, candidates = _preparation_countdown_candidates(items, baseline_resolution)
+    if len(anchors) != 1 or len(candidates) != 1:
+        return None
+    label, _ = anchors[0]
+    _, timer = candidates[0]
+    if (not .8 <= label["confidence"] < .9 or timer is label
+            or not .9 <= timer["confidence"] <= 1
+            or not label["text"].startswith("开战倒计时")
+            or any(item is not label and item is not timer and item["confidence"] >= .9
+                   and _preparation_seconds(item["text"]) is not None for item in items)):
+        return None
+    # Only the measured 18.647.2 heading location has a fixed crop which keeps
+    # every title glyph while excluding the upgrade arrow and its level digits.
+    box = scale_box(tuple(label["bbox"]), from_resolution=baseline_resolution,
+                    to_resolution=(1280, 720))
+    if not (575 <= box[0] <= 585 and 8 <= box[1] <= 15
+            and 700 <= box[2] <= 720 and 35 <= box[3] <= 45):
+        return None
+    roi = scale_box((578, 8, 674, 39), from_resolution=(1280, 720),
+                    to_resolution=baseline_resolution)
+    return {"reason": "one_weak_merged_heading_and_one_strong_timer",
+            "frame": str(snapshot.screenshot_path), "raw_label": label,
+            "timer": timer, "baseline_roi": roi}
+
+
 def attach_preparation_countdown(snapshot: SceneSnapshot,
                                  baseline_resolution: tuple[int, int] = (1280, 720)) -> None:
     """Use a unique, high-confidence preparation label and adjacent timer only.

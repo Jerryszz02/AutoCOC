@@ -670,8 +670,56 @@ class ScreenshotRecognizer:
             "ocr": ocr_finished - decoded, "details": time.monotonic() - ocr_finished}
         from .battle_vision import attach_preparation_countdown
         snapshot = SceneSnapshot(scene, confidence, path, observations)
+        self._recover_preparation_heading(snapshot, resolution)
         attach_preparation_countdown(snapshot, self.baseline_resolution)
+        observations["recognition_seconds"] = round(time.monotonic() - started, 3)
+        observations["recognition_timings_sec"]["details"] = time.monotonic() - ocr_finished
         return snapshot
+
+    def _recover_preparation_heading(self, snapshot: SceneSnapshot,
+                                     resolution: tuple[int, int]) -> None:
+        """Read one fixed current-frame title crop when full OCR merged a weak heading."""
+        if (self.client_version != "18.647.2" or type(snapshot.confidence) not in (int, float)
+                or not math.isfinite(snapshot.confidence)
+                or snapshot.confidence < .8):
+            return
+        from .battle_vision import preparation_label_line_recovery_candidate
+
+        candidate = preparation_label_line_recovery_candidate(snapshot, self.baseline_resolution)
+        if candidate is None:
+            return
+        receipt = {**candidate, "trigger": candidate["reason"],
+                   "status": "unproved", "source": "current_frame_heading_line_roi"}
+        snapshot.observations["preparation_label_recovery"] = receipt
+        read_line = getattr(self.provider, "recognize_line", None)
+        if not callable(read_line):
+            receipt["reason"] = "line_reader_unavailable"
+            return
+        roi = tuple(candidate["baseline_roi"])
+        native_roi = scale_box(roi, from_resolution=self.baseline_resolution,
+                               to_resolution=resolution)
+        receipt["native_roi"] = list(native_roi)
+        try:
+            reads = read_line(snapshot.screenshot_path, native_roi)
+        except OCRError:
+            receipt["reason"] = "line_reader_failed"
+            return
+        receipt["readings"] = ([asdict(item) for item in reads]
+                               if isinstance(reads, list) and all(isinstance(item, OCRText) for item in reads)
+                               else [])
+        if not isinstance(reads, list) or len(reads) != 1 or not isinstance(reads[0], OCRText):
+            receipt["reason"] = "line_reader_not_unique"
+            return
+        local = self._baseline_result(reads[0], resolution)
+        if (local.text.strip() != "开战倒计时" or not math.isfinite(local.confidence)
+                or not max(.9, self.ocr_config.confidence_threshold) <= local.confidence <= 1
+                or local.bbox is None or any(abs(a - b) > 1 for a, b in zip(local.bbox, roi))):
+            receipt["reason"] = "line_reader_not_exact_strong_heading"
+            return
+        corrected = {**asdict(local), "frame": str(snapshot.screenshot_path),
+                     "source": "current_frame_heading_line_roi"}
+        snapshot.observations["ocr"].append(corrected)
+        receipt.update(status="exact_current_frame_heading", correction=corrected)
 
     @staticmethod
     def _startup_logo(path: Path) -> dict | None:
