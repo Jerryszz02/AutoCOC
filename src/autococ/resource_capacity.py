@@ -15,7 +15,7 @@ from .vision import recognize_village_type
 # 18.647.2, 1280 x 720. The click is inside the balance bar, never its plus
 # button. Each text ROI is inside the first tooltip row, away from the HUD.
 _LAYOUT = {
-    "gold": ((1150, 37), 61, (977, 1265), (1005, 77, 1100, 102), (1104, 75, 1242, 101)),
+    "gold": ((1150, 37), 61, (977, 1265), (1005, 77, 1100, 102), (1108, 78, 1242, 99)),
     "elixir": ((1150, 87), 114, (977, 1265), (1005, 130, 1100, 155), (1104, 127, 1240, 155)),
     "dark_elixir": ((1150, 137), 163, (1014, 1265), (1045, 179, 1144, 205), (1148, 178, 1248, 204)),
 }

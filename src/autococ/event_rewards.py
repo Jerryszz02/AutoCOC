@@ -22,10 +22,12 @@ from .errors import FlowError, StopRequested
 CLIENT_VERSION = "18.647.2"
 _BASELINE = (1280, 720)
 _TEMPLATES = Path(__file__).resolve().parents[2] / "assets" / "templates"
-_ANCHORS = {
+_PAGE_ANCHORS = {
     "title": ("裂隙之乱", (350, 20, 500, 90)),
     "list": ("奖励清单", (145, 235, 260, 275)),
     "paid": ("购买活动令牌", (850, 95, 1145, 165)),
+}
+_POSITION_ANCHORS = {
     # These upper-track milestones bind the observed horizontal page position.
     # An empty generic lower pedestal alone cannot identify a claimed reward.
     "upper_medal_amount": ("600", (400, 210, 475, 250)),
@@ -119,12 +121,21 @@ def observe_reward_track(frame_path: str | Path, ocr: list[dict], *,
         return None
     image = cv2.resize(image, _BASELINE, interpolation=cv2.INTER_AREA)
     anchors = {}
-    for name, (label, roi) in _ANCHORS.items():
+    for name, (label, roi) in _PAGE_ANCHORS.items():
         matches = _exact(ocr, label, roi)
         if len(matches) != 1:
             return None
         anchors[name] = {"text": label, "bbox": list(matches[0]["bbox"]),
                          "confidence": matches[0]["confidence"]}
+    position_anchors = {}
+    for name, (label, roi) in _POSITION_ANCHORS.items():
+        matches = _exact(ocr, label, roi)
+        if len(matches) == 1:
+            position_anchors[name] = {"text": label, "bbox": list(matches[0]["bbox"]),
+                                      "confidence": matches[0]["confidence"]}
+    position_verified = len(position_anchors) == len(_POSITION_ANCHORS)
+    if position_verified:
+        anchors.update(position_anchors)
     visual = {name: _template_score(image, name, roi)
               for name, roi in _VISUAL_ROIS.items()}
     if any(score < .97 for score in visual.values()):
@@ -143,13 +154,13 @@ def observe_reward_track(frame_path: str | Path, ocr: list[dict], *,
         empty_score = _template_score(image, name + "_empty", spec["empty_roi"])
         status = "unknown"
         button = None
-        if len(labels) == len(amounts) == len(buttons) == 1 and green >= .35 and empty_score < .9:
+        if position_verified and len(labels) == len(amounts) == len(buttons) == 1 and green >= .35 and empty_score < .9:
             bbox = list(buttons[0]["bbox"])
             button = {"bbox": bbox, "point": [(bbox[0] + bbox[2]) // 2,
                                                  (bbox[1] + bbox[3]) // 2],
                       "confidence": buttons[0]["confidence"]}
             status = "claimable"
-        elif not labels and not amounts and not buttons and green <= .05 and empty_score >= .97:
+        elif position_verified and not labels and not amounts and not buttons and green <= .05 and empty_score >= .97:
             status = "no_opportunity"
         targets[name] = {"status": status, "label": spec["label"],
                          "amount": int(spec["amount"]), "button": button,
@@ -157,7 +168,8 @@ def observe_reward_track(frame_path: str | Path, ocr: list[dict], *,
     close_box = list(_VISUAL_ROIS["close"])
     return {"surface": "event_reward_track", "client_version": client_version,
             "frame": str(frame), "frame_sha256": _sha256(frame),
-            "anchors": anchors, "visual": {**visual, "paid_yellow_fraction": paid_yellow},
+            "anchors": anchors, "position_verified": position_verified,
+            "visual": {**visual, "paid_yellow_fraction": paid_yellow},
             "targets": targets,
             "button": {"name": "close_event_rewards", "text": "X（图像）",
                        "bbox": close_box, "point": [(close_box[0] + close_box[2]) // 2,
@@ -262,10 +274,12 @@ def open_reward_track(session, *, timeout_sec: float = 20) -> dict:
             break
     if panel is None:
         raise FlowError("Current event card was not confirmed; no entry tap issued")
-    entries = _exact(panel.observations.get("ocr", []), "领取", (850, 530, 1055, 625))
+    entries = [(label, item) for label in ("领取", "打开")
+               for item in _exact(panel.observations.get("ocr", []), label, (850, 530, 1055, 625))]
     if len(entries) != 1:
         raise FlowError("Current reward-track entry is missing or ambiguous")
-    bbox = entries[0]["bbox"]
+    entry_label, entry = entries[0]
+    bbox = entry["bbox"]
     panel_hash = _sha256(panel.screenshot_path)
     _require_foreground(session)
     session.check_deadline()
@@ -279,6 +293,7 @@ def open_reward_track(session, *, timeout_sec: float = 20) -> dict:
             _require_current(session, current, "shiny", end)
             return {"status": "opened", "frame": str(current.screenshot_path),
                     "frame_sha256": _sha256(current.screenshot_path), "entry_frame": str(panel.screenshot_path),
+                    "entry_label": entry_label, "position_verified": current.observations["event_reward_track"]["position_verified"],
                     "claim_attempted": False, "reward_inventory_verified": False, "formal_success": False}
     raise FlowError("Reward track did not become a confirmed current page")
 

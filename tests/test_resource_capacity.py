@@ -2,6 +2,8 @@
 
 from pathlib import Path
 from types import SimpleNamespace
+import hashlib
+import json
 import unittest
 from unittest.mock import patch
 
@@ -15,6 +17,7 @@ from autococ.scene import SceneSnapshot
 
 
 PROBES = Path(r"E:\projects\AutoCOC\reports\completion-20261015\probes")
+ANONYMOUS_GOLD = Path(__file__).parent / "fixtures" / "resource_capacity_18_647_2"
 INVENTORY = {"gold": 100, "elixir": 200, "dark_elixir": 30, "gems": 5}
 
 
@@ -52,6 +55,43 @@ class ReaderSession:
 
 
 class CapacityTests(unittest.TestCase):
+    def test_anonymous_real_gold_tooltip_replay(self):
+        from autococ.ocr import RapidOCRProvider
+
+        provenance = json.loads((ANONYMOUS_GOLD / "provenance.json").read_text(encoding="utf-8"))
+        provider = RapidOCRProvider()
+        for name in ("old_home", "old_animation", "new_animation"):
+            with self.subTest(frame=name):
+                frame = ANONYMOUS_GOLD / f"{name}.png"
+                self.assertEqual(hashlib.sha256(frame.read_bytes()).hexdigest(),
+                                 provenance["fixtures"][name]["derived_sha256"])
+                self.assertIsNone(read_tooltip_capacity(frame, "gold", provider))
+                self.assertTrue(_tooltip_border_absent(frame, "gold"))
+        for name in ("old_settled", "new_settled"):
+            with self.subTest(frame=name):
+                frame = ANONYMOUS_GOLD / f"{name}.png"
+                self.assertEqual(hashlib.sha256(frame.read_bytes()).hexdigest(),
+                                 provenance["fixtures"][name]["derived_sha256"])
+                proof = read_tooltip_capacity(frame, "gold", provider)
+                self.assertIsNotNone(proof)
+                self.assertEqual(proof["capacity"], 29_000_000)
+                self.assertGreaterEqual(proof["ocr"]["number_raw"], .95)
+                self.assertGreaterEqual(proof["ocr"]["number_white"], .95)
+                self.assertFalse(_tooltip_border_absent(frame, "gold"))
+
+    def test_anonymous_gold_tooltip_rejects_clipped_or_conflicting_number(self):
+        from autococ.ocr import RapidOCRProvider
+        import cv2
+
+        frame = ANONYMOUS_GOLD / "new_settled.png"
+        clipped = cv2.imread(str(frame), cv2.IMREAD_COLOR)
+        clipped[78:99, 1108:1140] = 24
+        with patch("autococ.resource_capacity.read_frame", return_value=clipped):
+            self.assertIsNone(read_tooltip_capacity(frame, "gold", RapidOCRProvider()))
+        conflict = [("最大储量：", .99), ("最大储量：", .99),
+                    ("29000000", .99), ("28 000 000", .99)]
+        self.assertIsNone(read_tooltip_capacity(frame, "gold", Provider(conflict)))
+
     def test_tooltip_requires_border_and_dual_ocr_agreement(self):
         image = np.zeros((720, 1280, 3), dtype=np.uint8)
         image[61, 984:1258] = 255
@@ -188,6 +228,13 @@ class CapacityTests(unittest.TestCase):
         if recent.is_dir():
             self.assertIsNone(read_tooltip_capacity(recent / "00002-gold-storage-detail.png", "gold", provider))
             settled = read_tooltip_capacity(recent / "00003-gold-storage-detail-settled.png", "gold", provider)
+            self.assertEqual(settled["capacity"], 29_000_000)
+            self.assertGreaterEqual(settled["ocr"]["number_raw"], .95)
+            self.assertGreaterEqual(settled["ocr"]["number_white"], .95)
+        latest = PROBES / "20261016-074804-075059-capacity-all-v1" / "frames"
+        if latest.is_dir():
+            self.assertIsNone(read_tooltip_capacity(latest / "00002-gold-storage-detail.png", "gold", provider))
+            settled = read_tooltip_capacity(latest / "00003-gold-storage-detail-settled.png", "gold", provider)
             self.assertEqual(settled["capacity"], 29_000_000)
             self.assertGreaterEqual(settled["ocr"]["number_raw"], .95)
             self.assertGreaterEqual(settled["ocr"]["number_white"], .95)

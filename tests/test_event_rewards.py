@@ -99,6 +99,14 @@ class EventRewardTests(unittest.TestCase):
         for row in provenance["ocr_fixtures"].values():
             self.assertEqual(hashlib.sha256((ROOT / row["derived_path"]).read_bytes()).hexdigest(),
                              row["derived_sha256"])
+        roundtrip = json.loads((FIXTURES / "roundtrip_20261016_provenance.json").read_text(encoding="utf-8"))
+        self.assertFalse(roundtrip["human_review"])
+        self.assertFalse(roundtrip["formal_acceptance"])
+        for row in roundtrip["fixtures"].values():
+            self.assertEqual(hashlib.sha256((ROOT / row["derived_path"]).read_bytes()).hexdigest(),
+                             row["derived_sha256"])
+            self.assertEqual(hashlib.sha256((ROOT / row["ocr_path"]).read_bytes()).hexdigest(),
+                             row["ocr_sha256"])
 
     def test_real_before_animation_and_later_empty_states(self):
         cases = (("shiny_before", "shiny_before", "claimable", "claimable"),
@@ -114,11 +122,73 @@ class EventRewardTests(unittest.TestCase):
                 self.assertEqual(result["targets"]["shiny"]["status"], shiny)
                 self.assertEqual(result["targets"]["glowy"]["status"], glowy)
 
+    def test_real_shifted_track_is_closable_but_original_targets_remain_unknown(self):
+        result = observe_reward_track(FIXTURES / "roundtrip_track_shifted.png",
+                                      fixture_ocr("roundtrip_track_shifted"), client_version="18.647.2")
+        self.assertIsNotNone(result)
+        self.assertFalse(result["position_verified"])
+        self.assertEqual([result["targets"][name]["status"] for name in ("shiny", "glowy")],
+                         ["unknown", "unknown"])
+        snapshot = recognized("roundtrip_track_shifted")
+        self.assertEqual(snapshot.scene, "popup")
+        self.assertEqual([button["name"] for button in snapshot.observations["buttons"]],
+                         ["close_event_rewards"])
+        session = FakeSession([snapshot, SceneSnapshot("village", .95, FIXTURES / "roundtrip_panel_open.png",
+                              {"village_type": "home", "resource_source": "village_inventory",
+                               "buttons": [{"name": "attack"}, {"name": "shop"}]})])
+        with patch("autococ.event_rewards.foreground_package", return_value=session.config.game.package_name):
+            closed = close_reward_track(session)
+        self.assertEqual(closed["status"], "home")
+        self.assertEqual(len(session.taps), 1)
+
+    def test_missing_original_milestone_never_becomes_claim_or_no_opportunity(self):
+        old = fixture_ocr("shiny_before")
+        omitted = [item for item in old if item["text"] not in {"600", "95"}]
+        result = observe_reward_track(FIXTURES / "shiny_before.png", omitted, client_version="18.647.2")
+        self.assertIsNotNone(result)
+        self.assertFalse(result["position_verified"])
+        self.assertTrue(all(row["status"] == "unknown" and row["button"] is None
+                            for row in result["targets"].values()))
+        shifted = FakeSession([recognized("roundtrip_track_shifted")])
+        with patch("autococ.event_rewards.foreground_package", return_value=shifted.config.game.package_name):
+            receipt = claim_one_free_reward(shifted, "shiny", enabled=True)
+        self.assertEqual(receipt["status"], "unknown")
+        self.assertFalse(receipt["ui_claim_acknowledged"])
+        self.assertEqual(shifted.taps, [])
+
+    def test_real_open_entry_and_conflicting_or_displaced_labels(self):
+        home = SceneSnapshot("village", .95, FIXTURES / "roundtrip_panel_open.png",
+                             {"village_type": "home", "resource_source": "village_inventory",
+                              "buttons": [{"name": "attack"}, {"name": "shop"}]})
+        panel = recognized("roundtrip_panel_open")
+        shifted = recognized("roundtrip_track_shifted")
+        session = FakeSession([home, panel, shifted])
+        with patch("autococ.event_rewards.foreground_package", return_value=session.config.game.package_name):
+            opened = open_reward_track(session)
+        self.assertEqual(opened["status"], "opened")
+        self.assertEqual(opened["entry_label"], "打开")
+        self.assertEqual(session.taps, [((950, 580), "Open confirmed current event reward track")])
+
+        for error in ("conflict", "displaced"):
+            with self.subTest(error=error):
+                panel = recognized("roundtrip_panel_open")
+                if error == "conflict":
+                    panel.observations["ocr"].append({"text": "领取", "confidence": .999,
+                                                       "bbox": [926, 564, 974, 596]})
+                else:
+                    next(item for item in panel.observations["ocr"] if item["text"] == "打开")["bbox"] = [350, 564, 398, 596]
+                rejected = FakeSession([home, panel])
+                with patch("autococ.event_rewards.foreground_package",
+                           return_value=rejected.config.game.package_name):
+                    with self.assertRaises(FlowError):
+                        open_reward_track(rejected)
+                self.assertEqual(rejected.taps, [])
+
     def test_reward_track_requires_current_page_and_correct_target_evidence(self):
         path = FIXTURES / "shiny_before.png"
         base = fixture_ocr("shiny_before")
         self.assertIsNone(observe_reward_track(path, base, client_version="18.647.3"))
-        for missing in ("裂隙之乱", "奖励清单", "购买活动令牌", "600", "95"):
+        for missing in ("裂隙之乱", "奖励清单", "购买活动令牌"):
             with self.subTest(missing=missing):
                 self.assertIsNone(observe_reward_track(path, [x for x in base if x["text"] != missing],
                                                        client_version="18.647.2"))

@@ -1,0 +1,61 @@
+{
+  "client_version": "18.647.2",
+  "purpose": "anonymous real gold tooltip replay; not formal capacity acceptance",
+  "transformation": {
+    "decode": "cv2.IMREAD_COLOR",
+    "resize": [
+      1280,
+      720
+    ],
+    "interpolation": "cv2.INTER_AREA",
+    "preserved_roi_xyxy": [
+      970,
+      52,
+      1270,
+      107
+    ],
+    "fill_bgr": [
+      24,
+      24,
+      24
+    ],
+    "order": [
+      "decode",
+      "resize",
+      "fill outside preserved ROI",
+      "cv2.imwrite PNG"
+    ]
+  },
+  "fixtures": {
+    "old_home": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261015-221320-capacity-reader\\frames\\00001-launch-home-check.png",
+      "source_sha256": "10909d11a2260ed06a2928bddf7584fb60c440bf15e13ac2225dcf94ffacdb0b",
+      "derived_path": "tests\\fixtures\\resource_capacity_18_647_2\\old_home.png",
+      "derived_sha256": "9c069c6b6f4ff38a1aa38ad653070bb3f3ad745273ca917b79a692b015caf3e3"
+    },
+    "old_animation": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261015-221320-capacity-reader\\frames\\00002-gold-storage-detail.png",
+      "source_sha256": "8c1077d6467fa6c9255798c51a4d6289f419620958a0512a72084773b259383f",
+      "derived_path": "tests\\fixtures\\resource_capacity_18_647_2\\old_animation.png",
+      "derived_sha256": "652e9b515ceef6b2eeae7317a9528edacd33d71ce26ca75c3f21d62e339815ce"
+    },
+    "old_settled": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261015-221320-capacity-reader\\frames\\00003-gold-storage-detail-settled.png",
+      "source_sha256": "4311d50aa592e875024b97fd4107bfef524435d45dbb714068d75c3756386bb5",
+      "derived_path": "tests\\fixtures\\resource_capacity_18_647_2\\old_settled.png",
+      "derived_sha256": "6aba4f3b65fea6b1a759cf061c76dd2b17445fb21d66213b1e5a9ca5df4327ae"
+    },
+    "new_animation": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-074804-075059-capacity-all-v1\\frames\\00002-gold-storage-detail.png",
+      "source_sha256": "5f2d815dd39193ee16152dc8c70f40552b3ab262181f01564c9615e9f5277cc1",
+      "derived_path": "tests\\fixtures\\resource_capacity_18_647_2\\new_animation.png",
+      "derived_sha256": "f2d539306523a433fc6233fa810b80df6c070f4d615bf8eb1161f86d50135c94"
+    },
+    "new_settled": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-074804-075059-capacity-all-v1\\frames\\00003-gold-storage-detail-settled.png",
+      "source_sha256": "c2229e9e2b19ab74744dd5cd035f8c286a2fb6ea05a88fe5aab458cdbea13248",
+      "derived_path": "tests\\fixtures\\resource_capacity_18_647_2\\new_settled.png",
+      "derived_sha256": "9fb86518527a19d76e9763abd001a5029d51d584401cc58461eccb983ebdacaa"
+    }
+  }
+}
