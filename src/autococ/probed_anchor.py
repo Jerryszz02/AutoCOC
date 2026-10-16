@@ -329,72 +329,49 @@ def _remaining_roster_checkpoint(session: Any, plan: ProbedAnchorPlan, snapshot:
             "troops": positive, "heroes": heroes}
 
 
-def _spent_balloon_89_border(gray: Any, horizontal_edges: Any,
-                             bbox: tuple[int, int, int, int]) -> dict | None:
-    """Independent 18.647.2 outline proof for the sampled 89px gray card."""
+def _spent_balloon_89_border(gray: Any, bbox: tuple[int, int, int, int]) -> dict | None:
+    """Source-bound, connected lower outline inside the sampled 89px gray card."""
     import cv2
     import numpy as np
     from .unit_catalog import CATALOG_ROOT
 
-    left, _top, right, bottom = bbox
-    direction = np.median(horizontal_edges[625:695], axis=0)
-    left_edge, right_edge = float(direction[left]), float(direction[right - 1])
-    # This card is dimmer than the earlier 88px gray card. Prove every row of
-    # both opposite straight sides, then track both sides into the rounded
-    # corners. The old 88px thresholds and path remain unchanged below.
-    straight_left = horizontal_edges[625:702, left]
-    straight_right = horizontal_edges[625:702, right - 1]
-    if (left_edge < 200 or right_edge > -200 or
-            np.any(straight_left < 200) or np.any(straight_right > -130) or
-            np.any(straight_right[696 - 625:] > -200)):
+    left, _top, right, _bottom = bbox
+    current = gray[625:711, left:right]
+    if current.shape != (86, 89):
         return None
-    left_position, right_position = left, right - 1
-    corners = []
-    for row in range(702, 711):
-        left_band = horizontal_edges[row, left:left + 9]
-        right_band = horizontal_edges[row, right - 9:right]
-        next_left = left + int(np.argmax(left_band))
-        next_right = right - 9 + int(np.argmin(right_band))
-        if (float(left_band.max()) < 40 or float(right_band.min()) > -40 or
-                not left_position <= next_left <= left_position + 2 or
-                not right_position - 2 <= next_right <= right_position):
-            return None
-        corners.append([row, next_left, next_right])
-        left_position, right_position = next_left, next_right
-    interior = slice(left + 8, right - 8)
-    if (left_position < left + 5 or right_position > right - 6 or
-            not 0 <= interior.start - left_position <= 2 or
-            not 0 <= right_position - (interior.stop - 1) <= 2):
+    # Fixed source geometry, never adapted to a current frame. The four-pixel
+    # bands join both straight sides to both rounded corners and the lower
+    # horizontal band; the top edge is outside this proof.
+    mask = np.zeros((86, 89), dtype=bool)
+    mask[:77, :4] = True
+    mask[:77, 85:] = True
+    left_trace = (1, 1, 1, 1, 2, 2, 3, 4, 6)
+    right_trace = (87, 87, 87, 87, 86, 86, 85, 84, 82)
+    for row, (left_edge, right_edge) in enumerate(zip(left_trace, right_trace), start=77):
+        mask[row, left_edge + 1:left_edge + 5] = True
+        mask[row, right_edge - 4:right_edge] = True
+    mask[81:86, 8:81] = True
+    if int(mask.sum()) != 1045:
         return None
 
-    template_path = CATALOG_ROOT / "units" / "balloon_spent_bottom_89_18_647_2.png"
+    template_path = CATALOG_ROOT / "units" / "balloon_spent_lower_inner_89_18_647_2.png"
     try:
         template_bytes = template_path.read_bytes()
     except OSError:
         return None
     template_sha = hashlib.sha256(template_bytes).hexdigest()
-    if template_sha != "82a82f970d61d1a5e0971103cb6a3ca6025110bb6ad704db65ffadd3c489f797":
+    if template_sha != "2c863f88179a7d5389295444f28c4f0a1ac27b66ca1d94ac33690e1536ea0524":
         return None
     template = cv2.imdecode(np.frombuffer(template_bytes, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
-    core = gray[bottom - 5:bottom + 2, interior]
-    if template is None or template.shape != (7, 73) or core.shape != template.shape:
+    if template is None or template.shape != current.shape:
         return None
-    core_max_error = int(np.abs(core.astype(np.int16) - template.astype(np.int16)).max())
-    if core_max_error > 4:
+    masked_max_error = int(np.abs(current.astype(np.int16) - template.astype(np.int16))[mask].max())
+    if masked_max_error > 4:
         return None
-    trough = gray[bottom:bottom + 2, interior].mean(axis=0)
-    below = gray[bottom + 2:bottom + 5, interior].mean(axis=0)
-    rebound = below - trough
-    if np.any(rebound < 7):
-        return None
-    return {"method": "spent_balloon_89_versioned_closed_outline",
-            "left_edge": left_edge, "right_edge": right_edge,
-            "straight_left_min": float(straight_left.min()),
-            "straight_right_max": float(straight_right.max()),
-            "corner_trace": corners, "corner_endpoints": [left_position, right_position],
-            "core_template_sha256": template_sha, "core_max_error": core_max_error,
-            "lower_rebound_min": float(rebound.min()),
-            "continuous_columns": right - left - 16}
+    return {"method": "spent_balloon_89_versioned_inner_lower_outline",
+            "inner_outline_template_sha256": template_sha,
+            "masked_max_error": masked_max_error, "required_pixels": int(mask.sum()),
+            "proof_roi": [left, 625, right, 711]}
 
 
 def _spent_balloon_dark_border(current: Any, bbox: tuple[int, int, int, int]) -> dict | None:
@@ -407,9 +384,9 @@ def _spent_balloon_dark_border(current: Any, bbox: tuple[int, int, int, int]) ->
             not 590 <= top <= 605 or bottom != 711 or not 80 <= right - left <= 96):
         return None
     gray = cv2.cvtColor(current, cv2.COLOR_BGR2GRAY)
-    horizontal_edges = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
     if right - left == 89:
-        return _spent_balloon_89_border(gray, horizontal_edges, bbox)
+        return _spent_balloon_89_border(gray, bbox)
+    horizontal_edges = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
     direction = np.median(horizontal_edges[625:695], axis=0)
     left_edge, right_edge = float(direction[left]), float(direction[right - 1])
     # Retain the stronger opposite-side requirements of _closed_card_border.

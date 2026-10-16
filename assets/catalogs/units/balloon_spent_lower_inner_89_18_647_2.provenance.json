@@ -1,0 +1,25 @@
+{
+  "client_version": "18.647.2",
+  "source_frame": "reports/completion-20261015/live/20261016-173539-614225-f37bc7ce/frames/00018-mixed-balloon-post-1.png",
+  "source_sha256": "1d140181061226a6099413d825dda0ab5092829de7f4edb9148b815fb1747243",
+  "source_events": "reports/completion-20261015/live/20261016-173539-614225-f37bc7ce/events.jsonl",
+  "source_events_sha256": "1a9c21eb839e56d71153345ce67e596d7aff890d77f0697e1a6edeec37bd8d44",
+  "template_sha256": "2c863f88179a7d5389295444f28c4f0a1ac27b66ca1d94ac33690e1536ea0524",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "baseline_roi_xyxy": [
+    383,
+    625,
+    472,
+    711
+  ],
+  "template_shape": [
+    86,
+    89
+  ],
+  "transform": "Decode source BGR, resize to 1280x720 with cv2.INTER_AREA, convert to grayscale, crop rows y=625..710 and columns x=383..471, encode as grayscale PNG.",
+  "fixed_mask": "Within this ROI: both straight sides columns 0..3 and 85..88 on rows 0..76; left corner rows 77..85 columns trace_left+1..+4 and right corner trace_right-4..-1 where fixed source trace_left=[1,1,1,1,2,2,3,4,6] and trace_right=[87,87,87,87,86,86,85,84,82]; bottom rows81..85 columns8..80. All 1045 masked pixels are required; 4-neighbor and 8-neighbor both yield one connected component.",
+  "purpose": "Source-bound current-version 89px spent balloon lower outline inside frozen bbox only; no top border, quantity, portrait, human ground truth or verified deployment proof."
+}

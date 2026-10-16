@@ -29,6 +29,8 @@ SOURCE_ROOT = Path(r"E:\projects\AutoCOC")
 METADATA = ROOT / "tests/fixtures/mixed_balloon_spent_89_18_647_2_20261016.json"
 BBOX = (383, 595, 472, 711)
 TEMPLATE = CATALOG_ROOT / "units/balloon_spent_bottom_89_18_647_2.png"
+INNER_TEMPLATE = CATALOG_ROOT / "units/balloon_spent_lower_inner_89_18_647_2.png"
+INNER_METADATA = ROOT / "tests/fixtures/mixed_balloon_spent_89_inner_18_647_2_20261016.json"
 LOCAL_OCR = ROOT / "tests/fixtures/mixed_balloon_spent_89_local_ocr_replay_20261016.json"
 
 
@@ -43,6 +45,14 @@ def _path(number):
 
 def _image(number):
     return cv2.resize(read_frame(_path(number)), (1280, 720),
+                      interpolation=cv2.INTER_AREA)
+
+
+def _inner_image(number):
+    metadata = json.loads(INNER_METADATA.read_text(encoding="utf-8"))
+    row, = [row for row in metadata["frames"]
+            if Path(row["source_frame"]).name.startswith(f"{number:05d}")]
+    return cv2.resize(read_frame(ROOT / row["path"]), (1280, 720),
                       interpolation=cv2.INTER_AREA)
 
 
@@ -102,80 +112,151 @@ def test_spent_89_template_is_exact_source_crop():
         706:713, 391:464])
 
 
+def test_spent_89_inner_template_and_new_frames_are_source_bound():
+    provenance = json.loads(INNER_TEMPLATE.with_suffix(".provenance.json").read_text(
+        encoding="utf-8"))
+    metadata = json.loads(INNER_METADATA.read_text(encoding="utf-8"))
+    assert metadata["human_reviewed"] is False
+    assert metadata["formal_success"] is False
+    assert metadata["counts_toward_acceptance"] is False
+    assert provenance["client_version"] == metadata["client_version"] == "18.647.2"
+    assert provenance["baseline_roi_xyxy"] == [383, 625, 472, 711]
+    assert provenance["template_shape"] == [86, 89]
+    assert provenance["source_sha256"] == _rows()[-1]["source_sha256"]
+    assert _file_sha256(INNER_TEMPLATE) == provenance["template_sha256"]
+    template = cv2.imread(str(INNER_TEMPLATE), cv2.IMREAD_GRAYSCALE)
+    assert np.array_equal(template, cv2.cvtColor(_image(18), cv2.COLOR_BGR2GRAY)[
+        625:711, 383:472])
+    assert [Path(row["source_frame"]).name[:5] for row in metadata["frames"]] == [
+        "00013", "00015", "00017"]
+    events = SOURCE_ROOT / metadata["source_events"]
+    if events.is_file():
+        assert _file_sha256(events) == metadata["source_events_sha256"]
+    for row in metadata["frames"]:
+        path = ROOT / row["path"]
+        image = read_frame(path)
+        assert _file_sha256(path) == row["sha256"]
+        assert image.shape == (1440, 2560, 3)
+        retained = np.zeros(image.shape[:2], dtype=bool)
+        for left, top, right, bottom in row["retained_native_rectangles_xyxy"]:
+            retained[top:bottom, left:right] = True
+        assert np.all(image[~retained] == 45)
+        assert row["cached_ocr"] == _retained(
+            row["cached_ocr"], row["retained_baseline_rectangles_xyxy"])
+        source = SOURCE_ROOT / row["source_frame"]
+        if source.is_file():
+            assert _file_sha256(source) == row["source_sha256"]
+            assert np.array_equal(image[retained], read_frame(source)[retained])
+        if events.is_file():
+            original = [event for line in events.read_text(encoding="utf-8").splitlines()
+                        if (event := json.loads(line)).get("kind") == "observation"
+                        and Path(str(event.get("frame"))) == source]
+            assert len(original) == 1
+            assert row["cached_ocr"] == _retained(
+                original[0]["observations"].get("ocr") or [],
+                row["retained_baseline_rectangles_xyxy"])
+
+
+def _inner_mask():
+    mask = np.zeros((86, 89), dtype=np.uint8)
+    mask[:77, :4] = 1
+    mask[:77, 85:] = 1
+    for index, (left, right) in enumerate(zip((1, 1, 1, 1, 2, 2, 3, 4, 6),
+                                               (87, 87, 87, 87, 86, 86, 85, 84, 82))):
+        mask[77 + index, left + 1:left + 5] = 1
+        mask[77 + index, right - 4:right] = 1
+    mask[81:86, 8:81] = 1
+    return mask
+
+
+def test_spent_89_required_inner_outline_is_four_connected_and_stable():
+    mask = _inner_mask()
+    assert int(mask.sum()) == 1045
+    for connectivity in (4, 8):
+        components, labels = cv2.connectedComponents(mask, connectivity=connectivity)
+        assert components == 2  # Background plus one continuous lower outline.
+        assert int((labels == 1).sum()) == 1045
+    old = cv2.cvtColor(_image(18), cv2.COLOR_BGR2GRAY)[625:711, 383:472]
+    new = cv2.cvtColor(_inner_image(17), cv2.COLOR_BGR2GRAY)[625:711, 383:472]
+    difference = np.abs(old.astype(np.int16) - new.astype(np.int16))
+    assert int(difference[mask != 0].max()) == 0
+    components = {"left_straight": (slice(0, 77), slice(0, 4)),
+                  "right_straight": (slice(0, 77), slice(85, 89)),
+                  "left_corner": (slice(77, 86), slice(1, 11)),
+                  "right_corner": (slice(77, 86), slice(78, 88)),
+                  "bottom": (slice(81, 86), slice(8, 81))}
+    for region in components.values():
+        assert int(difference[region][mask[region] != 0].max()) == 0
+
+
 def test_spent_89_real_pixels_require_complete_separate_gray_outline():
     for number in (14, 16, 17):
         assert _spent_balloon_dark_border(_image(number), BBOX) is None
-    image = _image(18)
-    assert _closed_card_border(image, BBOX) is None  # Reproduce the live stop.
-    border = _spent_balloon_dark_border(image, BBOX)
-    assert border["method"] == "spent_balloon_89_versioned_closed_outline"
-    assert border["left_edge"] >= 200 and border["right_edge"] <= -200
-    assert border["straight_left_min"] >= 200
-    assert border["straight_right_max"] <= -130
-    assert border["corner_trace"] == [
-        [702, 384, 470], [703, 384, 470], [704, 384, 470],
-        [705, 384, 470], [706, 385, 469], [707, 385, 469],
-        [708, 386, 468], [709, 387, 467], [710, 389, 465]]
-    assert border["core_max_error"] == 0
-    assert border["core_template_sha256"] == hashlib.sha256(TEMPLATE.read_bytes()).hexdigest()
-    assert border["lower_rebound_min"] >= 7
-    assert border["continuous_columns"] == 73
+    for number in (13, 15):
+        assert _spent_balloon_dark_border(_inner_image(number), BBOX) is None
+    for image in (_image(18), _inner_image(17)):
+        assert _closed_card_border(image, BBOX) is None  # Both live stops.
+        border = _spent_balloon_dark_border(image, BBOX)
+        assert border["method"] == "spent_balloon_89_versioned_inner_lower_outline"
+        assert border["inner_outline_template_sha256"] == _file_sha256(INNER_TEMPLATE)
+        assert border["masked_max_error"] == 0
+        assert border["required_pixels"] == 1045
+        assert border["proof_roi"] == [383, 625, 472, 711]
 
 
 @pytest.mark.parametrize("damage", (
     "left_side", "right_side", "left_straight", "right_straight",
-    "left_corner", "right_corner", "bottom", "below", "flat_gray",
+    "left_corner", "right_corner", "bottom", "left_join", "right_join", "flat_gray",
     "shifted_bbox", "wrong_width"))
 def test_spent_89_rejects_missing_side_corner_bottom_or_geometry(damage):
-    image = _image(18).copy()
+    image = _inner_image(17).copy()
     bbox = BBOX
     if damage == "left_side":
-        image[625:695, 381:386] = 45
+        image[650, 384] = 255
     elif damage == "right_side":
-        image[625:695, 469:474] = 45
+        image[650, 470] = 255
     elif damage == "left_straight":
-        image[696:703, 381:386] = 45
+        image[701, 384] = 255
     elif damage == "right_straight":
-        image[696:703, 469:474] = 45
+        image[701, 470] = 255
     elif damage == "left_corner":
-        image[702:706, 381:394] = 45
+        image[704, 386] = 255
     elif damage == "right_corner":
-        image[702:706, 461:474] = 45
+        image[704, 468] = 255
     elif damage == "bottom":
-        image[711:713, 391:464] = 45
-    elif damage == "below":
-        image[713:716, 391:464] = 0
+        image[708, 420] = 255
+    elif damage == "left_join":
+        image[710, 391] = 255
+    elif damage == "right_join":
+        image[710, 463] = 255
     elif damage == "flat_gray":
-        image[625:716, 383:472] = 45
+        image[625:711, 383:472] = 45
     elif damage == "shifted_bbox":
         bbox = (384, 595, 473, 711)
     else:
         bbox = (383, 595, 471, 711)
-    if damage in {"left_side", "right_side", "left_straight", "right_straight",
-                  "left_corner", "right_corner"}:
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        edges = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
-        if damage == "left_side":
-            assert float(np.median(edges[625:695, 383])) < 200
-        elif damage == "right_side":
-            assert float(np.median(edges[625:695, 471])) > -200
-        elif damage == "left_straight":
-            assert np.any(edges[696:702, 383] < 200)
-        elif damage == "right_straight":
-            assert np.any(edges[696:702, 471] > -200)
-        elif damage == "left_corner":
-            assert float(edges[704, 383:392].max()) < 40
-        else:
-            assert float(edges[704, 463:472].min()) > -40
     assert _spent_balloon_dark_border(image, bbox) is None
+
+
+@pytest.mark.parametrize("background", ("dark", "bright", "texture"))
+def test_spent_89_ignores_only_card_exterior_background(background):
+    image = _inner_image(17).copy()
+    rng = np.random.default_rng(17)
+    for region in ((slice(625, 716), slice(370, 383)),
+                   (slice(625, 716), slice(472, 486)),
+                   (slice(711, 716), slice(383, 472))):
+        shape = image[region].shape
+        image[region] = (0 if background == "dark" else 255 if background == "bright"
+                         else rng.integers(0, 256, size=shape, dtype=np.uint8))
+    assert _spent_balloon_dark_border(image, BBOX)["masked_max_error"] == 0
 
 
 def test_spent_89_rejects_changed_template_hash(monkeypatch, tmp_path):
     copied = tmp_path / "units"
     copied.mkdir()
-    (copied / TEMPLATE.name).write_bytes(TEMPLATE.read_bytes() + b"changed")
+    (copied / INNER_TEMPLATE.name).write_bytes(INNER_TEMPLATE.read_bytes() + b"changed")
     monkeypatch.setattr("autococ.unit_catalog.CATALOG_ROOT", tmp_path)
-    assert _spent_balloon_dark_border(_image(18), BBOX) is None
+    assert _spent_balloon_dark_border(_inner_image(17), BBOX) is None
 
 
 @pytest.mark.parametrize("caller", ("probed", "mixed"))
@@ -249,7 +330,7 @@ def test_spent_89_keeps_source_identity_and_version_gates(monkeypatch, caller, f
         source_identity = result.get("source_identity") or result.get("source_portrait_identity")
         assert source_identity["unit_id"] == "balloon"
         assert result["current_card_border"]["method"] == \
-               "spent_balloon_89_versioned_closed_outline"
+               "spent_balloon_89_versioned_inner_lower_outline"
     else:
         with pytest.raises(FlowError):
             probe()
@@ -285,7 +366,7 @@ def test_spent_89_callers_cannot_bypass_missing_or_bad_asset_with_generic_border
     original_read_bytes = Path.read_bytes
 
     def damaged_asset(path):
-        if path == TEMPLATE:
+        if path == INNER_TEMPLATE:
             if asset == "missing":
                 raise FileNotFoundError(str(path))
             return original_read_bytes(path) + b"changed"
