@@ -979,7 +979,7 @@ class ScreenshotRecognizer:
                 "anchors": evidence, "close_score": round(score, 5), "button": button}
 
     def _unit_detail_close(self, path: Path, texts: list[OCRText]) -> dict[str, object] | None:
-        """Expose only the close icon on a sampled current siege detail dialog."""
+        """Expose only the close icon on a sampled current unit detail dialog."""
         if self.client_version != "18.647.2":
             return None
         anchors = {
@@ -995,16 +995,44 @@ class ScreenshotRecognizer:
                            ("持续时间（秒）", (900, 110, 1110, 180)),
                            ("攻击次数", (650, 190, 840, 250)),
                            ("巨人数量", (900, 190, 1080, 250))),
+            "4级烈焰熔炉": (("生命值", (650, 110, 830, 155)),
+                          ("1800", (650, 145, 830, 185)),
+                          ("持续时间（秒）", (900, 110, 1110, 155)),
+                          ("60", (900, 145, 1110, 185)),
+                          ("小火怪数量", (650, 190, 840, 235)),
+                          ("22", (650, 220, 840, 260)),
+                          ("小火怪等级", (900, 190, 1080, 235)),
+                          ("4", (900, 220, 1080, 260)),
+                          ("所需空间", (595, 275, 760, 320)),
+                          ("18", (595, 310, 760, 350))),
         }
-        titles = [item for item in texts if item.confidence >= .9
+        titles = [item for item in texts if math.isfinite(item.confidence)
+                  and .9 <= item.confidence <= 1
                   and normalize_label(item.text) in anchors
                   and self._in_observed_roi(item, (530, 15, 750, 95))]
-        if len(titles) != 1 or not all(
-            any(item.confidence >= .9 and normalize_label(item.text) == label
-                and self._in_observed_roi(item, roi) for item in texts)
-            for label, roi in anchors[normalize_label(titles[0].text)]
-        ):
+        if len(titles) != 1:
             return None
+        title = normalize_label(titles[0].text)
+        if title == "4级烈焰熔炉" and titles[0].text.strip() != title:
+            return None
+        for label, roi in anchors[title]:
+            if title == "4级烈焰熔炉" and label in {"1800", "60", "22", "4", "18"}:
+                # Do not turn 180.0 or 1.8 into a verified integer by
+                # punctuation normalization. Conflicting OCR in the same
+                # numeric cell also makes the detail unsafe to act on.
+                reads = [item for item in texts if math.isfinite(item.confidence)
+                         and .9 <= item.confidence <= 1
+                         and re.search(r"[0-9]", item.text)
+                         and self._in_observed_roi(item, roi)]
+                if len(reads) != 1 or reads[0].text.strip() != label:
+                    return None
+                continue
+            hits = [item for item in texts if math.isfinite(item.confidence)
+                    and .9 <= item.confidence <= 1
+                    and normalize_label(item.text) == label
+                    and self._in_observed_roi(item, roi)]
+            if not hits or (title == "4级烈焰熔炉" and len(hits) != 1):
+                return None
         import cv2
 
         image = read_frame(path, cv2.IMREAD_COLOR)
@@ -1021,7 +1049,8 @@ class ScreenshotRecognizer:
         left, top = position[0] + 1080, position[1] + 15
         box = scale_box((left, top, left + template.shape[1], top + template.shape[0]),
                         from_resolution=(1280, 720), to_resolution=self.baseline_resolution)
-        button = {"name": "close_unit_details", "text": "攻城器械详情关闭图标",
+        button = {"name": "close_unit_details",
+                  "text": ("烈焰熔炉详情关闭图标" if title == "4级烈焰熔炉" else "攻城器械详情关闭图标"),
                   "confidence": round(score, 5), "bbox": list(box),
                   "point": [(box[0] + box[2]) // 2, (box[1] + box[3]) // 2]}
         return {"title": asdict(titles[0]), "close_score": round(score, 5), "button": button}

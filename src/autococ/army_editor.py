@@ -228,23 +228,35 @@ def _bottom_picker_controls(image: np.ndarray, kind: str,
             client_version=client_version).get("client"):
         return controls, availability
     matches: dict[str, list[dict[str, object]]] = {}
-    for top in (431, 568):
-        for index in range(9):
-            left = round(33 + index * 130.25)
-            box = (left, top, left + 124, top + 124)
-            identity = recognize_card_identity(image, box, kind,
-                                               surface="current_picker",
-                                               client_version=client_version)
-            unit_id = identity["unit_id"]
-            if unit_id is None or not identity["evidence"]:
-                continue
-            matched = identity["evidence"][0]["template"]
-            state = ("capacity_gray" if "_capacity_gray_" in matched else
-                     "active" if "_active_" in matched else None)
-            if state is None:
-                continue
-            matches.setdefault(unit_id, []).append({"box": box, "identity": identity,
-                                                     "state": state})
+    boxes = [(round(33 + index * 130.25), top,
+              round(33 + index * 130.25) + 124, top + 124)
+             for top in (431, 568) for index in range(9)]
+    # The last visible troop card shifts with the picker page. A portrait can
+    # match inside an adjacent, incomplete slot; derive this one card's box
+    # from its own blue information glyph and require all four frame edges.
+    furnace_box = None
+    if (kind == "troop" and client_version == "18.647.2"
+            and isinstance(capacity, dict)
+            and capacity.get("used") == capacity.get("total")):
+        furnace_box = _furnace_picker_box(image, client_version)
+        if furnace_box is not None and furnace_box not in boxes:
+            boxes.append(furnace_box)
+    for box in boxes:
+        identity = recognize_card_identity(image, box, kind,
+                                           surface="current_picker",
+                                           client_version=client_version)
+        unit_id = identity["unit_id"]
+        if unit_id is None or not identity["evidence"]:
+            continue
+        if unit_id == "furnace" and box != furnace_box:
+            continue
+        matched = identity["evidence"][0]["template"]
+        state = ("capacity_gray" if "_capacity_gray_" in matched else
+                 "active" if "_active_" in matched else None)
+        if state is None:
+            continue
+        matches.setdefault(unit_id, []).append({"box": box, "identity": identity,
+                                                 "state": state})
     for unit_id, hits in matches.items():
         if len(hits) != 1:
             continue
@@ -271,6 +283,45 @@ def _bottom_picker_controls(image: np.ndarray, kind: str,
                                           to_resolution=baseline_resolution)),
                                       "state": state}})
     return controls, availability
+
+
+def _closed_furnace_picker_frame(image: np.ndarray,
+                                 box: tuple[int, int, int, int]) -> bool:
+    """Check the observed complete second-row frame, not a clipped portrait."""
+    left, top, right, bottom = box
+    if top != 568 or right - left != 124 or bottom - top != 124 or not (0 <= left and right <= 1280):
+        return False
+    gray = cv2.cvtColor(image[top:bottom, left:right], cv2.COLOR_BGR2GRAY)
+    frame = (gray[2:7, 10:114], gray[10:114, 2:7],
+             gray[10:114, 117:122], gray[117:122, 10:114])
+    return all(float(np.mean(edge > 140)) >= minimum
+               for edge, minimum in zip(frame, (.55, .70, .68, .40)))
+
+
+def _furnace_picker_box(image: np.ndarray, client_version: str) -> tuple[int, int, int, int] | None:
+    """Locate the sampled Furnace card from its own icon and closed frame."""
+    icon_path = CATALOG_ROOT / "current_picker_blue_info_18_647_2.png"
+    icon = (cv2.imdecode(np.fromfile(icon_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if icon_path.is_file() else None)
+    if icon is None or icon.shape[:2] != (28, 28):
+        return None
+    scores = cv2.matchTemplate(image[568:600, 25:1245], icon, cv2.TM_CCOEFF_NORMED)
+    candidates: list[tuple[int, int, int, int]] = []
+    for y, x in zip(*np.where(scores >= .95)):
+        # In the sampled UI the icon's top-left is 90 px right and 3 px
+        # below its card's top-left. Offset alone does not authorize a card.
+        if int(y) != 3:
+            continue
+        left = int(x) + 25 - 90
+        box = (left, 568, left + 124, 692)
+        if not _closed_furnace_picker_frame(image, box):
+            continue
+        identity = recognize_card_identity(image, box, "troop",
+                                           surface="current_picker",
+                                           client_version=client_version)
+        if identity["unit_id"] == "furnace" and box not in candidates:
+            candidates.append(box)
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def _lightning_info_control(image: np.ndarray, controls: list[dict[str, object]],

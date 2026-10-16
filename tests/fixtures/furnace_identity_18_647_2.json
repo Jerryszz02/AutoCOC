@@ -1,0 +1,73 @@
+{
+  "client_version": "18.647.2",
+  "unit_id": "furnace",
+  "purpose": "agent_visual_unit_identity_and_close_regression_not_training_ground_truth",
+  "evidence_limits": "The level-4 detail and two sampled army surfaces identify this Furnace. The gray picker card means full capacity, not locked. No battle-card sample or battle deployment proof exists.",
+  "sources": {
+    "army_template": {
+      "path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-154525-troop-next\\frames\\00002-after.png",
+      "sha256": "b1bda256233d3319c94942ec2b286af15e155a9ebad99253c08e17e0d05b5c3c"
+    },
+    "army_fixture": {
+      "path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-154137-observe\\frames\\00001-before.png",
+      "sha256": "2eb39d6b43bb4252472f0f4d9fbffbfab1ccb806cd6e162ca87552c14c3d92d6"
+    },
+    "picker_template": {
+      "path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-154525-troop-next\\frames\\00002-after.png",
+      "sha256": "b1bda256233d3319c94942ec2b286af15e155a9ebad99253c08e17e0d05b5c3c"
+    },
+    "picker_fixture": {
+      "path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-154621-tap\\frames\\00001-before.png",
+      "sha256": "0c2b70b2db0068ca04e34e8f8feb7b82af97a184b7d062d0ded318580218707f"
+    },
+    "detail": {
+      "path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-154621-tap\\frames\\00002-after.png",
+      "sha256": "3752e78a3af402e1351f9847111a54fd8fabcd8646bef722bb2433e49e636a69",
+      "observed_title": "4级烈焰熔炉",
+      "observed_hitpoints": "1800",
+      "observed_duration_seconds": "60",
+      "observed_fire_mites": "22",
+      "observed_fire_mite_level": "4",
+      "observed_housing_space": "18",
+      "cached_ocr_frame": "reports/completion-20261015/probes/20261016-154621-tap/summary.json"
+    }
+  },
+  "templates": [
+    {
+      "path": "assets/catalogs/units/furnace_army_18_647_2.png",
+      "sha256": "ecbefab3f68698b0b3bba67d50e1735b452a367d5fffcc2b2bb0e9b0758f43a7",
+      "source_key": "army_template",
+      "source_bbox_1280": [785, 226, 830, 268]
+    },
+    {
+      "path": "assets/catalogs/units/furnace_picker_capacity_gray_18_647_2.png",
+      "sha256": "876a78c9e3dea1754f22ddb2359a2528247e14659f928dad4b0efc238ba7a942",
+      "source_key": "picker_template",
+      "source_bbox_1280": [1015, 591, 1055, 631]
+    }
+  ],
+  "fixtures": [
+    {
+      "path": "tests/fixtures/furnace_army_holdout_18_647_2.png",
+      "sha256": "86338e8bfe36a48356d9b1db38811f8cfc5cde0c015598a4c4d58dad7650ba1c",
+      "source_key": "army_fixture",
+      "retained_baseline_rectangles_xyxy": [[760, 190, 870, 295]]
+    },
+    {
+      "path": "tests/fixtures/furnace_picker_holdout_18_647_2.png",
+      "sha256": "e5e06fae2c01c94e7a8a9afca46ae2ccae6095f7e55be6db48ace8f30d63fa02",
+      "source_key": "picker_fixture",
+      "retained_baseline_rectangles_xyxy": [[995, 565, 1130, 695]]
+    },
+    {
+      "path": "tests/fixtures/furnace_detail_close_18_647_2.png",
+      "sha256": "9c7be72c54184f3f20dff1f43689f1c84a9e7bfb816735fbdb1a3c8f0ac0dba3",
+      "source_key": "detail",
+      "retained_baseline_rectangles_xyxy": [[530, 15, 750, 95], [1095, 15, 1165, 95], [595, 110, 1125, 350]]
+    }
+  ],
+  "fixture_derivation": {
+    "resize": "cv2.resize(source, (1280, 720), interpolation=cv2.INTER_AREA)",
+    "background_bgr": [45, 45, 45]
+  }
+}

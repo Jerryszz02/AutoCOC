@@ -30,10 +30,11 @@ class Unit:
 
 
 # Independently observed information panels / picker space labels on 18.600.7;
-# 18.647.2 archer and totem details also confirm one housing space each.
+# 18.647.2 archer and totem details also confirm one housing space each;
+# the level-4 Furnace detail independently shows 18 housing spaces.
 # Unobserved units keep None; capacity checks must never treat that as zero.
 _SAMPLED_HOUSING = {"electro_dragon": 30, "dragon_rider": 25, "balloon": 5,
-                    "dragon": 20, "baby_dragon": 10, "archer": 1,
+                    "dragon": 20, "baby_dragon": 10, "archer": 1, "furnace": 18,
                     "lightning_spell": 1, "totem_spell": 1}
 
 

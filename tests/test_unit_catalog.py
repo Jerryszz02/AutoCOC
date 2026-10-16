@@ -76,7 +76,8 @@ class UnitCatalogTests(unittest.TestCase):
         entries = [entry for entry in
                    template_manifest(client_version="18.647.2")["templates"]
                    if entry.get("surface") == "current_picker"
-                   and get_unit(entry["unit_id"]).kind == "troop"]
+                   and get_unit(entry["unit_id"]).kind == "troop"
+                   and entry["unit_id"] != "furnace"]  # New source and shifted card: test_furnace_current.
         boxes = {"archer": (293, 568, 417, 692),
                  "balloon": (684, 431, 808, 555),
                  "dragon": (814, 568, 938, 692),

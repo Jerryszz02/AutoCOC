@@ -73,6 +73,21 @@
       "template_sha256": "bc332e92c4fb98091bda4e5b9d0d730d974be6e839a7b91e53cd7cb17400a358"
     },
     {
+      "unit_id": "furnace",
+      "surface": "army",
+      "path": "units/furnace_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261016-154525-troop-next/frames/00002-after.png",
+      "source_bbox_1280": [785, 226, 830, 268],
+      "state": "active",
+      "client_version": "18.647.2",
+      "source_sha256": "b1bda256233d3319c94942ec2b286af15e155a9ebad99253c08e17e0d05b5c3c",
+      "template_sha256": "ecbefab3f68698b0b3bba67d50e1735b452a367d5fffcc2b2bb0e9b0758f43a7",
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261016-154621-tap/frames/00002-after.png",
+      "identity_evidence_sha256": "3752e78a3af402e1351f9847111a54fd8fabcd8646bef722bb2433e49e636a69",
+      "identity_evidence_title": "4级烈焰熔炉",
+      "identity_evidence_status": "agent_visual_detail_title_not_human_ground_truth"
+    },
+    {
       "unit_id": "lightning_spell",
       "surface": "army",
       "path": "units/lightning_spell_army_18_647_2.png",
@@ -207,6 +222,21 @@
       "identity_evidence_frame": "reports/completion-20261015/probes/20261016-earthquake-info-v2/frames/00004-earthquake-info-after-3.png",
       "identity_evidence_sha256": "ddddb41892feab0904ab9c289f97d2c2e2633cb6f5d4c2c3a3779c035ee522aa",
       "identity_evidence_title": "2级图腾法术",
+      "identity_evidence_status": "agent_visual_detail_title_not_human_ground_truth"
+    },
+    {
+      "unit_id": "furnace",
+      "surface": "current_picker",
+      "path": "units/furnace_picker_capacity_gray_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261016-154525-troop-next/frames/00002-after.png",
+      "source_bbox_1280": [1015, 591, 1055, 631],
+      "state": "capacity_gray",
+      "client_version": "18.647.2",
+      "source_sha256": "b1bda256233d3319c94942ec2b286af15e155a9ebad99253c08e17e0d05b5c3c",
+      "template_sha256": "876a78c9e3dea1754f22ddb2359a2528247e14659f928dad4b0efc238ba7a942",
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261016-154621-tap/frames/00002-after.png",
+      "identity_evidence_sha256": "3752e78a3af402e1351f9847111a54fd8fabcd8646bef722bb2433e49e636a69",
+      "identity_evidence_title": "4级烈焰熔炉",
       "identity_evidence_status": "agent_visual_detail_title_not_human_ground_truth"
     },
     {
