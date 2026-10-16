@@ -269,7 +269,8 @@ class ScreenshotRecognizer:
 
     def recognize_battle(self, screenshot_path: str | Path, *, purpose: str,
                          slot: dict | None = None, previous: SceneSnapshot | None = None) -> SceneSnapshot:
-        if purpose not in {"troop_count", "mixed_selection_wait", "hero", "settlement", "battle_hud"}:
+        if purpose not in {"troop_count", "mixed_selection_wait", "line_boundary_wait",
+                           "hero", "settlement", "battle_hud"}:
             raise ValueError(f"Unknown battle observation purpose: {purpose}")
         if purpose in {"troop_count", "mixed_selection_wait"} and slot is None:
             raise ValueError("Troop observation requires a known card")

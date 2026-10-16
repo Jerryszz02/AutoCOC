@@ -574,7 +574,9 @@ class BattleObserver:
 
         cloud = measure_cloud_cover(path)
         modal = self.modal_visible(image)
-        guarded = None if cloud["obscured"] or modal else self.guard(image)
+        guarded = (None if cloud["obscured"] or modal or
+                   purpose == "line_boundary_wait" and self.recognizer.client_version != "18.647.2"
+                   else self.guard(image))
         guarded_at = time.monotonic()
         reading = None
         self.last_count_diagnostic = None
@@ -623,6 +625,21 @@ class BattleObserver:
                 "buttons": [], "ocr": [], "battle": {"slots": []},
                 "matched_reasons": ["mixed_selection_guard_unverified"],
             })
+        if purpose == "line_boundary_wait" and (
+                guarded is None or guarded[0] != "enemy_village"):
+            # A boundary miss is retryable only after the current preview HUD
+            # has been proved. Never turn an ambiguous frame into a no-line
+            # decision by falling back to full OCR or reusing an older scene.
+            return SceneSnapshot("unknown", 0.0, path, {
+                "recognition_scope": purpose, "fast_fallback": False,
+                "recognition_seconds": time.monotonic() - started,
+                "recognition_timings_sec": timings,
+                "source_resolution": [width, height],
+                "baseline_resolution": list(self.recognizer.baseline_resolution),
+                "cloud_cover": cloud, "modal_visible": modal,
+                "buttons": [], "ocr": [], "battle": {"slots": []},
+                "matched_reasons": ["line_boundary_hud_unverified"],
+            })
         if guarded is None or (purpose == "troop_count" and reading is None):
             snapshot = self.recognizer.recognize(path)
             if self.last_count_diagnostic is not None:
@@ -642,7 +659,8 @@ class BattleObserver:
             "recognition_seconds": time.monotonic() - started,
             "recognition_timings_sec": timings,
             "source_resolution": [width, height], "baseline_resolution": list(self.recognizer.baseline_resolution),
-            "cloud_cover": cloud, "buttons": [], "ocr": [], "battle": {"slots": []},
+            "cloud_cover": cloud, "modal_visible": modal,
+            "buttons": [], "ocr": [], "battle": {"slots": []},
             "matched_reasons": ["two_current_hud_anchors"],
         })
         if selection_wait and reading is None:

@@ -167,6 +167,38 @@ class BattleVisionTests(unittest.TestCase):
         self.assertTrue(missing_hud.observations["fast_fallback"])
         self.assertEqual(missing_hud.observations["recognition_requested"], "battle_hud")
 
+    def test_line_boundary_wait_requires_current_preview_hud_without_full_fallback(self):
+        self.reader.client_version = "18.647.2"
+        self.previous = SceneSnapshot("enemy_village", .95, self.previous.screenshot_path, {
+            **self.previous.observations,
+            "ocr": [{"text": "开战倒计时", "confidence": .99,
+                     "bbox": [540, 10, 740, 35]}],
+        })
+        good = self.observe(purpose="line_boundary_wait")
+        self.assertEqual(good.scene, "enemy_village")
+        self.assertEqual(good.observations["recognition_scope"], "line_boundary_wait")
+        self.assertIs(good.observations["fast_fallback"], False)
+        self.assertEqual(good.observations["matched_reasons"], ["two_current_hud_anchors"])
+        self.assertEqual(good.observations["battle"], {"slots": []})
+        self.assertEqual(good.observations["ocr"], [])
+        modal = self.image.copy()
+        modal[200:400, 400:850] = 190
+        cloud = self.image.copy()
+        cloud[150:490, 240:1050] = 255
+        for name, image in (("dim", np.uint8(self.image * .6)),
+                            ("modal", modal), ("cloud", cloud)):
+            with self.subTest(name=name):
+                rejected = self.observe(image, purpose="line_boundary_wait")
+                self.assertEqual(rejected.scene, "unknown")
+                self.assertIs(rejected.observations["fast_fallback"], False)
+                self.assertEqual(rejected.observations["matched_reasons"],
+                                 ["line_boundary_hud_unverified"])
+        self.reader.client_version = "18.600.7"
+        self.assertEqual(self.observe(purpose="line_boundary_wait").scene, "unknown")
+        self.reader.recognize.assert_not_called()
+        self.provider.recognize.assert_not_called()
+        self.provider.recognize_line_image.assert_not_called()
+
     def test_same_path_overwrite_invalidates_frame_and_template_cache(self):
         path = self.write("cache", self.image)
         self.assertGreater(read_frame(path).max(), 0)

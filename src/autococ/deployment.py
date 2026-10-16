@@ -702,6 +702,9 @@ def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt
         raise FlowError("Minimum zoom did not stabilize before line deployment")
     if capture_context is not None:
         capture_context["toolbar_before"] = current
+        # Keep the original scout deadline even if a later full frame reads a
+        # newer countdown. A fast boundary frame has no timer of its own.
+        capture_context["preview_end"] = preview_end
     # Minimum scale alone does not fix camera translation or the build boundary.
     # Selecting a troop reveals the current red border without placing anything.
     troops = [slot for slot in current.observations.get("battle", {}).get("slots", [])
@@ -712,19 +715,117 @@ def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt
     identity_frame = str(current.screenshot_path)
     session.tap(current, troops[0]["point"], reason="Reveal current deployment boundaries")
     failure_reason = "Selected troop card could not be verified while revealing deployment boundaries"
+    fast_scan = capture_context is not None
+    hard_end = (min(preview_end, getattr(session, "deadline", math.inf),
+                    getattr(session, "task_deadline", math.inf)) if fast_scan else math.inf)
+
+    def require_new_frame(previous: SceneSnapshot, observed: SceneSnapshot) -> None:
+        before_at = previous.observations.get("observed_at_monotonic")
+        after_at = observed.observations.get("observed_at_monotonic")
+        before_id = previous.observations.get("frame_id")
+        after_id = observed.observations.get("frame_id")
+        if (observed.screenshot_path == previous.screenshot_path
+                or type(before_at) not in (int, float) or not math.isfinite(before_at)
+                or type(after_at) not in (int, float) or not math.isfinite(after_at)
+                or after_at <= before_at
+                or before_id is not None and before_id == after_id):
+            raise FlowError("Boundary scan did not capture a fresh frame")
+
     for _ in range(3):
-        current = session.observe("line-boundary")
+        if fast_scan and time.monotonic() >= hard_end:
+            raise FlowError("Original preview deadline expired during boundary scan")
+        previous = current
+        observation_started = time.monotonic()
+        current = session.observe("line-boundary", **({"purpose": "line_boundary_wait"} if fast_scan else {}))
         receipt["evidence"].append(str(current.screenshot_path))
-        _battle_frame(current)
+        if fast_scan:
+            require_new_frame(previous, current)
+            observations = current.observations
+            cloud = observations.get("cloud_cover")
+            if (current.scene != "enemy_village" or not math.isfinite(current.confidence)
+                    or current.confidence < .8 or
+                    observations.get("recognition_scope") != "line_boundary_wait" or
+                    observations.get("fast_fallback") is not False or
+                    observations.get("matched_reasons") != ["two_current_hud_anchors"] or
+                    not isinstance(cloud, dict) or cloud.get("obscured") is not False or
+                    observations.get("modal_visible") is not False or
+                    observations.get("ocr") != [] or
+                    observations.get("buttons") != [] or
+                    observations.get("battle") != {"slots": []}):
+                receipt.setdefault("line_boundary_scan", []).append({
+                    "frame": str(current.screenshot_path), "status": "hud_unverified",
+                    "observation_elapsed_sec": time.monotonic() - observation_started})
+                raise FlowError("Current boundary HUD guard is unverified")
+            motion = measure_camera_motion(capture_context["toolbar_before"].screenshot_path,
+                                           current.screenshot_path)
+            if not _minimum_zoom_motion(motion):
+                raise FlowError("Boundary scan camera changed before full confirmation")
+            if time.monotonic() >= hard_end:
+                raise FlowError("Original preview deadline expired during boundary scan")
+        else:
+            _battle_frame(current)
         selected_box = selected_card_bbox(current.screenshot_path, troops[0]["bbox"],
                                           session.config.game.baseline_resolution)
         if selected_box is None:
+            if fast_scan:
+                receipt.setdefault("line_boundary_scan", []).append({
+                    "frame": str(current.screenshot_path), "status": "no_selected_card",
+                    "observation_elapsed_sec": time.monotonic() - observation_started})
             continue
         terrain = find_line_deployment_edges(current.screenshot_path,
                                              baseline_resolution=session.config.game.baseline_resolution)
         if not terrain:
             failure_reason = "Two current deployment boundaries could not be verified"
+            if fast_scan:
+                receipt.setdefault("line_boundary_scan", []).append({
+                    "frame": str(current.screenshot_path), "status": "no_boundary",
+                    "observation_elapsed_sec": time.monotonic() - observation_started})
             continue
+        if fast_scan:
+            # The fast pixels only nominate a candidate. Capture one new full
+            # frame and prove every action-bearing fact again on that frame.
+            receipt.setdefault("line_boundary_scan", []).append({
+                "frame": str(current.screenshot_path), "status": "candidate_only",
+                "observation_elapsed_sec": time.monotonic() - observation_started})
+            if time.monotonic() + 2 >= hard_end:
+                raise FlowError("Original preview deadline cannot cover full boundary confirmation")
+            fast_candidate = current
+            confirmation_started = time.monotonic()
+            current = session.observe("line-boundary-confirm")
+            receipt["evidence"].append(str(current.screenshot_path))
+            confirmation_receipt = {
+                "candidate_frame": str(fast_candidate.screenshot_path),
+                "frame": str(current.screenshot_path), "status": "unverified",
+                "observation_elapsed_sec": time.monotonic() - confirmation_started}
+            receipt["line_boundary_confirmation"] = confirmation_receipt
+            require_new_frame(fast_candidate, current)
+            if (current.scene != "enemy_village" or not math.isfinite(current.confidence)
+                    or current.confidence < .8 or
+                    current.observations.get("recognition_scope", "full") != "full" or
+                    current.observations.get("fast_fallback") is True or
+                    (current.observations.get("battle") or {}).get("phase") != "scout"):
+                confirmation_receipt["status"] = "preview_unverified"
+                raise FlowError("Full boundary confirmation lost the current enemy preview")
+            session._validate_snapshot(current)
+            _remaining_seconds(current)
+            if time.monotonic() >= hard_end:
+                raise FlowError("Original preview deadline expired during full boundary confirmation")
+            confirmation_motion = measure_camera_motion(
+                capture_context["toolbar_before"].screenshot_path, current.screenshot_path)
+            if not _minimum_zoom_motion(confirmation_motion):
+                confirmation_receipt["status"] = "camera_changed"
+                raise FlowError("Full boundary confirmation camera changed")
+            selected_box = selected_card_bbox(current.screenshot_path, troops[0]["bbox"],
+                                              session.config.game.baseline_resolution)
+            if selected_box is None:
+                confirmation_receipt["status"] = "selected_card_missing"
+                raise FlowError("Full boundary confirmation lost the selected card")
+            terrain = find_line_deployment_edges(current.screenshot_path,
+                                                 baseline_resolution=session.config.game.baseline_resolution)
+            if not terrain:
+                confirmation_receipt["status"] = "boundaries_missing"
+                raise FlowError("Full boundary confirmation lost the red boundaries")
+            confirmation_receipt.update(status="current_full_candidate", camera=confirmation_motion)
         # The selected white header can erase the hue used to classify a troop.
         # Its outline can also join a neighbor. Verify each original portrait and
         # current count independently before replacing any missing border detection.
@@ -758,11 +859,16 @@ def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt
                 "point": [(box[0] + box[2]) // 2, (box[1] + box[3]) // 2],
                 "count": reading["count"], "evidence": new_evidence})
         if len(refreshed) != len(troops):
+            if fast_scan:
+                receipt["line_boundary_confirmation"]["status"] = "roster_unverified"
+                raise FlowError(failure_reason)
             continue
         slots = current.observations["battle"]["slots"]
         current.observations["battle"]["slots"] = sorted(
             [slot for slot in slots if all(abs(slot["point"][0] - troop["point"][0]) >= 25 for troop in troops)] + refreshed,
             key=lambda slot: slot["point"][0])
+        if fast_scan:
+            receipt["line_boundary_confirmation"]["status"] = "roster_verified"
         return current, terrain
     raise FlowError(failure_reason)
 
@@ -781,7 +887,8 @@ def _deploy_continuous_line(session, current, receipt, context, hero_manifest, d
     captured_at = current.observations.get("observed_at_monotonic")
     if type(captured_at) not in (int, float) or not math.isfinite(captured_at):
         raise FlowError("Continuous line preview has no capture timestamp")
-    latest_start = min(deadline, captured_at + min(10, _remaining_seconds(current) - 1))
+    latest_start = min(deadline, context.get("preview_end", math.inf),
+                       captured_at + min(10, _remaining_seconds(current) - 1))
     if not isinstance(hero_manifest, dict) or hero_manifest.get("complete") is not True:
         raise FlowError("Continuous line needs the independently verified hero roster")
     rows = hero_manifest.get("cards")

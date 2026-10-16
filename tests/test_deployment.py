@@ -78,10 +78,18 @@ class FakeSession:
                 left = item["bbox"][0]
                 ocr.append({"text": f"x{count}", "confidence": 0.99,
                             "bbox": [left + 5, 590, left + 50, 618]})
-        frame = SceneSnapshot("enemy_village" if not self.taps else "battle", 0.95,
+        fast_boundary = options.get("purpose") == "line_boundary_wait"
+        scene = "enemy_village" if not self.taps or fast_boundary or label == "line-boundary-confirm" else "battle"
+        frame = SceneSnapshot(scene, 0.95,
                               Path(f"deployment-{len(self.frames)}.png"), {
                                   "observed_at_monotonic": captured_at,
-                                  "battle": {"slots": slots}, "ocr": ocr,
+                                  "battle": {"slots": [] if fast_boundary else slots,
+                                             **({"phase": "scout"} if scene == "enemy_village" and not fast_boundary else {})},
+                                  "ocr": [] if fast_boundary else ocr,
+                                  **({"recognition_scope": "line_boundary_wait", "fast_fallback": False,
+                                      "matched_reasons": ["two_current_hud_anchors"],
+                                      "buttons": [], "cloud_cover": {"obscured": False},
+                                      "modal_visible": False} if fast_boundary else {}),
                               })
         if self.observe_hook is not None:
             frame = self.observe_hook(label, frame)
@@ -828,6 +836,8 @@ class DeploymentTests(unittest.TestCase):
         preview_end = session.scout.observations["observed_at_monotonic"] + countdown
 
         def add_countdown(label, frame):
+            if label == "line-boundary":
+                return frame
             seconds = max(1, int(preview_end - frame.observations["observed_at_monotonic"]))
             frame.observations["battle"].update(countdown_seconds=seconds, countdown_evidence={
                 "frame": str(frame.screenshot_path), "source": "current_frame_ocr", "confidence": .99})
@@ -845,7 +855,8 @@ class DeploymentTests(unittest.TestCase):
     def test_continuous_zoom_stops_after_verified_gesture_and_keeps_full_roster(self):
         session = self._continuous_zoom_session()
         session.observe = Mock(wraps=session.observe)
-        self.camera_motion.side_effect = [self._motion(.9958), self._motion(), self._motion()]
+        self.camera_motion.side_effect = [self._motion(.9958), self._motion(),
+                                          self._motion(), self._motion(), self._motion()]
         terrain = [{"edge": edge, "point": point} for edge, points in (
             (0, ([450, 210], [300, 320])), (1, ([300, 370], [440, 470]))) for point in points]
         receipt = {"evidence": []}
@@ -858,13 +869,168 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(result, terrain)
         self.assertEqual(session.native.zoom_out.call_count, 2)
         self.assertEqual(receipt["minimum_zoom"]["gesture_count"], 2)
-        self.assertEqual(receipt["minimum_zoom"]["frame"], str(session.frames[-2].screenshot_path))
+        self.assertEqual(receipt["minimum_zoom"]["frame"], str(session.frames[-3].screenshot_path))
         self.assertEqual(current.observations["battle"]["slots"][0]["count"], 10)
         self.assertEqual(len(receipt["zoom_probes"]), 2)
         self.assertEqual(sum(event == "line_zoom_probe" for event, _ in session.events), 2)
         self.assertTrue(all(probe["gesture_elapsed_sec"] > 0 for probe in receipt["zoom_probes"]))
         self.assertEqual([call.kwargs.get("purpose") for call in session.observe.call_args_list
                           if call.args[0] == "line-zoom-probe"], ["settlement", "settlement"])
+
+    def test_continuous_boundary_three_fast_negative_frames_use_no_full_confirmation(self):
+        session = self._continuous_zoom_session(countdown=30)
+        session.observe = Mock(wraps=session.observe)
+        self.camera_motion.return_value = self._motion()
+        receipt = {"evidence": [], "phase": "boundary_scan", "terrain_evidence": [],
+                   "consumption_events": [], "attempted_placements": 0,
+                   "issued_placements": 0, "offensive_actions": 0, "deployed_units": 0}
+        with patch("autococ.battle_vision.selected_card_bbox", return_value=[177, 587, 253, 703]), \
+             patch("autococ.terrain.find_line_deployment_edges", return_value=[]) as terrain, \
+             patch("autococ.deployment._verified_line_card_reading") as read_card:
+            with self.assertRaisesRegex(FlowError, "Two current deployment boundaries"):
+                _prepare_two_edge_view(session, session.scout, receipt, capture_context={})
+        boundary_calls = [call for call in session.observe.call_args_list
+                          if call.args[0].startswith("line-boundary")]
+        self.assertEqual(len(boundary_calls), 3)
+        self.assertTrue(all(call.kwargs == {"purpose": "line_boundary_wait"}
+                            for call in boundary_calls))
+        self.assertEqual([row["status"] for row in receipt["line_boundary_scan"]],
+                         ["no_boundary"] * 3)
+        self.assertEqual(terrain.call_count, 3)
+        read_card.assert_not_called()
+        self.assertEqual(len(session.taps), 1)  # Selection, never a field input.
+        self.assertEqual(receipt["terrain_evidence"], [])
+
+    def test_continuous_boundary_candidate_needs_one_fresh_full_same_frame_proof(self):
+        session = self._continuous_zoom_session(countdown=30)
+        session.observe = Mock(wraps=session.observe)
+        self.camera_motion.return_value = self._motion()
+        fast_terrain = [{"edge": 0, "point": [400, 200]}]
+        confirmed = [{"edge": edge, "point": point} for edge, points in (
+            (0, ([450, 210], [300, 320])), (1, ([300, 370], [440, 470]))) for point in points]
+        receipt, context = {"evidence": []}, {}
+        with patch("autococ.battle_vision.selected_card_bbox", return_value=[177, 587, 253, 703]) as selected, \
+             patch("autococ.terrain.find_line_deployment_edges",
+                   side_effect=[fast_terrain, confirmed]) as terrain, \
+             patch("autococ.deployment._verified_line_card_reading",
+                   return_value={"count": 10, "portrait_score": .99}) as read_card:
+            current, result = _prepare_two_edge_view(session, session.scout, receipt,
+                                                     capture_context=context)
+        self.assertEqual(result, confirmed)
+        self.assertNotEqual(result, fast_terrain)
+        self.assertIs(current, session.last_snapshot)
+        self.assertEqual(receipt["line_boundary_confirmation"]["frame"], str(current.screenshot_path))
+        self.assertEqual(receipt["line_boundary_confirmation"]["status"], "roster_verified")
+        self.assertEqual(context["toolbar_before"].screenshot_path, session.frames[-3].screenshot_path)
+        self.assertEqual(selected.call_count, 2)
+        self.assertEqual(terrain.call_count, 2)
+        read_card.assert_called_once()
+        calls = [call for call in session.observe.call_args_list
+                 if call.args[0].startswith("line-boundary")]
+        self.assertEqual([call.args[0] for call in calls], ["line-boundary", "line-boundary-confirm"])
+        self.assertEqual(calls[0].kwargs, {"purpose": "line_boundary_wait"})
+        self.assertEqual(calls[1].kwargs, {})
+        self.assertEqual(len(session.taps), 1)
+
+    def test_continuous_boundary_full_frame_cannot_inherit_fast_card_or_terrain(self):
+        for missing in ("selected", "terrain"):
+            with self.subTest(missing=missing):
+                session = self._continuous_zoom_session(countdown=30)
+                session.observe = Mock(wraps=session.observe)
+                self.camera_motion.side_effect = None
+                self.camera_motion.return_value = self._motion()
+                candidate = [{"edge": 0, "point": [400, 200]}]
+                boxes = [[177, 587, 253, 703], None if missing == "selected" else [177, 587, 253, 703]]
+                terrains = [candidate, [] if missing == "terrain" else candidate]
+                with patch("autococ.battle_vision.selected_card_bbox", side_effect=boxes), \
+                     patch("autococ.terrain.find_line_deployment_edges", side_effect=terrains), \
+                     patch("autococ.deployment._verified_line_card_reading") as read_card:
+                    with self.assertRaisesRegex(FlowError, "Full boundary confirmation lost"):
+                        _prepare_two_edge_view(session, session.scout, {"evidence": []},
+                                               capture_context={})
+                read_card.assert_not_called()
+                self.assertEqual(len(session.taps), 1)
+                self.assertEqual(sum(call.args[0] == "line-boundary-confirm"
+                                     for call in session.observe.call_args_list), 1)
+
+    def test_continuous_boundary_full_frame_rejects_missing_timer_or_roster(self):
+        for missing in ("timer", "roster"):
+            with self.subTest(missing=missing):
+                session = self._continuous_zoom_session(countdown=30)
+                session.observe = Mock(wraps=session.observe)
+                self.camera_motion.side_effect = None
+                self.camera_motion.return_value = self._motion()
+                original = session.observe_hook
+
+                def alter(label, frame):
+                    frame = original(label, frame)
+                    if label == "line-boundary-confirm" and missing == "timer":
+                        frame.observations["battle"].pop("countdown_evidence")
+                    return frame
+
+                session.observe_hook = alter
+                with patch("autococ.battle_vision.selected_card_bbox",
+                           return_value=[177, 587, 253, 703]), \
+                     patch("autococ.terrain.find_line_deployment_edges",
+                           return_value=[{"edge": 0, "point": [400, 200]}]), \
+                     patch("autococ.deployment._verified_line_card_reading",
+                           return_value={"count": None, "portrait_score": None,
+                                         "reason": "header_count_unverified"} if missing == "roster" else
+                           {"count": 10, "portrait_score": .99}) as read_card:
+                    with self.assertRaises(FlowError):
+                        _prepare_two_edge_view(session, session.scout, {"evidence": []},
+                                               capture_context={})
+                self.assertEqual(read_card.call_count, 0 if missing == "timer" else 1)
+                self.assertEqual(len(session.taps), 1)
+                self.assertEqual(sum(call.args[0] == "line-boundary-confirm"
+                                     for call in session.observe.call_args_list), 1)
+
+    def test_continuous_boundary_unknown_stale_moving_or_expired_never_confirms(self):
+        for failure in ("hud", "account", "modal", "cloud", "fallback", "old_frame",
+                        "old_time", "camera", "expired"):
+            with self.subTest(failure=failure):
+                session = self._continuous_zoom_session(countdown=30)
+                session.observe = Mock(wraps=session.observe)
+                self.camera_motion.side_effect = None
+                self.camera_motion.return_value = self._motion()
+                if failure == "camera":
+                    self.camera_motion.side_effect = [self._motion(), self._motion(),
+                                                      self._motion(.97)]
+                original = session.observe_hook
+
+                def alter(label, frame):
+                    frame = original(label, frame)
+                    if label != "line-boundary":
+                        return frame
+                    if failure in {"hud", "account"}:
+                        frame = replace(frame, scene="account_in_use" if failure == "account" else "unknown")
+                    elif failure == "modal":
+                        frame.observations["modal_visible"] = True
+                    elif failure == "cloud":
+                        frame.observations["cloud_cover"]["obscured"] = True
+                    elif failure == "fallback":
+                        frame.observations["fast_fallback"] = True
+                    elif failure == "old_frame":
+                        frame = replace(frame, screenshot_path=session.frames[-1].screenshot_path)
+                    elif failure == "old_time":
+                        frame.observations["observed_at_monotonic"] = session.frames[-1].observations[
+                            "observed_at_monotonic"]
+                    elif failure == "expired":
+                        self.clock.advance(40)
+                    return frame
+
+                session.observe_hook = alter
+                with patch("autococ.battle_vision.selected_card_bbox", return_value=[177, 587, 253, 703]), \
+                     patch("autococ.terrain.find_line_deployment_edges",
+                           return_value=[{"edge": 0, "point": [400, 200]}]):
+                    with self.assertRaises(FlowError) as raised:
+                        _prepare_two_edge_view(session, session.scout, {"evidence": []},
+                                               capture_context={})
+                self.assertNotEqual(str(raised.exception),
+                                    "Two current deployment boundaries could not be verified")
+                self.assertEqual(len(session.taps), 1)
+                self.assertEqual(sum(call.args[0] == "line-boundary-confirm"
+                                     for call in session.observe.call_args_list), 0)
 
     def _countdown_recheck_session(self, *, second="strong", countdown=24):
         from autococ.battle_vision import attach_preparation_countdown
@@ -907,7 +1073,7 @@ class DeploymentTests(unittest.TestCase):
                    return_value={"count": 10, "portrait_score": .99}), \
              patch("autococ.terrain.find_line_deployment_edges", return_value=[{"edge": 0}, {"edge": 1}]):
             current, _ = _prepare_two_edge_view(session, session.scout, receipt, capture_context=context)
-        rechecked = session.frames[-2]
+        rechecked = session.frames[-3]
         self.assertIs(context["toolbar_before"], rechecked)
         self.assertEqual(receipt["minimum_zoom"]["frame"], str(rechecked.screenshot_path))
         self.assertEqual(receipt["countdown_recheck"]["frame"], str(rechecked.screenshot_path))

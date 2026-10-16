@@ -1,0 +1,596 @@
+{
+  "client_version": "18.647.2",
+  "baseline_resolution": [
+    1280,
+    720
+  ],
+  "role": "development_prototype_only",
+  "human_review": false,
+  "source_image_resolution": [
+    2560,
+    1440
+  ],
+  "transform": "cv2.resize(source, (1280,720), INTER_AREA); black canvas; copy fixed rectangles; PNG lossless",
+  "retained_rectangles_at_1280x720": [
+    [
+      555,
+      0,
+      715,
+      95
+    ],
+    [
+      42,
+      510,
+      145,
+      565
+    ],
+    [
+      80,
+      580,
+      190,
+      720
+    ]
+  ],
+  "frames": {
+    "negative_source": {
+      "path": "negative_source.png",
+      "derived_sha256": "38b90f332c9bfbb0eb0dbe81b9ca1bb6393789e8b0e58a64079fa12bb755c551",
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-225217-078590-ce5b10ef\\frames\\00070-line-zoom-verified.png",
+      "source_frame_sha256": "5c2f81fedb8dcfee7ca46627f2eb41223a5c361db5f98dc534d5bba6664c2394",
+      "source_events": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-225217-078590-ce5b10ef\\events.jsonl",
+      "source_events_sha256": "8e44a362e7e697aac66d4f5cb2c810762d69ca55a2085d3757fbb2a0c3637173",
+      "source_scene": "enemy_village",
+      "source_confidence": 0.92,
+      "cached_ocr_retained": [
+        {
+          "text": "开战倒计时",
+          "confidence": 0.99979,
+          "bbox": [
+            582,
+            14,
+            681,
+            38
+          ]
+        },
+        {
+          "text": "19秒",
+          "confidence": 0.99982,
+          "bbox": [
+            597,
+            33,
+            680,
+            80
+          ]
+        }
+      ],
+      "cached_buttons_retained": [
+        {
+          "name": "end_battle",
+          "text": "结束战斗",
+          "confidence": 0.99954,
+          "bbox": [
+            60,
+            528,
+            126,
+            551
+          ],
+          "point": [
+            93,
+            539
+          ]
+        }
+      ],
+      "cached_battle_retained": {
+        "slots": [
+          {
+            "index": 0,
+            "kind": "troop",
+            "bbox": [
+              93,
+              595,
+              182,
+              711
+            ],
+            "unit_id": "electro_dragon",
+            "confidence": 0.99797,
+            "source": "army",
+            "point": [
+              137,
+              653
+            ],
+            "count": 10,
+            "level": null,
+            "available": null,
+            "evidence": {
+              "method": "independent_card_border",
+              "header_hue": 105.0,
+              "hero_pet_icon": null,
+              "clan_badge": null,
+              "event_portrait": null,
+              "count": {
+                "text": "x10",
+                "confidence": 0.99847,
+                "bbox": [
+                  132,
+                  594,
+                  179,
+                  621
+                ]
+              },
+              "identity": {
+                "unit_id": "electro_dragon",
+                "confidence": 0.99797,
+                "reason": "portrait_template",
+                "evidence": [
+                  {
+                    "score": 0.99797,
+                    "unit_id": "electro_dragon",
+                    "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\electro_dragon_battle_18_647_2.png"
+                  },
+                  {
+                    "score": 0.43754,
+                    "unit_id": "baby_dragon",
+                    "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\baby_dragon_battle_18_647_2.png"
+                  },
+                  {
+                    "score": 0.31938,
+                    "unit_id": "furnace",
+                    "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\furnace_battle_active_18_647_2.png"
+                  }
+                ],
+                "template_client_version": "18.647.2",
+                "version_verified": true
+              }
+            }
+          }
+        ],
+        "countdown_seconds": 19,
+        "countdown_evidence": {
+          "frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-225217-078590-ce5b10ef\\frames\\00070-line-zoom-verified.png",
+          "label": {
+            "text": "开战倒计时",
+            "bbox": [
+              582,
+              14,
+              681,
+              38
+            ],
+            "confidence": 0.99979
+          },
+          "timer": {
+            "text": "19秒",
+            "bbox": [
+              597,
+              33,
+              680,
+              80
+            ],
+            "confidence": 0.99982
+          },
+          "confidence": 0.99979,
+          "source": "current_frame_ocr"
+        }
+      }
+    },
+    "negative_wait": {
+      "path": "negative_wait.png",
+      "derived_sha256": "97847f0398a577dd3fc26ef39130df665746a6cdbdc144762502972a5bcbdd2a",
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-225217-078590-ce5b10ef\\frames\\00073-line-boundary.png",
+      "source_frame_sha256": "5b885d4b5ab0db127362f997563ac53ca19cbc2e3ffe8d79ea2fe970d23635c9",
+      "source_events": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-225217-078590-ce5b10ef\\events.jsonl",
+      "source_events_sha256": "8e44a362e7e697aac66d4f5cb2c810762d69ca55a2085d3757fbb2a0c3637173",
+      "source_scene": "enemy_village",
+      "source_confidence": 0.92,
+      "cached_ocr_retained": [
+        {
+          "text": "开战倒计时",
+          "confidence": 0.99962,
+          "bbox": [
+            582,
+            14,
+            681,
+            38
+          ]
+        },
+        {
+          "text": "11秒",
+          "confidence": 0.9999,
+          "bbox": [
+            610,
+            38,
+            670,
+            76
+          ]
+        }
+      ],
+      "cached_buttons_retained": [
+        {
+          "name": "end_battle",
+          "text": "结束战斗",
+          "confidence": 0.99954,
+          "bbox": [
+            60,
+            528,
+            126,
+            551
+          ],
+          "point": [
+            93,
+            539
+          ]
+        }
+      ],
+      "cached_battle_retained": {
+        "slots": [
+          {
+            "index": 0,
+            "kind": "troop",
+            "bbox": [
+              92,
+              591,
+              183,
+              708
+            ],
+            "unit_id": "electro_dragon",
+            "confidence": 0.96664,
+            "source": "army",
+            "point": [
+              137,
+              649
+            ],
+            "count": 10,
+            "level": null,
+            "available": null,
+            "evidence": {
+              "method": "independent_card_border",
+              "header_hue": 105.0,
+              "hero_pet_icon": null,
+              "clan_badge": null,
+              "event_portrait": null,
+              "count": {
+                "text": "x10",
+                "confidence": 0.99801,
+                "bbox": [
+                  130,
+                  586,
+                  182,
+                  616
+                ]
+              },
+              "identity": {
+                "unit_id": "electro_dragon",
+                "confidence": 0.96664,
+                "reason": "portrait_template",
+                "evidence": [
+                  {
+                    "score": 0.96664,
+                    "unit_id": "electro_dragon",
+                    "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\electro_dragon_battle_18_647_2.png"
+                  },
+                  {
+                    "score": 0.44028,
+                    "unit_id": "baby_dragon",
+                    "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\baby_dragon_battle_18_647_2.png"
+                  },
+                  {
+                    "score": 0.34424,
+                    "unit_id": "dragon",
+                    "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\dragon_battle_18_647_2.png"
+                  }
+                ],
+                "template_client_version": "18.647.2",
+                "version_verified": true
+              }
+            }
+          }
+        ],
+        "countdown_seconds": 11,
+        "countdown_evidence": {
+          "frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-225217-078590-ce5b10ef\\frames\\00073-line-boundary.png",
+          "label": {
+            "text": "开战倒计时",
+            "bbox": [
+              582,
+              14,
+              681,
+              38
+            ],
+            "confidence": 0.99962
+          },
+          "timer": {
+            "text": "11秒",
+            "bbox": [
+              610,
+              38,
+              670,
+              76
+            ],
+            "confidence": 0.9999
+          },
+          "confidence": 0.99962,
+          "source": "current_frame_ocr"
+        }
+      }
+    },
+    "positive_source": {
+      "path": "positive_source.png",
+      "derived_sha256": "61dccca1760f41c3c7793668e89ab2201a51e4fd211c4aa882ea161a86c070e8",
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-221530-953258-2b85e777\\frames\\00021-line-zoom-verified.png",
+      "source_frame_sha256": "7f6029a2aed40286a5e0fb286898b501782f4277fd333223c34ec71304f34d51",
+      "source_events": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-221530-953258-2b85e777\\events.jsonl",
+      "source_events_sha256": "5aac0190744cc0995fd718f4f4826b3c4706cec6c88b6437341f39da3db32954",
+      "source_scene": "enemy_village",
+      "source_confidence": 0.92,
+      "cached_ocr_retained": [
+        {
+          "text": "开战倒计时",
+          "confidence": 0.99924,
+          "bbox": [
+            582,
+            12,
+            681,
+            40
+          ]
+        },
+        {
+          "text": "17秒",
+          "confidence": 0.9998,
+          "bbox": [
+            601,
+            34,
+            677,
+            82
+          ]
+        }
+      ],
+      "cached_buttons_retained": [
+        {
+          "name": "end_battle",
+          "text": "结束战斗",
+          "confidence": 0.99954,
+          "bbox": [
+            60,
+            528,
+            126,
+            551
+          ],
+          "point": [
+            93,
+            539
+          ]
+        }
+      ],
+      "cached_battle_retained": {
+        "slots": [
+          {
+            "index": 0,
+            "kind": "troop",
+            "bbox": [
+              93,
+              595,
+              182,
+              711
+            ],
+            "unit_id": "electro_dragon",
+            "confidence": 0.99212,
+            "source": "army",
+            "point": [
+              137,
+              653
+            ],
+            "count": 10,
+            "level": null,
+            "available": null,
+            "evidence": {
+              "method": "independent_card_border",
+              "header_hue": 105.0,
+              "hero_pet_icon": null,
+              "clan_badge": null,
+              "event_portrait": null,
+              "count": {
+                "text": "x10",
+                "confidence": 0.99633,
+                "bbox": [
+                  130,
+                  592,
+                  178,
+                  621
+                ]
+              },
+              "identity": {
+                "unit_id": "electro_dragon",
+                "confidence": 0.99212,
+                "reason": "portrait_template",
+                "evidence": [
+                  {
+                    "score": 0.99212,
+                    "unit_id": "electro_dragon",
+                    "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\electro_dragon_battle_18_647_2.png"
+                  },
+                  {
+                    "score": 0.43754,
+                    "unit_id": "baby_dragon",
+                    "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\baby_dragon_battle_18_647_2.png"
+                  },
+                  {
+                    "score": 0.32197,
+                    "unit_id": "furnace",
+                    "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\furnace_battle_active_18_647_2.png"
+                  }
+                ],
+                "template_client_version": "18.647.2",
+                "version_verified": true
+              }
+            }
+          }
+        ],
+        "countdown_seconds": 17,
+        "countdown_evidence": {
+          "frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-221530-953258-2b85e777\\frames\\00021-line-zoom-verified.png",
+          "label": {
+            "text": "开战倒计时",
+            "bbox": [
+              582,
+              12,
+              681,
+              40
+            ],
+            "confidence": 0.99924
+          },
+          "timer": {
+            "text": "17秒",
+            "bbox": [
+              601,
+              34,
+              677,
+              82
+            ],
+            "confidence": 0.9998
+          },
+          "confidence": 0.99924,
+          "source": "current_frame_ocr"
+        }
+      }
+    },
+    "positive_wait": {
+      "path": "positive_wait.png",
+      "derived_sha256": "5be664c520a2a3a070209365de70251b4b414399f939e1e5f4ea0f5f680d2baa",
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-221530-953258-2b85e777\\frames\\00023-line-boundary.png",
+      "source_frame_sha256": "e4bff0b35580e6c5454098932deb95273c321c71bd0d0e222f459263bfb7a459",
+      "source_events": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-221530-953258-2b85e777\\events.jsonl",
+      "source_events_sha256": "5aac0190744cc0995fd718f4f4826b3c4706cec6c88b6437341f39da3db32954",
+      "source_scene": "enemy_village",
+      "source_confidence": 0.92,
+      "cached_ocr_retained": [
+        {
+          "text": "开战倒计时",
+          "confidence": 0.99947,
+          "bbox": [
+            582,
+            12,
+            681,
+            39
+          ]
+        },
+        {
+          "text": "12秒",
+          "confidence": 0.99868,
+          "bbox": [
+            602,
+            33,
+            677,
+            80
+          ]
+        }
+      ],
+      "cached_buttons_retained": [
+        {
+          "name": "end_battle",
+          "text": "结束战斗",
+          "confidence": 0.99954,
+          "bbox": [
+            60,
+            528,
+            126,
+            551
+          ],
+          "point": [
+            93,
+            539
+          ]
+        }
+      ],
+      "cached_battle_retained": {
+        "slots": [
+          {
+            "index": 0,
+            "kind": "troop",
+            "bbox": [
+              92,
+              591,
+              183,
+              708
+            ],
+            "unit_id": "electro_dragon",
+            "confidence": 0.98082,
+            "source": "army",
+            "point": [
+              137,
+              649
+            ],
+            "count": 10,
+            "level": null,
+            "available": null,
+            "evidence": {
+              "method": "independent_card_border",
+              "header_hue": 105.0,
+              "hero_pet_icon": null,
+              "clan_badge": null,
+              "event_portrait": null,
+              "count": {
+                "text": "x10",
+                "confidence": 0.99814,
+                "bbox": [
+                  130,
+                  588,
+                  182,
+                  616
+                ]
+              },
+              "identity": {
+                "unit_id": "electro_dragon",
+                "confidence": 0.98082,
+                "reason": "portrait_template",
+                "evidence": [
+                  {
+                    "score": 0.98082,
+                    "unit_id": "electro_dragon",
+                    "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\electro_dragon_battle_18_647_2.png"
+                  },
+                  {
+                    "score": 0.44028,
+                    "unit_id": "baby_dragon",
+                    "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\baby_dragon_battle_18_647_2.png"
+                  },
+                  {
+                    "score": 0.34424,
+                    "unit_id": "dragon",
+                    "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\dragon_battle_18_647_2.png"
+                  }
+                ],
+                "template_client_version": "18.647.2",
+                "version_verified": true
+              }
+            }
+          }
+        ],
+        "countdown_seconds": 12,
+        "countdown_evidence": {
+          "frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-221530-953258-2b85e777\\frames\\00023-line-boundary.png",
+          "label": {
+            "text": "开战倒计时",
+            "bbox": [
+              582,
+              12,
+              681,
+              39
+            ],
+            "confidence": 0.99947
+          },
+          "timer": {
+            "text": "12秒",
+            "bbox": [
+              602,
+              33,
+              677,
+              80
+            ],
+            "confidence": 0.99868
+          },
+          "confidence": 0.99868,
+          "source": "current_frame_ocr"
+        }
+      }
+    }
+  }
+}

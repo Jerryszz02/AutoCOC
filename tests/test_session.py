@@ -197,6 +197,21 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(snapshot.observations["observed_at_monotonic"], self.clock.now)
         self.assertIs(self.session.last_snapshot, snapshot)
 
+    def test_line_boundary_wait_uses_new_capture_and_battle_route(self):
+        previous = self.session.observe("line-zoom-verified")
+        self.clock.advance(.1)
+        self.recognizer.recognize_battle.side_effect = lambda path, **kwargs: SceneSnapshot(
+            "unknown", 0.0, path, {"recognition_scope": "line_boundary_wait",
+                                 "fast_fallback": False})
+        current = self.session.observe("line-boundary", purpose="line_boundary_wait")
+        self.recognizer.recognize_battle.assert_called_once_with(
+            current.screenshot_path, purpose="line_boundary_wait", slot=None, previous=previous)
+        self.recognizer.recognize.assert_called_once()
+        self.assertNotEqual(current.screenshot_path, previous.screenshot_path)
+        self.assertGreater(current.observations["observed_at_monotonic"],
+                           previous.observations["observed_at_monotonic"])
+        self.assertIs(self.session.last_snapshot, current)
+
     def test_stale_or_noncurrent_snapshot_cannot_click(self) -> None:
         previous = self.session.observe("previous")
         current = self.session.observe("current")
