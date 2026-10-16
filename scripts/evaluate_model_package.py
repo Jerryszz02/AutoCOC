@@ -303,7 +303,9 @@ def main(argv: list[str] | None = None) -> int:
                     "dataset_sha256": verified["snapshot_sha256"],
                     "split_sha256": verified["split_sha256"],
                     "reviewed_jsonl_sha256": hashlib.sha256(args.reviewed_jsonl.read_bytes()).hexdigest(),
-                    "test_image_count": len(rows)}
+                    "image_count": len(rows)}
+                if args.split == "test":
+                    result["evaluation_scope"]["test_image_count"] = len(rows)
             result["evaluation"] = evaluate(model, rows, reviewed_root, args.iou)
             if args.kind == "building":
                 config = load_config(args.evaluation_config) if args.evaluation_config else load_config()

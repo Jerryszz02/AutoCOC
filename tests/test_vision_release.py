@@ -148,6 +148,43 @@ class VisionReleaseTests(unittest.TestCase):
         self.assertEqual(report["evidence"]["building_dataset_sha256"],
                          self.scope(self.building_dir)["dataset_sha256"])
 
+    def test_split_image_count_new_and_legacy_fields(self):
+        # The existing test/val reports remain valid; new reports name every
+        # frozen split's size with image_count.
+        self.assertEqual(self.check()["status"], "PASS")
+        for report_name, count in (("scene_report", 7), ("building_report", 7),
+                                   ("ap_stability", 1)):
+            with self.subTest(report=report_name):
+                report = copy.deepcopy(getattr(self, report_name))
+                scope = report["evaluation_scope"]
+                del scope["test_image_count"]
+                scope["image_count"] = count
+                self.assertEqual(self.check(**{report_name: report})["status"], "PASS")
+                scope["test_image_count"] = count
+                self.assertEqual(self.check(**{report_name: report})["status"], "PASS")
+
+    def test_split_image_count_conflicts_and_invalid_types_fail(self):
+        for field, value in (("image_count", 8), ("test_image_count", 8),
+                             ("image_count", True), ("image_count", 7.0),
+                             ("image_count", "7"), ("test_image_count", False),
+                             ("test_image_count", 7.0), ("test_image_count", "7")):
+            with self.subTest(field=field, value=value):
+                report = copy.deepcopy(self.scene_report)
+                report["evaluation_scope"]["image_count"] = 7
+                report["evaluation_scope"][field] = value
+                result = self.check(scene_report=report)
+                self.assertEqual(result["status"], "FAIL")
+                self.assertTrue(any("scene evaluation image count" in item
+                                    for item in result["failures"]))
+
+    def test_split_image_count_missing_both_is_insufficient(self):
+        report = copy.deepcopy(self.scene_report)
+        del report["evaluation_scope"]["test_image_count"]
+        result = self.check(scene_report=report)
+        self.assertEqual(result["status"], "INSUFFICIENT_DATA")
+        self.assertTrue(any("scene evaluation image count" in item
+                            for item in result["missing"]))
+
     def test_missing_evidence_and_low_sample_counts_are_insufficient(self):
         self.assertEqual(self.check(parity=None)["status"], "INSUFFICIENT_DATA")
         self.assertEqual(self.check(ap_stability=None)["status"], "INSUFFICIENT_DATA")

@@ -161,8 +161,24 @@ def validate_release(*, acceptance: dict, scene_report: dict | None = None,
         verified = verified_snapshots["building" if task.startswith("building") else "scene"]
         if verified is not None:
             meta = verified["metadata"]
-            match_evidence(scope_report.get("test_image_count"), len(verified["paths"][expected_split]),
-                           f"{task} evaluation image count")
+            count_message = f"{task} evaluation image count"
+            expected_count = len(verified["paths"][expected_split])
+            has_count = "image_count" in scope_report
+            has_legacy = "test_image_count" in scope_report
+            if not has_count and not has_legacy:
+                missing.append(count_message + " missing")
+            else:
+                count = scope_report["image_count" if has_count else "test_image_count"]
+                if type(count) is not int:
+                    failures.append(count_message + " invalid type")
+                elif count != expected_count:
+                    failures.append(count_message + " mismatch")
+                if has_count and has_legacy:
+                    legacy = scope_report["test_image_count"]
+                    if type(legacy) is not int:
+                        failures.append(count_message + " legacy invalid type")
+                    elif type(count) is int and legacy != count:
+                        failures.append(count_message + " new/legacy conflict")
             match_evidence(report.get("evaluation", {}).get("samples"), len(verified["paths"][expected_split]),
                            f"{task} measured sample count")
             match_evidence(scope_report.get("dataset_sha256"), verified["snapshot_sha256"],

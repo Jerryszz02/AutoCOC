@@ -2,9 +2,11 @@
 
 状态：**静态训练/导出、独立评估、发布门及动态离线工具已在工作分支实现；真实 S/B 原型已训练并导出，正式数据、正式模型质量与发布验收未通过。**
 
-计划制定：2026-09-27；状态核对：2026-10-15，开发基线 `1a06d1a8cb9c2db6d86fb52517a055de496c1fb7`，本轮代码位于未合并的 `agent/complete-daily-vision`。本文维护训练、导出和验收规格；实际命令见[工具说明](../../training/vision/README.md)。本轮已实测 Windows / RTX 3070 Ti 8GB / CUDA 独立环境并执行 S/B 各 32 张、2 epoch 原型训练；Mac 是后续可选环境。全部剩余工作见[当前进度](../PROGRESS.md)。
+计划制定：2026-09-27；状态核对：2026-10-16，开发基线 `1a06d1a8cb9c2db6d86fb52517a055de496c1fb7`，本轮代码位于未合并的 `agent/complete-daily-vision`。本文维护训练、导出和验收规格；实际命令见[工具说明](../../training/vision/README.md)。本轮已实测 Windows / RTX 3070 Ti 8GB / CUDA 独立环境并执行 S/B 各 32 张、2 epoch 原型训练；Mac 是后续可选环境。全部剩余工作见[当前进度](../PROGRESS.md)。
 
 阅读顺序：[素材采集与标注](VISION_DATA_COLLECTION_PLAN.md) → 本文 → [模型包接口](../MODEL_PACKAGE.md)；产品执行与时限要求以[主计划](VISION_AGENT_PLAN.md)为准。实施状态见第 8 节及当前进度；建议超参数仍是实验起点，不能称为已验证最优。
+
+最新开发实验另在当前版本 11 张大本营单类 Agent 图像上比较 YOLO11n/YOLO26n，固定 8/2/1 划分，实际完成 57/60 epoch、ONNX 导出与仅 val 推理。两模型在当前运行阈值下都漏检 2 个 val 真值，正式数据与模型门仍未通过；小样本独立 AP 不替代运行点精度。原件、哈希及具体结果见[训练工具说明](../../training/vision/README.md)和[当前进度](../PROGRESS.md)。此批仍是原型，不改变 T1/T3/T4 的正式条件。
 
 ## 1. 为什么拆出本计划
 

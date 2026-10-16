@@ -675,6 +675,11 @@ def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt
                                           session.config.game.baseline_resolution)
         if selected_box is None:
             continue
+        terrain = find_line_deployment_edges(current.screenshot_path,
+                                             baseline_resolution=session.config.game.baseline_resolution)
+        if not terrain:
+            failure_reason = "Two current deployment boundaries could not be verified"
+            continue
         # The selected white header can erase the hue used to classify a troop.
         # Its outline can also join a neighbor. Verify each original portrait and
         # current count independently before replacing any missing border detection.
@@ -713,11 +718,7 @@ def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt
         current.observations["battle"]["slots"] = sorted(
             [slot for slot in slots if all(abs(slot["point"][0] - troop["point"][0]) >= 25 for troop in troops)] + refreshed,
             key=lambda slot: slot["point"][0])
-        terrain = find_line_deployment_edges(current.screenshot_path,
-                                            baseline_resolution=session.config.game.baseline_resolution)
-        if terrain:
-            return current, terrain
-        failure_reason = "Two current deployment boundaries could not be verified"
+        return current, terrain
     raise FlowError(failure_reason)
 
 

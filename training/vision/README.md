@@ -1,6 +1,10 @@
 # 本地视觉训练工具
 
+2026-10-16 新增当前 18.647.2 的大本营单类 Agent 原型，11 张/11 个来源组按 seed 42 冻结为 8 train / 2 val / 1 test。相同 640 输入、batch 2、最多 60 epoch、patience 20 下，YOLO11n 实际训练 57 epoch，YOLO26n 训练 60 epoch；两者完成 ONNX 导出，全部 2 张 val 的数值一致性通过。运行点阈值 0.7 下两者均 0 TP / 2 FN，不能启用；独立 AP50 / AP50–95 分别为 1.0000 / 0.5030 和 0.2525 / 0.1017，只是两张 val 的原型结果。test 仅用于工具的快照完整性/标签 schema 校验，未用于模型推理、指标、人工查看或调参。源码与输入绑定均固定于 `b8b427e`，比较报告位于 `E:/projects/AutoCOC-training/reports/building-current-th-only-prototype-20261016-v1/two-model-comparison-root-v1.json`；模型保持 `prototype_only/unvalidated`，不与下述旧范围实验直接比较。
+
 S/R 训练配方 `trainer_recipe_version=2` 在头部训练时同时冻结主干参数和 BatchNorm 运行统计；进入微调时重置早停计数，保留全局最佳权重，连续 7 次微调验证无改善才早停。配方写入运行配置和恢复签名，旧配方 checkpoint 不能混用 resume；旧运行和导出产物保留用于对照。针对性验证为 17 passed / 1 skipped（未启用本次不涉及的 B 训练集成），包含真实张量训练、阶段边界恢复和 S/R 合成训练导出；这些结果只证明程序行为。
+
+新冻结拆分评估统一以 `evaluation_scope.image_count` 表示所选 split 的样本数，仅 test 同时输出兼容字段 `test_image_count`。发布验证支持旧字段；双字段并存时须为一致的严格整数，不能让 val 报告误看作已评估 test。历史原件保留其原字段，应结合 `evaluation_scope.split` 解释。
 
 训练环境与日常助手 `.venv` 分开。先在隔离环境中安装匹配的 PyTorch/torchvision CUDA wheel，再安装 `requirements-training.txt` 的其余顶层依赖；程序不会下载预训练权重。当前 Windows/Python 3.13.12/RTX 3070 Ti 实测 torch 2.13.0+cu126 与 torchvision 0.28.0+cu126，完整已安装版本写入每次运行的 `environment.json`。其他平台需重新核对兼容性与冒烟，不把这份记录当成通用锁定环境。
 

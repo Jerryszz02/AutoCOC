@@ -745,17 +745,51 @@ class DeploymentTests(unittest.TestCase):
                 "baseline_resolution": [1280, 720], "source_resolution": [2560, 1440],
                 "recognition_scope": "full"}))
 
-    def test_boundary_error_reports_unverified_card_before_terrain(self):
+    def test_boundary_without_terrain_skips_card_ocr(self):
         session = FakeSession(self.clock, [card(count=1)])
         session.native = Mock()
         session.recognizer = Mock()
-        session.recognizer.recognize_slot_count.return_value = {"count": 1, "portrait_score": None}
         self.camera_motion.return_value = {"stationary": True}
         with patch("autococ.battle_vision.selected_card_bbox", return_value=[177, 587, 253, 703]), \
-             patch("autococ.terrain.find_line_deployment_edges") as terrain:
-            with self.assertRaisesRegex(FlowError, "troop card portrait or count unverified"):
+             patch("autococ.deployment._verified_line_card_reading") as read_card, \
+             patch("autococ.terrain.find_line_deployment_edges", return_value=[]) as terrain:
+            with self.assertRaisesRegex(FlowError, "Two current deployment boundaries"):
                 _prepare_two_edge_view(session, session.scout, {"evidence": []})
-        terrain.assert_not_called()
+        self.assertEqual(terrain.call_count, 3)
+        read_card.assert_not_called()
+
+    def test_boundary_with_terrain_still_rejects_unverified_card(self):
+        candidate = [{"edge": 0, "point": [450, 210]}]
+        for reading in ({"count": 1, "portrait_score": None},
+                        {"count": 2, "portrait_score": .99}):
+            with self.subTest(reading=reading):
+                session = FakeSession(self.clock, [card(count=1)])
+                session.native = Mock()
+                session.recognizer = Mock()
+                session.recognizer.recognize_slot_count.return_value = reading
+                self.camera_motion.return_value = {"stationary": True}
+                with patch("autococ.battle_vision.selected_card_bbox", return_value=[177, 587, 253, 703]), \
+                     patch("autococ.terrain.find_line_deployment_edges", return_value=candidate) as terrain:
+                    with self.assertRaisesRegex(FlowError, "troop card portrait or count unverified"):
+                        _prepare_two_edge_view(session, session.scout, {"evidence": []})
+                self.assertEqual(terrain.call_count, 3)
+
+    def test_boundary_reads_cards_only_on_first_current_terrain_candidate(self):
+        session = FakeSession(self.clock, [card(count=1)])
+        session.native = Mock()
+        session.recognizer = Mock()
+        self.camera_motion.return_value = {"stationary": True}
+        candidate = [{"edge": 0, "point": [450, 210]}]
+        with patch("autococ.battle_vision.selected_card_bbox", return_value=[177, 587, 253, 703]), \
+             patch("autococ.deployment._verified_line_card_reading",
+                   return_value={"count": 1, "portrait_score": .99}) as read_card, \
+             patch("autococ.terrain.find_line_deployment_edges",
+                   side_effect=[[], candidate]) as terrain:
+            current, observed = _prepare_two_edge_view(session, session.scout, {"evidence": []})
+        self.assertEqual(observed, candidate)
+        self.assertEqual(current.screenshot_path, session.frames[-1].screenshot_path)
+        self.assertEqual(terrain.call_count, 2)
+        read_card.assert_called_once()
 
     def test_boundary_selection_keeps_only_reidentified_card_glyph_roi(self):
         original = {**card(count=10), "unit_id": "electro_dragon",
