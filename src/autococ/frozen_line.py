@@ -219,12 +219,50 @@ def _closed_dragon_card_border_18_647_2(current: Any,
     if min(left_bands) < 175 or max(right_bands) > -160:
         return None
     left_edge, right_edge = float(np.median(left_bands)), float(np.median(right_bands))
-    # The side edges turn inward at both rounded ends; a straight neighboring
-    # seam or a rectangular overlay is insufficient.
-    for y in (top + 5, bottom - 7):
-        if (side[y, left] > .7 * left_edge or
-                side[y, right - 1] < .75 * right_edge):
-            return None
+    # The saturated, still-available dragon card has roughly twice the side
+    # contrast of all sampled spent gray cards. The earlier single-row corner
+    # check happened to reject it; keep that independent gray-card separation
+    # when following the rounded corner over several rows.
+    if left_edge > 350 or right_edge < -350:
+        return None
+    # At the upper corner the one-pixel-wide edge reaches the straight side
+    # on either row +5 or +6 in captured 18.647.2 frames. Follow both signed
+    # Sobel ridges from the inset at +3/+4 to the side at +7 instead of
+    # requiring a particular gradient at one row. Every row must contribute a
+    # strong pixel and the inset can move outward by at most one column per
+    # row; isolated pixels and square corners cannot supply this path.
+    def upper_corner_trace(left_side: bool) -> tuple[int, ...] | None:
+        def has_edge(y: int, inset: int) -> bool:
+            if left_side:
+                return bool(side[y, left + inset] >= 140)
+            return bool(side[y, right - 1 - inset] <= -140)
+
+        paths = {(inset,) for inset in range(4)
+                 if inset >= 1 and has_edge(top + 3, inset)}
+        for y in range(top + 4, top + 8):
+            paths = {path + (inset,) for path in paths
+                     for inset in range(4)
+                     if (path[-1] >= inset and path[-1] - inset <= 1 and
+                         (y != top + 4 or inset >= 1) and has_edge(y, inset))}
+            if not paths:
+                return None
+        return next((path for path in sorted(paths) if path[-1] == 0), None)
+
+    upper_left = upper_corner_trace(True)
+    upper_right = upper_corner_trace(False)
+    if upper_left is None or upper_right is None:
+        return None
+    # Join the trace's straight-side endpoint to the first seven-band sample.
+    # The thinner old 89px gray rendering still has at least 123 signed Sobel
+    # units on every one of these rows in the independent development frames.
+    if (np.min(side[top + 7:625, left]) < 100 or
+            np.max(side[top + 7:625, right - 1]) > -100):
+        return None
+    # Keep the independent lower-corner inward turn unchanged.
+    y = bottom - 7
+    if (side[y, left] > .7 * left_edge or
+            side[y, right - 1] < .75 * right_edge):
+        return None
     # The lower rounded edge shifts inward by a pixel between rows on this
     # layout. A single x+3 sample at bottom-7 can land beyond that edge. Require
     # a four-connected rim within fixed card bounds instead: both full side
@@ -276,9 +314,13 @@ def _closed_dragon_card_border_18_647_2(current: Any,
         return None
     return {"method": "18.647.2_dragon_rounded_closed_card",
             "left_edge": left_edge, "right_edge": right_edge,
+            "gray_side_contrast_max": 350,
             "left_side_bands": left_bands, "right_side_bands": right_bands,
             "bottom_inner_gradient_min": min(bottom_inner_bands),
             "bottom_inner_gradient_bands": bottom_inner_bands,
+            "upper_outline": {"gradient_min": 140, "side_join_min": 100,
+                              "left_inset": upper_left,
+                              "right_inset": upper_right},
             "lower_outline": {"connectivity": 4, "gradient_min": 40,
                               "bottom_gradient_max": -40,
                               "connected_pixels": len(connected)}}

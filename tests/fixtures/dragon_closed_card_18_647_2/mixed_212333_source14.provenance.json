@@ -1,0 +1,22 @@
+{
+  "client_version": "18.647.2",
+  "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-212333-508869-610cb694\\frames\\00014-line-boundary.png",
+  "source_sha256": "2df6110ce65cd9e66b98e7c422fd7221a051adcf94cd0c59b8884314fb3de21e",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "native_preserved_xyxy": [
+    360,
+    1140,
+    590,
+    1440
+  ],
+  "native_preserved_pixel_sha256": "15025373c5c97a6c17e1574f3caa2a547adf0516c6d84a5d6b5e584e0447ea20",
+  "output_sha256": "df9d7ce55e129ac8d02d5f40f9d756510430fa1410b3e2e4b4c85851b9c9e92b",
+  "output_preserved_pixel_sha256": "15025373c5c97a6c17e1574f3caa2a547adf0516c6d84a5d6b5e584e0447ea20",
+  "outside_preserved_area": "black masked",
+  "events_source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-212333-508869-610cb694\\events.jsonl",
+  "events_sha256": "be05f59af2a1de334a204069da1b2c8d64eb0ad8bb642ff5970211ce11d7e8a8",
+  "purpose": "Development-only source-bound dragon upper-corner regression; not human truth or formal heldout."
+}

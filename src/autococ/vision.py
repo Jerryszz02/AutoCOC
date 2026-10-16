@@ -341,6 +341,18 @@ class ScreenshotRecognizer:
                 baseline_resolution=self.baseline_resolution)
             if event_reward_track is not None:
                 scene, confidence, reasons = SCENE_POPUP, .95, ["current_event_reward_track_verified"]
+        ore_inventory = None
+        if (self.client_version == "18.647.2" and not account_claim_visible
+                and account_in_use is None and hero_detail is None and unit_detail is None
+                and spell_detail is None and event_panel is None and event_reward_track is None
+                and scene in {SCENE_UNKNOWN, SCENE_POPUP}
+                and any(normalize_label(item.text) == "英雄装备" for item in texts)):
+            from .ore_inventory import observe_ore_inventory
+            ore_inventory = observe_ore_inventory(
+                path, [asdict(item) for item in texts], client_version=self.client_version,
+                baseline_resolution=self.baseline_resolution)
+            if ore_inventory is not None:
+                scene, confidence, reasons = SCENE_POPUP, .95, ["current_ore_inventory_verified"]
         battle_reward_claim = None
         battle_reward = None
         if (self.client_version == "18.647.2" and not account_claim_visible
@@ -499,6 +511,9 @@ class ScreenshotRecognizer:
             # Claiming is only available through the explicitly enabled reward
             # executor. General popup navigation can only close this surface.
             buttons = [event_reward_track["button"]]
+        if ore_inventory is not None and scene == SCENE_POPUP:
+            # This read-only inventory page exposes no equip or upgrade action.
+            buttons = [ore_inventory["button"]]
         if battle_reward_claim is not None and scene == SCENE_SETTLEMENT:
             buttons = [battle_reward_claim["button"]]
         if battle_reward is not None and scene == SCENE_BATTLE_REWARD:
@@ -526,6 +541,7 @@ class ScreenshotRecognizer:
             "village_type_evidence": None,
             "event_panel": event_panel,
             "event_reward_track": event_reward_track,
+            "ore_inventory": ore_inventory,
             "battle_reward_claim": battle_reward_claim,
             "battle_reward": battle_reward,
             "account_in_use": account_in_use,
