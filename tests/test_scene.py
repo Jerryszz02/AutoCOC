@@ -579,6 +579,28 @@ class SceneTests(unittest.TestCase):
                          {"gold": None, "elixir": None, "dark_elixir": None, "gems": None})
         self.assertIsNone(snapshot.observations["resource_source"])
 
+    def test_current_event_panel_cannot_override_account_ownership_dialog(self) -> None:
+        directory = Path(__file__).parent / "fixtures/event_rewards_18_647_2"
+        path = directory / "entry_panel.png"
+        background = [OCRText(item["text"], item["confidence"], tuple(item["bbox"]))
+                      for item in json.loads((directory / "entry_panel.ocr.json").read_text(encoding="utf-8"))]
+        message = OCRText("另一个设备正在连接这个村庄。", .999, (330, 334, 576, 358))
+        dialog = [OCRText("连接断开", .999, (330, 294, 426, 323)), message,
+                  OCRText("重新载入", .999, (330, 408, 399, 430))]
+        provider = Mock()
+        recognizer = ScreenshotRecognizer(provider=provider)
+        recognizer.client_version = "18.647.2"
+        for name, foreground, scene in (("complete", dialog, "account_in_use"),
+                                         ("partial", [message], "unknown")):
+            with self.subTest(name=name):
+                provider.recognize.return_value = [*background, *foreground]
+                snapshot = recognizer.recognize(path)
+                self.assertEqual(snapshot.scene, scene)
+                self.assertIsNone(snapshot.observations["event_panel"])
+                self.assertIsNone(snapshot.observations["event_reward_track"])
+                self.assertEqual(snapshot.observations["buttons"], [])
+                self.assertIsNone(snapshot.observations["resource_source"])
+
     def test_current_event_panel_accepts_real_weak_close_only_with_both_headings(self) -> None:
         path = Path(__file__).parent / "fixtures/event_panel_weak_close_18_647_2_20261015.png"
         recognizer = ScreenshotRecognizer()

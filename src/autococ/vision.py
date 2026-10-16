@@ -297,7 +297,7 @@ class ScreenshotRecognizer:
             # disconnect's retry button or the village HUD behind the modal.
             scene, confidence, reasons = SCENE_UNKNOWN, 0.0, ["account_in_use_dialog_incomplete"]
         event_panel = None
-        if self.client_version == "18.647.2":
+        if self.client_version == "18.647.2" and account_in_use is None and not account_claim_visible:
             anchors = {}
             for name, label, roi in (("title", "活动", (590, 25, 690, 90)),
                                      ("close", "X", (1010, 15, 1100, 100)),
@@ -331,6 +331,16 @@ class ScreenshotRecognizer:
             scene, confidence, reasons = SCENE_POPUP, .95, [
                 "lightning_detail_title_stats_and_close" if spell_detail["unit_id"] == "lightning_spell"
                 else "totem_detail_title_stats_and_close"]
+        event_reward_track = None
+        if (self.client_version == "18.647.2" and not account_claim_visible
+                and account_in_use is None and hero_detail is None and unit_detail is None
+                and spell_detail is None and scene in {SCENE_UNKNOWN, SCENE_POPUP}):
+            from .event_rewards import observe_reward_track
+            event_reward_track = observe_reward_track(
+                path, [asdict(item) for item in texts], client_version=self.client_version,
+                baseline_resolution=self.baseline_resolution)
+            if event_reward_track is not None:
+                scene, confidence, reasons = SCENE_POPUP, .95, ["current_event_reward_track_verified"]
         village_type_evidence = None
         if scene == SCENE_UNKNOWN and not account_claim_visible and all(
             any(normalize_label(item.text) == label and self._in_observed_roi(item, roi)
@@ -467,6 +477,10 @@ class ScreenshotRecognizer:
             buttons.append(unit_detail["button"])
         if spell_detail is not None and scene == SCENE_POPUP:
             buttons.append(spell_detail["button"])
+        if event_reward_track is not None and scene == SCENE_POPUP:
+            # Claiming is only available through the explicitly enabled reward
+            # executor. General popup navigation can only close this surface.
+            buttons = [event_reward_track["button"]]
         if (scene == SCENE_VILLAGE and village_type_evidence is not None
                 and village_type_evidence.get("type") == "home"
                 and not any(button["name"] == "attack" for button in buttons)):
@@ -489,6 +503,7 @@ class ScreenshotRecognizer:
             "village_type": "unknown",
             "village_type_evidence": None,
             "event_panel": event_panel,
+            "event_reward_track": event_reward_track,
             "account_in_use": account_in_use,
             "resource_evidence": {},
             "collectibles": [],
