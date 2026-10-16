@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import json
 import logging
 import math
@@ -41,8 +42,10 @@ class GameSession:
         self.deadline = time.monotonic() + config.stop.max_duration_sec
         self.task_deadline = self.deadline
         self.last_snapshot: SceneSnapshot | None = None
+        self._enrichable_capture: dict[str, object] | None = None
         self.frame_number = 0
         self.action_count = 0
+        self._input_attempt_generation = 0
         self.logger = logger or logging.getLogger(__name__)
         self.client_version = "unknown"
         self.client_version_code: int | None = None
@@ -194,6 +197,7 @@ class GameSession:
         self.check_deadline()
         previous = self.last_snapshot
         self.last_snapshot = None
+        self._enrichable_capture = None
         self.frame_number += 1
         safe_label = "".join(c if c.isalnum() or c in "-_" else "-" for c in label)
         path = self.directory / "frames" / f"{self.frame_number:05d}-{safe_label}.png"
@@ -203,6 +207,25 @@ class GameSession:
         requested_at = getattr(artifact, "requested_at_monotonic", None)
         if isinstance(requested_at, (int, float)) and math.isfinite(requested_at):
             captured_at = min(captured_at, requested_at)
+        capture_binding = None
+        if purpose == "line_boundary_wait":
+            pixels_ready_at = getattr(artifact, "pixels_ready_at_monotonic", None)
+            frame_id = getattr(artifact, "frame_id", None)
+            requested_utc = getattr(artifact, "requested_at_utc", None)
+            if (Path(artifact.path).resolve() != path.resolve()
+                    or type(requested_at) not in (int, float) or not math.isfinite(requested_at)
+                    or type(pixels_ready_at) not in (int, float) or not math.isfinite(pixels_ready_at)
+                    or pixels_ready_at < requested_at or not isinstance(frame_id, str) or not frame_id
+                    or not isinstance(requested_utc, str) or not requested_utc):
+                raise FlowError("Boundary capture provenance is incomplete")
+            with path.open("rb") as source:
+                frame_sha256 = hashlib.file_digest(source, "sha256").hexdigest()
+            capture_binding = {"path": path.resolve(), "sha256": frame_sha256,
+                               "frame_id": frame_id, "captured_at": captured_at,
+                               "requested_at": requested_at, "pixels_ready_at": pixels_ready_at,
+                               "requested_utc": requested_utc, "frame_number": self.frame_number,
+                               "action_count": self.action_count,
+                               "input_attempt_generation": self._input_attempt_generation}
         self.context.screen_resolution = (artifact.width, artifact.height)
         recognition_started = time.monotonic()
         if purpose != "full":
@@ -237,11 +260,104 @@ class GameSession:
             snapshot.observations["evidence_retention"] = "transient" if _transient else "retained"
         self.event("observation", frame=str(path), scene=snapshot.scene, confidence=snapshot.confidence,
                    observations=snapshot.observations)
+        if capture_binding is not None:
+            capture_binding["snapshot"] = snapshot
+            self._enrichable_capture = capture_binding
         self.logger.info("scene=%s confidence=%.2f capture=%.3fs recognition=%.3fs total=%.3fs frame=%s",
                          snapshot.scene, snapshot.confidence, snapshot.observations["capture_elapsed_sec"],
                          snapshot.observations["recognition_elapsed_sec"],
                          snapshot.observations["observation_elapsed_sec"], path.name)
         return snapshot
+
+    def enrich_current_boundary_capture(self, snapshot: SceneSnapshot, *, expires_at: float) -> SceneSnapshot:
+        """Fully recognize the latest immutable fast frame without another capture."""
+        current = self.last_snapshot
+        binding = self._enrichable_capture
+        # An unsuccessful enrichment must never leave the fast frame actionable.
+        self.last_snapshot = None
+        self._enrichable_capture = None
+        try:
+            self.check_deadline()
+            if (binding is None or current is not snapshot or binding.get("snapshot") is not snapshot
+                    or snapshot.observations.get("recognition_scope") != "line_boundary_wait"
+                    or snapshot.observations.get("fast_fallback") is not False
+                    or type(expires_at) not in (int, float) or not math.isfinite(expires_at)
+                    or self.frame_number != binding["frame_number"]
+                    or self.action_count != binding["action_count"]
+                    or self._input_attempt_generation != binding["input_attempt_generation"]
+                    or snapshot.screenshot_path.resolve() != binding["path"]):
+                raise FlowError("Boundary enrichment source is no longer current")
+            for key, value in (("frame_id", binding["frame_id"]),
+                               ("observed_at_monotonic", binding["captured_at"]),
+                               ("requested_at_monotonic", binding["requested_at"]),
+                               ("pixels_ready_at_monotonic", binding["pixels_ready_at"]),
+                               ("captured_at_utc", binding["requested_utc"]),
+                               ("capture_timestamp_basis", "capture_request_start")):
+                if snapshot.observations.get(key) != value:
+                    raise FlowError("Boundary enrichment capture metadata changed")
+            deadline = min(expires_at, self.deadline, self.task_deadline,
+                           binding["captured_at"] + 30)
+            if time.monotonic() >= deadline:
+                raise FlowError("Boundary enrichment deadline expired")
+
+            def unchanged() -> bool:
+                if (self.last_snapshot is not None or self.frame_number != binding["frame_number"]
+                        or self.action_count != binding["action_count"]
+                        or self._input_attempt_generation != binding["input_attempt_generation"]):
+                    return False
+                try:
+                    with snapshot.screenshot_path.open("rb") as source:
+                        return hashlib.file_digest(source, "sha256").hexdigest() == binding["sha256"]
+                except OSError:
+                    return False
+
+            if not unchanged():
+                raise FlowError("Boundary enrichment source pixels changed")
+            started = time.monotonic()
+            full = self.recognizer.recognize(snapshot.screenshot_path, captured_at=binding["captured_at"])
+            self.check_deadline()
+            if time.monotonic() >= deadline:
+                raise FlowError("Boundary enrichment deadline expired")
+            if (not unchanged() or full.screenshot_path.resolve() != binding["path"]
+                    or full.scene != "enemy_village" or not math.isfinite(full.confidence)
+                    or full.confidence < .8 or full.observations.get("recognition_scope", "full") != "full"
+                    or full.observations.get("fast_fallback") is True):
+                raise FlowError("Boundary enrichment full recognition is unverified")
+            for key, value in (("frame_id", binding["frame_id"]),
+                               ("observed_at_monotonic", binding["captured_at"]),
+                               ("requested_at_monotonic", binding["requested_at"]),
+                               ("pixels_ready_at_monotonic", binding["pixels_ready_at"]),
+                               ("captured_at_utc", binding["requested_utc"]),
+                               ("capture_timestamp_basis", "capture_request_start")):
+                if key in full.observations and full.observations[key] != value:
+                    raise FlowError("Boundary enrichment full output changed capture metadata")
+            observations = dict(full.observations)
+            for key in ("observed_at_monotonic", "captured_at_utc", "capture_timestamp_basis",
+                        "frame_id", "requested_at_monotonic", "pixels_ready_at_monotonic",
+                        "payload_ready_at_monotonic", "published_at_monotonic", "pixels_elapsed_sec",
+                        "encode_elapsed_sec", "handoff_elapsed_sec", "capture_method",
+                        "capture_elapsed_sec", "evidence_retention"):
+                if key in snapshot.observations:
+                    observations[key] = snapshot.observations[key]
+            observations["recognition_scope"] = "full"
+            observations["recognition_elapsed_sec"] = time.monotonic() - started
+            observations["observation_elapsed_sec"] = time.monotonic() - binding["captured_at"]
+            enriched = replace(full, observations=observations)
+            self.event("recognition_enrichment", frame=str(enriched.screenshot_path),
+                       frame_id=binding["frame_id"], frame_sha256=binding["sha256"],
+                       observed_at_monotonic=binding["captured_at"],
+                       requested_at_monotonic=binding["requested_at"],
+                       pixels_ready_at_monotonic=binding["pixels_ready_at"],
+                       action_count=binding["action_count"], scene=enriched.scene,
+                       confidence=enriched.confidence, observations=enriched.observations)
+            self.check_deadline()
+            if time.monotonic() >= deadline or not unchanged():
+                raise FlowError("Boundary enrichment expired before publication")
+            self.last_snapshot = enriched
+            return enriched
+        except BaseException:
+            self.last_snapshot = None
+            raise
 
     def wait_for(self, scenes: set[str], *, timeout_sec: float = 30, label: str = "wait",
                  purpose: str = "full", poll_interval_sec: float | None = None) -> SceneSnapshot:
@@ -306,6 +422,7 @@ class GameSession:
         if not (0 <= x < width and 0 <= y < height):
             raise FlowError(f"Click is outside the screenshot: {point}")
         self.event("tap", frame=str(snapshot.screenshot_path), scene=snapshot.scene, point=[x, y], reason=reason)
+        self._input_attempt_generation += 1
         self.context.tap_xy(x, y, reason=reason)
         self.action_count += 1
 
@@ -335,6 +452,7 @@ class GameSession:
         if remaining <= 0:
             raise FlowError("Frozen battle input permission expired before send")
         timeout_sec = min(timeout_sec, remaining)
+        self._input_attempt_generation += 1
         if not self.config.runtime.dry_run:
             if self.native is not None:
                 self.native._request("tap", actual_x, actual_y, timeout_sec=timeout_sec)
@@ -359,6 +477,7 @@ class GameSession:
             raise FlowError("Chat swipe duration must be between 300 and 1000 ms")
         self.event("swipe", frame=str(snapshot.screenshot_path), scene=snapshot.scene,
                    start=list(start), end=list(end), duration_ms=duration_ms, reason=reason)
+        self._input_attempt_generation += 1
         self.context.swipe(*start, *end, duration_ms)
         self.action_count += 1
 
@@ -405,6 +524,7 @@ class GameSession:
         start, end = ((1060, y), (220, y)) if direction == "left" else ((220, y), (1060, y))
         self.event("swipe_battle_bar", frame=str(snapshot.screenshot_path), scene=snapshot.scene,
                    start=list(start), end=list(end), direction=direction, reason=reason)
+        self._input_attempt_generation += 1
         self.context.swipe(*start, *end, 550)
         self.action_count += 1
         self.last_snapshot = None
@@ -441,6 +561,7 @@ class GameSession:
         self.event("swipe_army_catalog", frame=str(snapshot.screenshot_path),
                    scene=snapshot.scene, start=list(start), end=list(end),
                    direction=direction, reason=reason)
+        self._input_attempt_generation += 1
         self.context.swipe(*start, *end, 550)
         self.action_count += 1
 
@@ -461,6 +582,7 @@ class GameSession:
         if not has_capacity or picker_numbers < 8:
             raise FlowError("Expanded army picker cannot be confirmed in this frame")
         self.event("close_army_catalog", frame=str(snapshot.screenshot_path), reason=reason)
+        self._input_attempt_generation += 1
         self.context.back()
         self.action_count += 1
 
@@ -491,5 +613,6 @@ class GameSession:
         if snapshot.scene not in {"training", "request", "donation", "clan_chat", "search", "popup", "goal_panel"}:
             raise FlowError(f"Back is not permitted in {snapshot.scene}")
         self.event("back", frame=str(snapshot.screenshot_path), reason=reason)
+        self._input_attempt_generation += 1
         self.context.back()
         self.action_count += 1

@@ -782,8 +782,9 @@ def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt
                     "observation_elapsed_sec": time.monotonic() - observation_started})
             continue
         if fast_scan:
-            # The fast pixels only nominate a candidate. Capture one new full
-            # frame and prove every action-bearing fact again on that frame.
+            # The fast pixels only nominate a candidate. Fully recognize the
+            # same immutable capture, then prove every action-bearing fact
+            # again from its full result before any field input.
             receipt.setdefault("line_boundary_scan", []).append({
                 "frame": str(current.screenshot_path), "status": "candidate_only",
                 "observation_elapsed_sec": time.monotonic() - observation_started})
@@ -791,14 +792,20 @@ def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt
                 raise FlowError("Original preview deadline cannot cover full boundary confirmation")
             fast_candidate = current
             confirmation_started = time.monotonic()
-            current = session.observe("line-boundary-confirm")
-            receipt["evidence"].append(str(current.screenshot_path))
+            current = session.enrich_current_boundary_capture(fast_candidate, expires_at=hard_end)
             confirmation_receipt = {
                 "candidate_frame": str(fast_candidate.screenshot_path),
                 "frame": str(current.screenshot_path), "status": "unverified",
-                "observation_elapsed_sec": time.monotonic() - confirmation_started}
+                "recognition_elapsed_sec": time.monotonic() - confirmation_started,
+                "same_capture": True,
+                "frame_id": current.observations.get("frame_id")}
             receipt["line_boundary_confirmation"] = confirmation_receipt
-            require_new_frame(fast_candidate, current)
+            if (current is fast_candidate or current.screenshot_path != fast_candidate.screenshot_path
+                    or current.observations.get("frame_id") != fast_candidate.observations.get("frame_id")
+                    or current.observations.get("observed_at_monotonic") !=
+                       fast_candidate.observations.get("observed_at_monotonic")):
+                confirmation_receipt["status"] = "capture_binding_mismatch"
+                raise FlowError("Full boundary confirmation capture binding changed")
             if (current.scene != "enemy_village" or not math.isfinite(current.confidence)
                     or current.confidence < .8 or
                     current.observations.get("recognition_scope", "full") != "full" or
