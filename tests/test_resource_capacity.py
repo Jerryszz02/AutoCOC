@@ -18,6 +18,7 @@ from autococ.scene import SceneSnapshot
 
 PROBES = Path(r"E:\projects\AutoCOC\reports\completion-20261015\probes")
 ANONYMOUS_GOLD = Path(__file__).parent / "fixtures" / "resource_capacity_18_647_2"
+ANONYMOUS_DARK = Path(__file__).parent / "fixtures" / "resource_capacity_18_647_2_dark_20261016"
 INVENTORY = {"gold": 100, "elixir": 200, "dark_elixir": 30, "gems": 5}
 
 
@@ -55,6 +56,43 @@ class ReaderSession:
 
 
 class CapacityTests(unittest.TestCase):
+    def test_anonymous_real_dark_elixir_tooltip_replay(self):
+        from autococ.ocr import RapidOCRProvider
+
+        provenance = json.loads((ANONYMOUS_DARK / "provenance.json").read_text(encoding="utf-8"))
+        provider = RapidOCRProvider()
+        for name in ("old_home", "new_home", "new_animation"):
+            with self.subTest(frame=name):
+                frame = ANONYMOUS_DARK / f"{name}.png"
+                self.assertEqual(hashlib.sha256(frame.read_bytes()).hexdigest(),
+                                 provenance["fixtures"][name]["derived_sha256"])
+                self.assertIsNone(read_tooltip_capacity(frame, "dark_elixir", provider))
+                self.assertTrue(_tooltip_border_absent(frame, "dark_elixir"))
+        for name in ("old_settled", "new_settled"):
+            with self.subTest(frame=name):
+                frame = ANONYMOUS_DARK / f"{name}.png"
+                self.assertEqual(hashlib.sha256(frame.read_bytes()).hexdigest(),
+                                 provenance["fixtures"][name]["derived_sha256"])
+                proof = read_tooltip_capacity(frame, "dark_elixir", provider)
+                self.assertIsNotNone(proof)
+                self.assertEqual(proof["capacity"], 470_000)
+                self.assertGreaterEqual(proof["ocr"]["number_raw"], .95)
+                self.assertGreaterEqual(proof["ocr"]["number_white"], .95)
+                self.assertFalse(_tooltip_border_absent(frame, "dark_elixir"))
+
+    def test_dark_elixir_rejects_clipped_or_conflicting_number(self):
+        from autococ.ocr import RapidOCRProvider
+        import cv2
+
+        frame = ANONYMOUS_DARK / "new_settled.png"
+        clipped = cv2.imread(str(frame), cv2.IMREAD_COLOR)
+        clipped[182:202, 1150:1190] = 24
+        with patch("autococ.resource_capacity.read_frame", return_value=clipped):
+            self.assertIsNone(read_tooltip_capacity(frame, "dark_elixir", RapidOCRProvider()))
+        conflict = [("最大储量：", .99), ("最大储量：", .99),
+                    ("470000", .99), ("480000", .99)]
+        self.assertIsNone(read_tooltip_capacity(frame, "dark_elixir", Provider(conflict)))
+
     def test_anonymous_real_gold_tooltip_replay(self):
         from autococ.ocr import RapidOCRProvider
 

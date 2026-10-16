@@ -8,6 +8,12 @@
 
 本轮客户端为 `18.647.2` / `180647003`，MuMu 实例 1、2560×1440，代码在未合并的 `agent/complete-daily-vision`。本节证据均位于本机 `E:/projects/AutoCOC/reports/completion-20261015/`。它们跨开发修复，不拼成同一冻结版本的连续验收。
 
+黑油数值 ROI 已收窄到完整数字区域，保留原图/白化双读一致、置信度、边框与关闭后库存核验。五张匿名实采夹具由根代理从原图独立逐像素重建一致（`diagnostics/dark-capacity-assets-root-v1.json`）；容量与战斗回归 **122 passed、1 skipped、105 subtests passed**（4.74 秒），源码/夹具在测试期间未变，见 `pytest-dark-capacity-final-20261016.*`。三资源整体结果仍待新轮实机，不追改旧失败。
+
+`3703dde` 新轮 `probes/20261016-080629-229222-event-reward-roundtrip-v1/summary.json` 已完成自动活动轨道往返：识别“打开”入口、进入跳档页、关闭回村，3 次输入、9 帧、23.159 秒，无辅助操作，源码/配置/脚本未变。金/紫/黑/宝石均保持 17,804,364 / 16,834,315 / 377,125 / 217。两项旧奖励位置未确认，目标仍为 unknown；本轮零领取，不计矿石到账或自动领奖。根代理已查看回村原图并复核九帧哈希，记录 `diagnostics/event-roundtrip-080629-root-audit.json`。
+
+同版 `probes/20261016-080407-670698-capacity-all-v1/summary.json` 已分别核实金币和圣水上限 29,000,000，且各自关闭后库存一致。第 5 次输入打开黑油详情，动画后稳定帧的原图 OCR 为 `470:000`（0.94976）、白化 OCR 为 `470 000`（0.98551），故未自动关闭，也未声称三资源容量全通过。其后一次辅助输入关闭弹层并回村（`probes/20261016-080543-tap/summary.json`），库存不变。旧失败不因后续修复追补。
+
 下述容量/活动失败后的最小修复保持原双读、当前帧、前台与后置门：仅收窄金币数值区域；活动入口支持唯一“领取/打开”，跳档页仅允许关闭，不得使用旧奖励位置。七张匿名夹具、两份 OCR 来源子集已独立重建，交叉审查无遗留具体 P1/P2；六模块 **205 passed、17 skipped、227 subtests passed**（43.42 秒），源码/夹具未变。证据 `pytest-event-capacity-fix-final-20261016.*`、`diagnostics/event-capacity-fix-assets-root-v1.json`；实机仍需另跑。
 
 `b784f07` 新窗口先正常恢复闲置重载并回村（`live/run-20261016-074738-930219-faa17a96.json`）。`probes/20261016-074804-075059-capacity-all-v1/summary.json` 仅发出一次金币详情打开：稳定帧可见 29,000,000，原数字 ROI 的原图 OCR 为 `129:000000`、白化 OCR 为 `29 000 000`，故生产容量核验失败。后续一次辅助输入关闭弹层，库存不变；`diagnostics/capacity-gold-074804-diagnosis.json` 保留原失败和具体 OCR 冲突。
