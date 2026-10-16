@@ -121,20 +121,21 @@ class ConfigTests(unittest.TestCase):
             with self.subTest(kwargs=kwargs), self.assertRaises(ConfigError):
                 BattleConfig(**kwargs)
 
-    def test_two_edge_split_requires_explicit_continuous_edrag_line(self):
+    def test_two_edge_modes_require_explicit_continuous_edrag_line(self):
         self.assertEqual(BattleConfig().line_tactics, "single_edge")
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.toml"
-            path.write_text('[battle]\nstrategy="edrag_line"\n'
-                            'line_execution_mode="continuous"\n'
-                            'line_tactics="two_edge_split"\n', encoding="utf-8")
-            self.assertEqual(load_config(path).battle.line_tactics, "two_edge_split")
-        for kwargs in ({"line_tactics": "two_edge_split"},
-                       {"strategy": "edrag_line", "line_tactics": "two_edge_split"},
-                       {"strategy": "edrag_line", "line_execution_mode": "continuous",
-                        "line_tactics": "unknown"}):
-            with self.subTest(kwargs=kwargs), self.assertRaises(ConfigError):
-                BattleConfig(**kwargs)
+            for tactics in ("two_edge_split", "two_edge_probed_anchors"):
+                with self.subTest(tactics=tactics):
+                    path.write_text('[battle]\nstrategy="edrag_line"\n'
+                                    'line_execution_mode="continuous"\n'
+                                    f'line_tactics="{tactics}"\n', encoding="utf-8")
+                    self.assertEqual(load_config(path).battle.line_tactics, tactics)
+                for strategy in ("verified", "edrag_line", "two_edge"):
+                    with self.subTest(tactics=tactics, strategy=strategy), self.assertRaises(ConfigError):
+                        BattleConfig(strategy=strategy, line_tactics=tactics)
+        with self.assertRaises(ConfigError):
+            BattleConfig(strategy="edrag_line", line_execution_mode="continuous", line_tactics="unknown")
 
     def test_legacy_weights_are_explicitly_ignored_for_existing_local_configs(self) -> None:
         with TemporaryDirectory() as tmp:

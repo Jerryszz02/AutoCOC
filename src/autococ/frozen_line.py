@@ -176,6 +176,26 @@ def _count_proves(reading: dict, expected: int, frame: Any,
     return counts == {expected}
 
 
+def _closed_card_border(current: Any, bbox: tuple[int, int, int, int]) -> dict | None:
+    """The same independent opposite edges and enclosed bottom used for spent cards."""
+    import cv2
+    import numpy as np
+
+    left, _top, right, bottom = bbox
+    if not (0 <= left < right < 1280 and 625 <= bottom - 4 and bottom + 3 <= 720 and
+            left + 8 < right - 8 and current.shape[:2] == (720, 1280)):
+        return None
+    gray = cv2.cvtColor(current, cv2.COLOR_BGR2GRAY)
+    edges = np.median(cv2.Sobel(gray[625:695], cv2.CV_32F, 1, 0, ksize=3), axis=0)
+    left_edge, right_edge = float(edges[left]), float(edges[right - 1])
+    bottom_contrast = float(gray[bottom - 4:bottom, left + 8:right - 8].mean() -
+                            gray[bottom + 1:bottom + 3, left + 8:right - 8].mean())
+    if left_edge < 250 or right_edge > -150 or bottom_contrast < 40:
+        return None
+    return {"left_edge": left_edge, "right_edge": right_edge,
+            "bottom_contrast": bottom_contrast}
+
+
 def _post_troop_reading(session: Any, post_path: Any, source_path: str,
                         point: tuple[int, int], bbox: tuple[int, int, int, int], *,
                         unit_id: str | None = None) -> dict:
@@ -280,18 +300,9 @@ def _post_troop_reading(session: Any, post_path: Any, source_path: str,
         return {}
     border = None
     if locator_source == "current_frame_closed_card_header_geometry":
-        gray = cv2.cvtColor(current, cv2.COLOR_BGR2GRAY)
-        edges = np.median(cv2.Sobel(gray[625:695], cv2.CV_32F, 1, 0, ksize=3), axis=0)
-        # Match vision._battle_observation's opposite-facing card edges
-        # (250/-150) and hero_state's closed-bottom contrast (40). A spent
-        # grayscale card has no cyan sides to validate instead.
-        left_edge, right_edge = float(edges[left]), float(edges[right - 1])
-        bottom_contrast = float(gray[bottom - 4:bottom, left + 8:right - 8].mean() -
-                                gray[bottom + 1:bottom + 3, left + 8:right - 8].mean())
-        if left_edge < 250 or right_edge > -150 or bottom_contrast < 40:
+        border = _closed_card_border(current, bbox)
+        if border is None:
             return {}
-        border = {"left_edge": left_edge, "right_edge": right_edge,
-                  "bottom_contrast": bottom_contrast}
     from .locator import scale_box
 
     original = read_frame(post_path)
@@ -670,6 +681,12 @@ def execute_frozen_line(session: Any, plan: FrozenLinePlan, *,
     receipt["burst_elapsed_sec"] = clock() - start
     receipt["input_sent"] = len(receipts) == len(plan.actions) and receipt["burst_elapsed_sec"] <= plan.burst_limit_sec
     receipt["burst_pass"] = receipt["input_sent"]
+    return _verify_frozen_line_post(session, plan, receipt, receipts[-1]["done_at"], sleep=sleep)
+
+
+def _verify_frozen_line_post(session: Any, plan: FrozenLinePlan, receipt: dict,
+                             after_time: float, *, sleep: Callable[[float], None]) -> SceneSnapshot:
+    """Read one complete original-roster post state after a separately authorized batch."""
     session._frozen_count_roi_hints = {}
     try:
         post = session.observe("frozen-line-post")
@@ -677,7 +694,6 @@ def execute_frozen_line(session: Any, plan: FrozenLinePlan, *,
         receipt["error"] = f"Post-burst observation failed: {exc}"
         raise DeploymentError(receipt["error"], partial_receipt=receipt) from exc
     previous_path = None
-    after_time = receipts[-1]["done_at"]
     for attempt in range(3):
         receipt["evidence"].append(str(post.screenshot_path))
         observed_at = post.observations.get("observed_at_monotonic")

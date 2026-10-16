@@ -775,6 +775,105 @@ class CombatTests(unittest.TestCase):
         self.assertEqual(result.metrics["inventory_delta"],
                          {"gold": 110, "elixir": 55, "dark_elixir": 10, "gems": 0})
 
+    def test_attempted_line_capture_failure_clears_snapshot_then_recovers_only_from_new_battle(self):
+        frames = complete_frames()
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle, strategy="edrag_line",
+                                        line_execution_mode="continuous")
+        session.deadline = session.task_deadline = __import__("time").monotonic() + 600
+        original_observe = session.observe
+        failed_once = False
+        def observe(label="observe", **options):
+            nonlocal failed_once
+            if label == "partial-deployment-recovery" and not failed_once:
+                failed_once = True
+                session.last_snapshot = None  # Actual GameSession invalidates before capture.
+                raise CaptureError("capture transport unavailable")
+            return original_observe(label, **options)
+        session.observe = observe
+        def fail_deployment(active, scout):
+            active.last_snapshot = None
+            raise DeploymentError("Probe post capture failed", partial_receipt={
+                "completed": False, "verified": False, "deployed_units": 0,
+                "attempted_placements": 1, "issued_placements": 1,
+                "evidence": ["probe-before.png"]})
+        session.deploy = fail_deployment
+        with patch("autococ.combat._read_continuous_line_army",
+                   side_effect=lambda active, current, evidence: (current, _read_army(current))):
+            result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "Probe post capture failed")
+        self.assertTrue(result.metrics["returned_home"])
+        self.assertEqual(result.metrics["deployment"]["attempted_placements"], 1)
+        self.assertEqual(sum(name == "partial_deployment_recovery" for name, _ in session.events), 2)
+        self.assertFalse(any("probe" in reason for _, reason in session.taps))
+
+    def test_attempted_line_unknown_recovery_never_clicks_or_replays(self):
+        frames = complete_frames()[:4] + [frame(40, "unknown"), frame(41, "unknown")]
+        session = FakeSession(frames)
+        session.config.battle = replace(session.config.battle, strategy="edrag_line",
+                                        line_execution_mode="continuous")
+        session.deadline = session.task_deadline = __import__("time").monotonic() + 600
+        def fail_deployment(active, scout):
+            active.last_snapshot = None
+            raise DeploymentError("Probe transport uncertain", partial_receipt={
+                "attempted_placements": 1, "issued_placements": 0,
+                "deployed_units": 0, "evidence": ["probe-before.png"]})
+        session.deploy = fail_deployment
+        taps_before = len(session.taps)
+        with patch("autococ.combat._read_continuous_line_army",
+                   side_effect=lambda active, current, evidence: (current, _read_army(current))):
+            result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "Probe transport uncertain")
+        self.assertEqual(session.observe_labels.count("partial-deployment-recovery"), 2)
+        self.assertFalse(result.metrics.get("returned_home", False))
+        self.assertFalse(any("end_battle" in reason or "return_home" in reason
+                             for _, reason in session.taps[taps_before:]))
+
+    def test_account_conflict_partial_receipt_stops_without_recovery_observation(self):
+        session = FakeSession(complete_frames()[:4])
+        session.config.battle = replace(session.config.battle, strategy="edrag_line",
+                                        line_execution_mode="continuous")
+        def fail_deployment(active, scout):
+            active.last_snapshot = None
+            raise DeploymentError("Game interruption: account_in_use", partial_receipt={
+                "interruption": "account_in_use", "attempted_placements": 1,
+                "issued_placements": 1, "evidence": ["probe-before.png"]})
+        session.deploy = fail_deployment
+        with patch("autococ.combat._read_continuous_line_army",
+                   side_effect=lambda active, current, evidence: (current, _read_army(current))):
+            result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.metrics["deployment"]["interruption"], "account_in_use")
+        self.assertNotIn("partial-deployment-recovery", session.observe_labels)
+        self.assertFalse(result.metrics.get("returned_home", False))
+
+    def test_account_conflict_discovered_during_recovery_retains_partial_receipt(self):
+        session = FakeSession(complete_frames()[:4] + [frame(40, "account_in_use")])
+        session.config.battle = replace(session.config.battle, strategy="edrag_line",
+                                        line_execution_mode="continuous")
+        session.deadline = session.task_deadline = __import__("time").monotonic() + 600
+        def fail_deployment(active, scout):
+            active.last_snapshot = None
+            raise DeploymentError("Probe post capture failed", partial_receipt={
+                "mode": "model_free_line_probed_anchors", "attempted_placements": 1,
+                "issued_placements": 1, "deployed_units": 0,
+                "probe_events": [{"edge": 0, "status": "input_sent"}],
+                "evidence": ["probe-before.png"]})
+        session.deploy = fail_deployment
+        with patch("autococ.combat._read_continuous_line_army",
+                   side_effect=lambda active, current, evidence: (current, _read_army(current))):
+            result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "Probe post capture failed")
+        self.assertEqual(result.metrics["deployment"]["probe_events"][0]["status"], "input_sent")
+        self.assertEqual(result.metrics["deployment_recovery_error"], "account_in_use")
+        self.assertEqual(session.observe_labels.count("partial-deployment-recovery"), 1)
+        self.assertFalse(result.metrics.get("returned_home", False))
+        self.assertFalse(any("return_home" in reason or "end_battle" in reason
+                             for _, reason in session.taps))
+
     def test_line_never_reconciles_unverified_start_inventory(self):
         for source, resources in (("village_inventory", {**BEFORE, "dark_elixir": None}),
                                   ("enemy_available", deepcopy(BEFORE)),

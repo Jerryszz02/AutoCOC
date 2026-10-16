@@ -5,12 +5,14 @@ import hashlib
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from autococ.config import ProfileConfig, load_config
 from autococ.reporting import (DecisionTrace, RunStats, TaskResult, capture_run_provenance,
-                               resource_metrics, summarize_run, vision_agent_metrics, write_report)
+                               interrupted_battle_metrics, resource_metrics, summarize_run,
+                               vision_agent_metrics, write_report)
 
 
 def success(task: str, **metrics: object) -> TaskResult:
@@ -18,6 +20,21 @@ def success(task: str, **metrics: object) -> TaskResult:
 
 
 class ReportingTests(unittest.TestCase):
+    def test_cancelled_probed_anchor_keeps_attempted_issued_and_verified_partial(self) -> None:
+        receipt = {"mode": "model_free_line_probed_anchors", "line_tactics": "two_edge_probed_anchors",
+                   "attempted_placements": 2, "issued_placements": 1,
+                   "deployed_units": 1, "verified": False, "completed": False,
+                   "input_sent": False, "any_input_sent": True,
+                   "probe_events": [{"edge": 0, "status": "verified", "after_count": 1},
+                                    {"edge": 1, "status": "uncertain"}]}
+        metrics = interrupted_battle_metrics(SimpleNamespace(frozen_line_receipt=receipt,
+                                                              prepared_battle_receipt=None))
+        self.assertIs(metrics["deployment"], receipt)
+        self.assertEqual(metrics["line_execution"],
+                         {"mode": "two_edge_probed_anchors", "status": "cancelled"})
+        self.assertEqual(metrics["deployment"]["deployed_units"], 1)
+        self.assertFalse(metrics["deployment"]["completed"])
+
     def test_vision_agent_report_keeps_failed_partial_and_unknown_attempts(self) -> None:
         complete = {"mode": "continuous", "status": "consumption_verified", "plan_ready": True,
                     "input_sent": True, "consumption_verified": True,

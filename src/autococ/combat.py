@@ -324,6 +324,9 @@ def run_battle(session: GameSession) -> TaskResult:
                 deployed = execute_strategy(session, scout, definition,
                                             prepared_army=prepared_army)
         except DeploymentError as exc:
+            metrics["deployment"] = exc.partial_receipt
+            if exc.partial_receipt.get("interruption") == "account_in_use":
+                raise
             last = session.last_snapshot
             units = exc.partial_receipt.get("deployed_units")
             issued = exc.partial_receipt.get("issued_placements", 0)
@@ -332,6 +335,50 @@ def run_battle(session: GameSession) -> TaskResult:
             attempted = exc.partial_receipt.get("attempted_placements", 0)
             attempted_line = line_mode and (type(issued) is int and issued > 0 or
                                            type(attempted) is int and attempted > 0)
+            if attempted_line and last is None and exc.partial_receipt.get("interruption") != "account_in_use":
+                # A failed capture clears GameSession.last_snapshot. The old
+                # preview must never authorize recovery input after a probe.
+                # Keep the original partial receipt and never retry placement.
+                for recovery_attempt in range(2):
+                    try:
+                        session.check_deadline()
+                    except AutoCOCError as recovery_error:
+                        metrics["deployment_recovery_error"] = str(recovery_error)
+                        break
+                    if time.monotonic() >= min(session.deadline, session.task_deadline):
+                        break
+                    try:
+                        fresh = session.observe("partial-deployment-recovery")
+                        evidence.append(fresh.screenshot_path)
+                        session.event("partial_deployment_recovery", attempt=recovery_attempt + 1,
+                                      frame=str(fresh.screenshot_path), scene=fresh.scene)
+                    except AutoCOCError as recovery_error:
+                        metrics["deployment_recovery_error"] = str(recovery_error)
+                        session.event("partial_deployment_recovery", attempt=recovery_attempt + 1,
+                                      error=str(recovery_error))
+                        if "account_in_use" in str(recovery_error):
+                            raise exc
+                        continue
+                    if fresh.scene == "account_in_use":
+                        metrics["deployment_recovery_error"] = "account_in_use"
+                        raise exc
+                    if (fresh.scene in {"battle", "settlement", "enemy_village"} and
+                            math.isfinite(fresh.confidence) and fresh.confidence >= .8):
+                        last = fresh
+                        break
+                if last is not None and last.scene == "enemy_village":
+                    # Only this newly recognized preview authorizes the same
+                    # bounded scout-exit path used by zero-input failures.
+                    try:
+                        _require_scene(last, {"enemy_village"})
+                        _leave_scout(session, last)
+                        home = return_to_village(session)
+                        evidence.append(home.screenshot_path)
+                        metrics["returned_home"] = True
+                    except AutoCOCError as recovery_error:
+                        metrics["deployment_recovery_error"] = str(recovery_error)
+                    metrics["deployment_error"] = str(exc)
+                    raise exc
             unstarted_continuous_line = (
                 line_mode and not vision_mode
                 and getattr(session.config.battle, "line_execution_mode", "verified") == "continuous"

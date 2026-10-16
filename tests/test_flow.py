@@ -314,6 +314,89 @@ class FlowTests(unittest.TestCase):
         self.session.back.assert_not_called()
         self.assertEqual([result.task for result in stats.task_results], ["collect"])
 
+    def test_maintenance_profile_stops_on_unexpected_battle_scene_before_social_tasks(self) -> None:
+        for scene in ("enemy_village", "battle"):
+            with self.subTest(scene=scene):
+                runner = self.runner(("launch", "collect", "request", "donate"))
+                village = self.snapshot("village")
+                frame_path = self.root / f"{scene}.png"
+                frame_path.write_bytes(b"unexpected-scene")
+                unexpected = replace(self.snapshot(scene), screenshot_path=frame_path)
+                unexpected.observations["buttons"] = []
+                frames = iter((village, unexpected))
+
+                def observe(*_args, **_kwargs):
+                    self.session.last_snapshot = next(frames)
+                    return self.session.last_snapshot
+
+                self.session.observe.reset_mock(side_effect=True)
+                self.session.observe.side_effect = observe
+                stats = runner.run_profile("test")
+                self.assertEqual([(result.task, result.status) for result in stats.task_results],
+                                 [("launch", "succeeded"), ("collect", "failed")])
+                self.assertIn(scene, stats.task_results[-1].reason)
+                self.assertEqual(stats.task_results[-1].evidence, [unexpected.screenshot_path])
+                self.assertEqual(stats.battles_completed, 0)
+                self.assertEqual(stats.attempts, 2)
+                self.assertEqual([call.args[0] for call in self.session.observe.call_args_list],
+                                 ["launch-home-check", "collect-before"])
+                for action in (self.session.tap, self.session.click, self.session.click_template,
+                               self.session.back, self.session.swipe):
+                    action.assert_not_called()
+
+    def test_disabled_social_tasks_do_not_input_on_clan_chat(self) -> None:
+        runner = self.runner(("collect",))
+        chat = self.snapshot("clan_chat")
+        chat.observations["buttons"] = [
+            {"name": "send", "point": [500, 500], "text": "Send"},
+            {"name": "donate", "point": [200, 400], "text": "Donate"},
+        ]
+        self.session.last_snapshot = chat
+        self.session.observe.return_value = chat
+        stats = runner.run_profile("test")
+        self.assertEqual([(result.task, result.status) for result in stats.task_results],
+                         [("collect", "failed")])
+        self.assertIn("clan_chat", stats.task_results[0].reason)
+        self.assertEqual(stats.task_results[0].evidence, [chat.screenshot_path])
+        self.assertEqual([call.args[0] for call in self.session.observe.call_args_list], ["collect-before"])
+        for action in (self.session.tap, self.session.click, self.session.click_template,
+                       self.session.back, self.session.swipe):
+            action.assert_not_called()
+
+    def test_completed_maintenance_profile_never_observes_disabled_social_chat(self) -> None:
+        runner = self.runner(("launch", "collect"))
+        village = self.snapshot("village")
+        collect_frame = self.root / "collect-village.png"
+        collect_frame.write_bytes(b"collect-village")
+        collect = SceneSnapshot("village", .95, collect_frame, {
+            "resource_source": "village_inventory",
+            "resources": {"gold": 100, "elixir": 100, "dark_elixir": 100},
+            "collectibles": [],
+        })
+        chat_frame = self.root / "social-chat.png"
+        chat_frame.write_bytes(b"social-chat")
+        chat = SceneSnapshot("clan_chat", .95, chat_frame, {"buttons": [
+            {"name": "send", "point": [500, 500], "text": "Send"},
+            {"name": "donate", "point": [200, 400], "text": "Donate"},
+        ]})
+        frames = iter((village, collect))
+
+        def observe(*_args, **_kwargs):
+            self.session.last_snapshot = next(frames, chat)
+            return self.session.last_snapshot
+
+        self.session.observe.side_effect = observe
+        stats = runner.run_profile("test")
+        self.assertEqual([(result.task, result.status) for result in stats.task_results],
+                         [("launch", "succeeded"), ("collect", "skipped")])
+        self.assertEqual([call.args[0] for call in self.session.observe.call_args_list],
+                         ["launch-home-check", "collect-before"])
+        self.assertEqual((stats.attempts, stats.skipped), (1, 1))
+        self.assertEqual(stats.battles_completed, 0)
+        for action in (self.session.tap, self.session.click, self.session.click_template,
+                       self.session.back, self.session.swipe):
+            action.assert_not_called()
+
     def test_unknown_launch_scene_does_not_trigger_blind_recovery(self) -> None:
         runner = self.runner(("launch",))
         self.session.last_snapshot = self.snapshot("unknown", 0.0)

@@ -132,10 +132,10 @@ class BattleConfig:
         if (self.line_execution_mode not in {"verified", "continuous"}
                 or self.line_execution_mode == "continuous" and self.strategy != "edrag_line"):
             raise ConfigError("battle.line_execution_mode continuous requires edrag_line")
-        if (self.line_tactics not in {"single_edge", "two_edge_split"} or
+        if (self.line_tactics not in {"single_edge", "two_edge_split", "two_edge_probed_anchors"} or
                 self.line_tactics != "single_edge" and
                 (self.line_execution_mode != "continuous" or self.strategy != "edrag_line")):
-            raise ConfigError("battle.line_tactics two_edge_split requires continuous edrag_line")
+            raise ConfigError("battle.line_tactics two-edge modes require continuous edrag_line")
         if self.objective not in {"resources", "event", "clan_games"}:
             raise ConfigError("battle.objective must be resources, event or clan_games")
         if self.resource_filter is not None:

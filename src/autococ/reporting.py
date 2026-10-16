@@ -445,9 +445,12 @@ def summarize_run(stats: RunStats, *, save_decision_trace: bool = True) -> dict[
 def interrupted_battle_metrics(session) -> dict[str, object]:
     """Preserve issued inputs when cooperative stop prevents further observation."""
     line_receipt = getattr(session, "frozen_line_receipt", None)
-    if isinstance(line_receipt, dict) and line_receipt.get("mode") == "model_free_line_continuous":
+    if isinstance(line_receipt, dict) and line_receipt.get("mode") in {
+            "model_free_line_continuous", "model_free_line_probed_anchors"}:
         return {"deployment": line_receipt,
-                "line_execution": {"mode": "continuous", "status": "cancelled"}}
+                "line_execution": {"mode": ("two_edge_probed_anchors" if
+                                             line_receipt["mode"] == "model_free_line_probed_anchors"
+                                             else "continuous"), "status": "cancelled"}}
     receipt = getattr(session, "prepared_battle_receipt", None)
     if not isinstance(receipt, dict):
         return {}
