@@ -1112,13 +1112,60 @@ def test_real_050614_dark_background_keeps_complete_spent_card(tmp_path):
             _balloon_count(session, invalid_plan, snapshot, 0)
 
 
+def test_real_084232_spent_card_allows_textured_background(tmp_path):
+    """The card outline is exact even when the scene below it is not uniform."""
+    from autococ.images import read_frame
+    from autococ.vision import ScreenshotRecognizer
+
+    paths = {name: FIXTURES / f"probed_balloon_084232_{name}.png"
+             for name in ("before", "source", "pending", "spent")}
+    for path in paths.values():
+        provenance = json.loads(path.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+        assert provenance["client_version"] == "18.647.2"
+        assert provenance["retained_native_xyxy"] == [0, 1090, 2560, 1440]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == provenance["fixture_sha256"]
+    bbox = (335, 595, 423, 711)
+    pending = cv2.resize(read_frame(paths["pending"]), (1280, 720), interpolation=cv2.INTER_AREA)
+    assert _spent_balloon_dark_border(pending, bbox) is None
+    spent = cv2.resize(read_frame(paths["spent"]), (1280, 720), interpolation=cv2.INTER_AREA)
+    gray = cv2.cvtColor(spent, cv2.COLOR_BGR2GRAY)
+    below = gray[713:716, 343:415].mean(axis=0)
+    farther = gray[716:719, 343:415].mean(axis=0)
+    assert np.percentile(np.abs(below - farther), 95) > 5  # Reproduce old rejection.
+    assert np.max(np.abs(below - farther)) > 10
+    base, _ = frozen_base(tmp_path)
+    frame = replace(base.frame, frame_id=str(paths["source"]), screenshot_path=paths["source"])
+    base = replace(base, frame=frame, frame_sha256=_file_sha256(paths["source"]),
+                   toolbar_before_frame_id=str(paths["before"]),
+                   toolbar_before_sha256=_file_sha256(paths["before"]))
+    plan = SimpleNamespace(base=base, balloon_point=(379, 653), balloon_bbox=bbox)
+    recognizer = ScreenshotRecognizer()
+    recognizer.client_version = "18.647.2"
+    snapshot = SceneSnapshot("battle", .99, paths["spent"], {
+        "recognition_scope": "battle_hud", "fast_fallback": False,
+        "matched_reasons": ["two_current_hud_anchors"],
+        "ocr": [], "battle": {"slots": []}})
+    session = SimpleNamespace(last_snapshot=snapshot, recognizer=recognizer,
+                              client_version="18.647.2")
+    reading = _balloon_count(session, plan, snapshot, 0)
+    assert reading["count"] == 0 and reading["confidence"] >= .9
+    assert reading["portrait_score"] >= .92
+    assert reading["source_portrait_identity"]["unit_id"] == "balloon"
+    border = reading["current_card_border"]
+    assert border["method"] == "spent_balloon_versioned_bottom_shape"
+    assert border["core_max_error"] == 0
+    assert border["lower_rebound_min"] >= 7
+    assert border["background_jump_p95"] > 5
+
+
+@pytest.mark.parametrize("group", ("050614", "084232"))
 @pytest.mark.parametrize("damage", ("bottom_occluded", "bottom_truncated", "black_below",
                                      "left_corner", "right_corner", "left_side",
-                                     "shifted_bbox", "adjacent_card"))
-def test_real_050614_spent_shape_rejects_damage(damage):
+                                     "shifted_bbox"))
+def test_real_spent_shape_rejects_damage(damage, group):
     from autococ.images import read_frame
 
-    source = FIXTURES / "probed_balloon_050614_spent.png"
+    source = FIXTURES / f"probed_balloon_{group}_spent.png"
     image = cv2.resize(read_frame(source), (1280, 720), interpolation=cv2.INTER_AREA).copy()
     bbox = (335, 595, 423, 711)
     if damage == "bottom_occluded":
@@ -1133,11 +1180,30 @@ def test_real_050614_spent_shape_rejects_damage(damage):
         image[704:713, 414:423] = (40, 40, 40)
     elif damage == "left_side":
         image[625:695, 335:337] = (40, 40, 40)
-    elif damage == "shifted_bbox":
-        bbox = (336, 595, 424, 711)
     else:
-        bbox = (432, 595, 520, 711)
+        bbox = (336, 595, 424, 711)
     assert _spent_balloon_dark_border(image, bbox) is None
+
+
+@pytest.mark.parametrize("group", ("050614", "084232"))
+def test_real_spent_count_proof_rejects_adjacent_card(tmp_path, group):
+    """A neighboring card may have a valid border; it is still not balloon x0."""
+    from autococ.vision import ScreenshotRecognizer
+
+    paths = {name: FIXTURES / f"probed_balloon_{group}_{name}.png"
+             for name in ("before", "source", "spent")}
+    base, _ = frozen_base(tmp_path)
+    frame = replace(base.frame, frame_id=str(paths["source"]), screenshot_path=paths["source"])
+    base = replace(base, frame=frame, frame_sha256=_file_sha256(paths["source"]),
+                   toolbar_before_frame_id=str(paths["before"]),
+                   toolbar_before_sha256=_file_sha256(paths["before"]))
+    plan = SimpleNamespace(base=base, balloon_point=(476, 653), balloon_bbox=(432, 595, 520, 711))
+    recognizer = ScreenshotRecognizer()
+    recognizer.client_version = "18.647.2"
+    snapshot = SceneSnapshot("battle", .99, paths["spent"], {"ocr": [], "battle": {"slots": []}})
+    session = SimpleNamespace(last_snapshot=snapshot, recognizer=recognizer, client_version="18.647.2")
+    with pytest.raises(FlowError):
+        _balloon_count(session, plan, snapshot, 0)
 
 
 def test_real_050614_spent_shape_rejects_changed_template(monkeypatch, tmp_path):

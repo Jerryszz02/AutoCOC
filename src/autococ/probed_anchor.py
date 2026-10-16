@@ -409,8 +409,10 @@ def _spent_balloon_dark_border(current: Any, bbox: tuple[int, int, int, int]) ->
     farther = gray[bottom + 5:bottom + 8, interior].mean(axis=0)
     rebound = below - trough
     background_jump = np.abs(below - farther)
-    if (np.any(rebound < 7) or np.percentile(background_jump, 95) > 5 or
-            np.any(background_jump > 10)):
+    # Rows beyond the closed outline belong to the moving battlefield. Their
+    # texture is diagnostic only: the versioned core, connected sides/corners
+    # and contrast immediately below the stroke already prove the card edge.
+    if np.any(rebound < 7):
         return None
     return {"method": "spent_balloon_versioned_bottom_shape", "left_edge": left_edge,
             "right_edge": right_edge, "dark_row": bottom,

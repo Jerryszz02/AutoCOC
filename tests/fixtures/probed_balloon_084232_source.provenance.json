@@ -1,0 +1,20 @@
+{
+  "client_version": "18.647.2",
+  "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-084232-715988-c9c08d5e\\frames\\00013-line-boundary.png",
+  "source_sha256": "37274ea6f917fb2bd1b16cbec817bb124887bc5d83805075565e687d3ec65fbf",
+  "fixture_sha256": "2a560487b960cfafd1d7b2b86ef4167ba8cabb12682a35c9a33f1538478181da",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "retained_native_xyxy": [
+    0,
+    1090,
+    2560,
+    1440
+  ],
+  "transform": "Decode BGR with OpenCV IMREAD_COLOR; overwrite native rows y=0..1089 inclusive with BGR (50,115,77); retain x=0..2559,y=1090..1439; encode PNG with cv2.imwrite.",
+  "purpose": "Current-version lower battle toolbar only; upper game/player scene anonymized, not a full-scene fixture.",
+  "card_state": "source",
+  "source_group": "20261016-084232-715988-c9c08d5e"
+}

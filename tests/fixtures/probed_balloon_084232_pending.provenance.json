@@ -1,0 +1,20 @@
+{
+  "client_version": "18.647.2",
+  "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-084232-715988-c9c08d5e\\frames\\00018-probed-anchor-1-post-0.png",
+  "source_sha256": "5acd1c219905cc554f8005961675e6ebe1c322916a6376feb38b467bfb71b9df",
+  "fixture_sha256": "54252d8f160be9dc1ccfab72545f340a1c3d4da8848ec574bb78c7e5f23a9330",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "retained_native_xyxy": [
+    0,
+    1090,
+    2560,
+    1440
+  ],
+  "transform": "Decode BGR with OpenCV IMREAD_COLOR; overwrite native rows y=0..1089 inclusive with BGR (50,115,77); retain x=0..2559,y=1090..1439; encode PNG with cv2.imwrite.",
+  "purpose": "Current-version lower battle toolbar only; upper game/player scene anonymized, not a full-scene fixture.",
+  "card_state": "pending",
+  "source_group": "20261016-084232-715988-c9c08d5e"
+}
