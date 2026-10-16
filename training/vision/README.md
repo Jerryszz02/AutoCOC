@@ -1,5 +1,7 @@
 # 本地视觉训练工具
 
+2026-10-16 扩充后的大本营单类 Agent 原型为 17 张、16 组，14 train / 2 val / 1 test。新增 6 张来自 5 个会话，只加入 train；旧 11 张的分配和字节保留，命中历史 test 近似哈希的整个会话 3 图排除。固定原配方的 YOLO11n/YOLO26n 分别完成 47/38 epoch、ONNX 导出与 val parity 2/2；阈值 0.7 下分别为 1 TP/1 FN 与 0 TP/2 FN，AP50/AP50–95 为 1.0000/0.4015 与 0.5187/0.3080。两张 val 不能支持正式质量结论，模型继续禁用。首个 OOM/MemoryError 中断目录保留，新尝试分别使用独立目录，源码及输入前后不变。比较报告为 `E:/projects/AutoCOC-training/reports/building-current-th-expanded-postb11-20261016-v1/two-model-comparison-resume-a-root-v1.json`；哈希、schema 和格式转换之外没有 test 语义查看、推理或调参。
+
 2026-10-16 新增当前 18.647.2 的大本营单类 Agent 原型，11 张/11 个来源组按 seed 42 冻结为 8 train / 2 val / 1 test。相同 640 输入、batch 2、最多 60 epoch、patience 20 下，YOLO11n 实际训练 57 epoch，YOLO26n 训练 60 epoch；两者完成 ONNX 导出，全部 2 张 val 的数值一致性通过。运行点阈值 0.7 下两者均 0 TP / 2 FN，不能启用；独立 AP50 / AP50–95 分别为 1.0000 / 0.5030 和 0.2525 / 0.1017，只是两张 val 的原型结果。test 仅用于工具的快照完整性/标签 schema 校验，未用于模型推理、指标、人工查看或调参。源码与输入绑定均固定于 `b8b427e`，比较报告位于 `E:/projects/AutoCOC-training/reports/building-current-th-only-prototype-20261016-v1/two-model-comparison-root-v1.json`；模型保持 `prototype_only/unvalidated`，不与下述旧范围实验直接比较。
 
 S/R 训练配方 `trainer_recipe_version=2` 在头部训练时同时冻结主干参数和 BatchNorm 运行统计；进入微调时重置早停计数，保留全局最佳权重，连续 7 次微调验证无改善才早停。配方写入运行配置和恢复签名，旧配方 checkpoint 不能混用 resume；旧运行和导出产物保留用于对照。针对性验证为 17 passed / 1 skipped（未启用本次不涉及的 B 训练集成），包含真实张量训练、阶段边界恢复和 S/R 合成训练导出；这些结果只证明程序行为。

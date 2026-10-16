@@ -30,6 +30,7 @@ S/R 训练配方现固定为版本 2：头部阶段冻结主干参数和 BatchNo
 
 ## 本次核对与证据边界
 
+- 大本营 Agent 原型扩充为 17 张、16 组，保持旧 val/test，新增 6 张仅用于 train；两个架构的训练、导出与 val 对照均已完成，但仍有漏检且缺正式人工数据。原件和数量以[训练工具说明](../../training/vision/README.md)与[当前进度](../PROGRESS.md)为准，不更改正式准入条件。
 - 对照上述计划、[模型加载器](../../src/autococ/model_vision.py)、[评估脚本](../../scripts/evaluate_model_package.py)、[战前执行器](../../src/autococ/prepared_battle.py)、[Jev 适配器](../../src/autococ/jev.py)及已有测试，区分首版代码和后续目标。
 - 主工作区旧 `训练素材/00_说明与索引/素材清单.jsonl` 的 146 条保留不改写，旧清单 `training_ready=false`。本轮另建原型标注、哈希校验及组级快照，并采集有客户端版本的新图；不把新产物反写成旧清单早已完成的事实。
 - `reports/vision-timing-20260927/` 与 `reports/capture-uncompressed-20260927/` 是历史测速材料；不将其当作当前模型或完整链路的时延验收。
