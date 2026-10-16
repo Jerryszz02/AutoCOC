@@ -1,0 +1,56 @@
+{
+  "client_version": "18.647.2",
+  "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-044553-862923-89227bb5\\frames\\00002-collect-before.png",
+  "source_sha256": "cc902516728a4038e7d5953ed2b68ccce8280e51b96dbe0bb5cc11536a3654ec",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "fixture_resolution": [
+    1280,
+    720
+  ],
+  "derivation": "Decode original PNG in BGR with cv2.IMREAD_COLOR; resize to 1280x720 using cv2.INTER_AREA; fill destination BGR pixels with [0,0,0]; copy each retained ROI [left,top,right,bottom] in listed order from resized source; encode PNG losslessly with cv2.imencode.",
+  "fixtures": [
+    {
+      "file": "collect_bubbles_current_18_647_2_044553.png",
+      "sha256": "f0687f4b5660423b82cf28ef764f342784ab40fff33d660563e432a6e37f4f1a",
+      "retained_rois_1280": [
+        [
+          640,
+          155,
+          980,
+          425
+        ]
+      ],
+      "purpose": "positive_real_bubbles"
+    },
+    {
+      "file": "collect_hud_controls_current_18_647_2_044553.png",
+      "sha256": "65d0086eea36e9afa42513949c7edb5f47f6dd78cc5c80544dfb779e86ebf99f",
+      "retained_rois_1280": [
+        [
+          1000,
+          0,
+          1280,
+          300
+        ],
+        [
+          0,
+          575,
+          145,
+          720
+        ],
+        [
+          1050,
+          575,
+          1280,
+          720
+        ]
+      ],
+      "purpose": "negative_real_hud_bottom_fragments_only"
+    }
+  ],
+  "review_status": "agent_visual_pending",
+  "formal_acceptance": false
+}

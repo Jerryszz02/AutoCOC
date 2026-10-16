@@ -766,42 +766,129 @@ def _deploy_continuous_line(session, current, receipt, context, hero_manifest, d
     return post
 
 
+def _current_full_header_count(snapshot: SceneSnapshot, troop: dict,
+                               client_version: str) -> dict | None:
+    """Use the full recognizer's OCR only beside its own closed current card.
+
+    ``ScreenshotRecognizer.recognize`` builds ``ocr`` and ``battle.slots`` from
+    one screenshot path in the same call. Neither the earlier army count nor a
+    remembered BattleObserver card supplies this quantity.
+    """
+    if (client_version != "18.647.2" or snapshot.scene not in {"enemy_village", "battle"}
+            or type(snapshot.confidence) not in (int, float)
+            or not math.isfinite(snapshot.confidence) or snapshot.confidence < .8
+            or snapshot.observations.get("recognition_scope", "full") != "full"
+            or snapshot.observations.get("baseline_resolution") not in ([1280, 720], (1280, 720))):
+        return None
+    box = troop.get("bbox")
+    if (not isinstance(box, (list, tuple)) or len(box) != 4
+            or any(type(value) is not int for value in box)):
+        return None
+    left, top, right, bottom = box
+    if not (0 <= left < right <= 1280 and 575 <= top < bottom <= 720):
+        return None
+    battle = snapshot.observations.get("battle")
+    slots = battle.get("slots") if isinstance(battle, dict) else None
+    if not isinstance(slots, list):
+        return None
+    closed = [slot for slot in slots if isinstance(slot, dict)
+              and slot.get("kind") == "troop" and slot.get("unit_id") == troop.get("unit_id")
+              and slot.get("bbox") == list(box)
+              and isinstance(slot.get("evidence"), dict)
+              and slot["evidence"].get("method") == "independent_card_border"]
+    if len(closed) != 1:
+        return None
+    card = closed[0]
+    identity = card["evidence"].get("identity")
+    card_score = card.get("confidence")
+    identity_score = identity.get("confidence") if isinstance(identity, dict) else None
+    if (not isinstance(identity, dict) or identity.get("unit_id") != troop.get("unit_id")
+            or identity.get("version_verified") is not True
+            or identity.get("template_client_version") != client_version
+            or type(card_score) not in (int, float) or not math.isfinite(card_score)
+            or card_score < .94 or type(identity_score) not in (int, float)
+            or not math.isfinite(identity_score) or identity_score < .94):
+        return None
+    counts = _snapshot_header_numbers(snapshot, box)
+    if len(counts) != 1:
+        return None
+    count, item = counts[0]
+    # The detector's count is a consistency check, never a source of the
+    # recovered quantity. It may be absent, but may not contradict the OCR.
+    if type(card.get("count")) is int and card["count"] != count:
+        return None
+    return {"count": count, "text": item["text"], "confidence": item["confidence"],
+            "bbox": list(item["bbox"]), "frame": str(snapshot.screenshot_path),
+            "source": "current_snapshot_full_ocr"}
+
+
+def _snapshot_header_numbers(snapshot: SceneSnapshot, bbox: list[int] | tuple[int, ...]) -> list[tuple[int, dict]]:
+    texts = snapshot.observations.get("ocr")
+    if not isinstance(texts, list):
+        return []
+    left, top, right, _ = bbox
+    numbers = []
+    for item in texts:
+        if not isinstance(item, dict):
+            continue
+        box, confidence = item.get("bbox"), item.get("confidence")
+        if (not isinstance(box, (list, tuple)) or len(box) != 4
+                or any(type(value) not in (int, float) or not math.isfinite(value) for value in box)
+                or not (left <= box[0] < box[2] <= right and
+                        max(0, top - 16) <= box[1] < box[3] <= min(720, top + 40))
+                or type(confidence) not in (int, float) or not math.isfinite(confidence)
+                or not .95 <= confidence <= 1):
+            continue
+        match = re.fullmatch(r"[xX×]\s*([0-9]+)", str(item.get("text", "")).strip())
+        if match is not None:
+            numbers.append((int(match[1]), item))
+    return numbers
+
+
 def _verified_line_card_reading(session: GameSession, snapshot: SceneSnapshot, troop: dict) -> dict:
     """Bind an OCR fallback to this frame's versioned troop portrait.
 
     The fast count reader normally proves both portrait and quantity. A small
-    `x1` may fall just below its line-OCR threshold while full region OCR still
-    reads it. That fallback is accepted only after independent same-frame
-    battle-template identity, never from the bare count or slot position.
+    `x1` may fail local OCR even when the current full screenshot OCR reads it.
+    Fallbacks still need independent same-frame card geometry and identity;
+    neither a previous count nor a card position supplies the quantity.
     """
     reading = session.recognizer.recognize_slot_count(snapshot.screenshot_path, tuple(troop["bbox"]))
     count, confidence = reading.get("count"), reading.get("confidence")
     recovered_header = False
+    full_header = None
     if reading.get("reason") == "header_count_unverified" and count is None:
         # The thresholded line OCR can hallucinate text over a card outline.
-        # Recover only one unthresholded, high-confidence explicit count; any
-        # other full-image read or conflicting thresholded number still rejects.
+        # Try its unthresholded original first; only then consider the full
+        # OCR and independently closed card of this very same snapshot.
         readings = reading.get("readings")
         originals = [item for item in readings if item.get("source") == "header_region_ocr"] if isinstance(readings, list) else []
-        if len(originals) != 1:
+        if len(originals) == 1:
+            original = originals[0]
+            match = re.fullmatch(r"[xX×]\s*([0-9]+)", str(original.get("text", "")).strip())
+            original_confidence = original.get("confidence")
+            if (match is not None and type(original_confidence) in (int, float)
+                    and math.isfinite(original_confidence) and original_confidence >= .95):
+                count, confidence = int(match[1]), original_confidence
+                recovered_header = True
+        if not recovered_header:
+            full_header = _current_full_header_count(snapshot, troop, session.client_version)
+            if full_header is None:
+                return reading
+            count, confidence = full_header["count"], full_header["confidence"]
+            recovered_header = True
+        if not isinstance(readings, list) or any(not isinstance(item, dict) for item in readings):
             return reading
-        original = originals[0]
-        match = re.fullmatch(r"[xX×]\s*([0-9]+)", str(original.get("text", "")).strip())
-        original_confidence = original.get("confidence")
-        if (match is None or not isinstance(original_confidence, (int, float))
-                or not math.isfinite(original_confidence) or original_confidence < .95):
-            return reading
-        count = int(match[1])
         for item in readings:
-            if item is original:
-                continue
-            if item.get("source") != "header_threshold_line":
+            if item.get("source") not in {"header_region_ocr", "header_threshold_line"}:
                 return reading
             other = re.fullmatch(r"[xX×]\s*([0-9]+)", str(item.get("text", "")).strip())
             if other is not None and int(other[1]) != count:
                 return reading
-        confidence = original_confidence
-        recovered_header = True
+        if full_header is None and any(item is not originals[0] and
+                                       item.get("source") != "header_threshold_line"
+                                       for item in readings):
+            return reading
     if reading.get("reason") == "header_count_unverified" and not recovered_header:
         return reading
     if (reading.get("reason") not in {"explicit_header_count", "header_count_unverified"} or
@@ -812,6 +899,9 @@ def _verified_line_card_reading(session: GameSession, snapshot: SceneSnapshot, t
         return reading
     if not isinstance(confidence, (int, float)) or not math.isfinite(confidence) or confidence < .9:
         return reading
+    if any(value != count for value, _ in _snapshot_header_numbers(snapshot, troop["bbox"])):
+        return {**reading, "count": None, "confidence": 0.0,
+                "portrait_score": None, "reason": "strong_count_conflict"}
     from .images import read_frame
     from .unit_catalog import recognize_card_identity
     import cv2
@@ -825,9 +915,11 @@ def _verified_line_card_reading(session: GameSession, snapshot: SceneSnapshot, t
     if (identity["version_verified"] and identity["unit_id"] == troop["unit_id"]
             and isinstance(identity["confidence"], (int, float)) and identity["confidence"] >= .94):
         return {**reading, "count": count, "confidence": confidence,
-                "reason": "portrait_bound_full_header_count" if recovered_header else reading["reason"],
+                "reason": ("portrait_bound_current_full_header_count" if full_header is not None else
+                           "portrait_bound_full_header_count" if recovered_header else reading["reason"]),
                 "portrait_score": identity["confidence"],
-                "portrait_source": "current_frame_versioned_battle_template", "portrait_identity": identity}
+                "portrait_source": "current_frame_versioned_battle_template", "portrait_identity": identity,
+                **({"full_header": full_header} if full_header is not None else {})}
     return reading
 
 

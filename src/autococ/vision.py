@@ -150,7 +150,7 @@ def detect_collectibles(
         original = read_template(template_path)
         if original is None:
             raise SceneError(f"Unable to decode collection template: {template_path}")
-        for size in (0.8, 0.9, 1.0, 1.1, 1.2):
+        for size in (0.8, 0.82, 0.9, 1.0, 1.1, 1.2):
             target = (
                 max(2, round(original.shape[1] * width / 1280 * size)),
                 max(2, round(original.shape[0] * height / 720 * size)),

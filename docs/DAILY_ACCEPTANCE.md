@@ -8,6 +8,10 @@
 
 本轮客户端为 `18.647.2` / `180647003`，MuMu 实例 1、2560×1440，代码在未合并的 `agent/complete-daily-vision`。本节证据均位于本机 `E:/projects/AutoCOC/reports/completion-20261015/`。它们跨开发修复，不拼成同一冻结版本的连续验收。
 
+04:41 数量漏读及 04:45 收集漏检修复的十六模块组合为 **605 passed、29 skipped、345 subtests passed**（112.82 秒），源码和夹具哈希一致；四张匿名夹具原图重建通过，尚待新现场窗口。证据为 `pytest-count-collect-final-20261016.json`、`current-count-collect-assets-v1.json`，收集倍率诊断元数据以 `diagnostics/collect-044553-scale082-verification-v2.json` 为准；v1 中原图哈希抄写错误的原件保留，v2 未伪造重跑耗时。
+
+`71eefbc` 的 `probes/20261016-043958-lightning-info` 完成 8 次只读输入（40.477 秒），自动读取 12 级雷电详情并返回主村，四资源相同。军队全量比较仍为 `not_established`：后帧飞龙公爵头像身份未过阈值，且援军内容未知。`live/run-20261016-044100-672854-5861f24a.json` 在投兵前因飞龙局部数量 OCR 缺证失败，0 投兵、0 技能并回村；原 `inventory_reconciled=false` 保留，原报告未写入 `resources_after` 字段。两张实际回村帧读数均为 13,640,823 / 13,730,124 / 352,433 / 217，只有 1,700 金币搜索费，累计开发费用 57,800。`live/run-20261016-044553-862923-89227bb5.json` 的收集任务错误地跳过为 `no_collectibles`；实际前帧可见金矿、圣水及黑油气泡，零点击且库存不变，不计正确无机会分支。三次运行源码均未变，父子入口均绑定该工作树；结果不能升级为正式验收。
+
 自动大守护者技能、容量局部读数及训练脚本入口补丁的二十七模块离线组合为 **702 passed、83 skipped、513 subtests passed**，源码与夹具哈希未变（`pytest-automatic-warden-final-r2-20261016.json`）。首次组合的单项新肖像来源校验失败已单独保留，修复后仍逐项核对原图哈希和像素。这些结果不计作实机技能或连续战斗通过。
 
 | 证据 | 实际结果 |

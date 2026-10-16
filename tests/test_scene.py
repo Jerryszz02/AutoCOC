@@ -1,3 +1,5 @@
+import hashlib
+import json
 import unittest
 
 from pathlib import Path
@@ -1217,6 +1219,39 @@ class SceneTests(unittest.TestCase):
 
 
 class CollectionVisionTests(unittest.TestCase):
+    def test_current_client_real_bubbles_need_observed_scale(self) -> None:
+        root = Path(__file__).parent / "fixtures"
+        provenance = json.loads((root / "collect_bubbles_current_18_647_2_044553.provenance.json")
+                                .read_text(encoding="utf-8"))
+        self.assertEqual(provenance["source_sha256"],
+                         "cc902516728a4038e7d5953ed2b68ccce8280e51b96dbe0bb5cc11536a3654ec")
+        fixture = provenance["fixtures"][0]
+        path = root / fixture["file"]
+        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), fixture["sha256"])
+        matches = detect_collectibles(path)
+        self.assertEqual(sorted((item["resource"], tuple(item["point"])) for item in matches),
+                         sorted([
+                             ("gold", (748, 379)), ("gold", (779, 357)),
+                             ("gold", (935, 240)), ("gold", (810, 334)),
+                             ("gold", (873, 287)), ("gold", (904, 264)),
+                             ("elixir", (685, 321)), ("elixir", (779, 251)),
+                             ("elixir", (841, 204)), ("elixir", (748, 274)),
+                             ("dark_elixir", (904, 306)),
+                             ("dark_elixir", (873, 329)),
+                             ("dark_elixir", (935, 282)),
+                         ]))
+        self.assertTrue(all(item["scale"] == .82 and item["confidence"] >= .88
+                            for item in matches))
+
+    def test_current_client_actual_hud_and_bottom_fragments_are_excluded(self) -> None:
+        root = Path(__file__).parent / "fixtures"
+        provenance = json.loads((root / "collect_bubbles_current_18_647_2_044553.provenance.json")
+                                .read_text(encoding="utf-8"))
+        fixture = provenance["fixtures"][1]
+        path = root / fixture["file"]
+        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), fixture["sha256"])
+        self.assertEqual(detect_collectibles(path), [])
+
     def test_collectibles_scale_and_exclude_hud_and_building_menu(self) -> None:
         import cv2
         import numpy as np

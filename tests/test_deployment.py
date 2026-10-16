@@ -1,5 +1,6 @@
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import asdict, replace
+import hashlib
 import json
 import os
 from datetime import datetime
@@ -589,6 +590,160 @@ class DeploymentTests(unittest.TestCase):
                 recognizer.recognize_slot_count.return_value = raw
                 session.client_version = "unknown"
                 self.assertNotIn("portrait_score", _verified_line_card_reading(session, snapshot, dragon))
+
+    @staticmethod
+    def _current_dragon_header_fixture(directory: Path, source: str):
+        import cv2
+        import numpy as np
+
+        fixture = Path(__file__).parent / "fixtures" / f"battle_bar_dragon_{source}_18_647_2.png"
+        crop = cv2.imread(str(fixture))
+        assert crop is not None and crop.shape == (300, 930, 3)
+        image = np.zeros((1440, 2560, 3), dtype=np.uint8)
+        image[1140:1440, 170:1100] = crop
+        path = directory / f"{source}.png"
+        assert cv2.imwrite(str(path), image)
+        recognizer = ScreenshotRecognizer(provider=RapidOCRProvider())
+        recognizer.client_version = "18.647.2"
+        resolution = recognizer._resolution(path)
+        texts = [recognizer._baseline_result(item, resolution)
+                 for item in recognizer.provider.recognize(path)]
+        battle = recognizer._battle_observation(path, texts, "enemy_village")
+        snapshot = SceneSnapshot("enemy_village", .95, path, {
+            "ocr": [asdict(item) for item in texts], "battle": battle,
+            "baseline_resolution": [1280, 720], "source_resolution": [2560, 1440],
+            "recognition_scope": "full",
+        })
+        dragon = next(card for card in battle["slots"] if card.get("unit_id") == "dragon")
+        session = SimpleNamespace(recognizer=recognizer, client_version="18.647.2")
+        return session, snapshot, dragon
+
+    def test_current_dragon_full_header_fallback_replays_real_local_ocr_failure(self):
+        with TemporaryDirectory() as directory:
+            session, snapshot, dragon = self._current_dragon_header_fixture(
+                Path(directory), "weak_044100")
+            local = session.recognizer.recognize_slot_count(
+                snapshot.screenshot_path, tuple(dragon["bbox"]))
+            self.assertEqual(local["reason"], "header_count_unverified")
+            self.assertIsNone(local["count"])
+            self.assertEqual(dragon["evidence"]["method"], "independent_card_border")
+            self.assertEqual(dragon["evidence"]["count"]["text"], "x1")
+            verified = _verified_line_card_reading(session, snapshot, dragon)
+            self.assertEqual(verified["count"], 1)
+            self.assertEqual(verified["reason"], "portrait_bound_current_full_header_count")
+            self.assertGreaterEqual(verified["confidence"], .95)
+            self.assertGreaterEqual(verified["portrait_score"], .94)
+            self.assertEqual(verified["full_header"]["frame"], str(snapshot.screenshot_path))
+
+            old_session, old_snapshot, old_dragon = self._current_dragon_header_fixture(
+                Path(directory), "old_035742")
+            old_local = old_session.recognizer.recognize_slot_count(
+                old_snapshot.screenshot_path, tuple(old_dragon["bbox"]))
+            self.assertEqual(old_local["count"], 1)
+            self.assertEqual(old_local["reason"], "explicit_header_count")
+            old_verified = _verified_line_card_reading(old_session, old_snapshot, old_dragon)
+            self.assertEqual(old_verified["count"], 1)
+            self.assertEqual(old_verified["reason"], "explicit_header_count")
+            self.assertNotIn("full_header", old_verified)
+
+    def test_current_dragon_header_fixtures_are_bound_to_real_crops(self):
+        import cv2
+        import numpy as np
+
+        for source in ("weak_044100", "old_035742"):
+            with self.subTest(source=source):
+                fixture = Path(__file__).parent / "fixtures" / f"battle_bar_dragon_{source}_18_647_2.png"
+                provenance = json.loads(fixture.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+                self.assertEqual(provenance["client_version"], "18.647.2")
+                self.assertEqual(provenance["crop_native_xyxy"], [170, 1140, 1100, 1440])
+                self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(),
+                                 provenance["fixture_sha256"])
+                original = Path(__file__).resolve().parents[1] / provenance["source"]
+                if original.is_file():
+                    self.assertEqual(hashlib.sha256(original.read_bytes()).hexdigest(),
+                                     provenance["source_sha256"])
+                    pixels = cv2.imread(str(original))[1140:1440, 170:1100]
+                    self.assertTrue(np.array_equal(cv2.imread(str(fixture)), pixels))
+
+    def test_current_dragon_full_header_fallback_rejects_conflict_and_unbound_sources(self):
+        import cv2
+
+        with TemporaryDirectory() as directory:
+            session, snapshot, dragon = self._current_dragon_header_fixture(
+                Path(directory), "weak_044100")
+            original = session.recognizer.recognize_slot_count
+
+            def rejected(*, snapshot=snapshot, dragon=dragon):
+                reading = _verified_line_card_reading(session, snapshot, dragon)
+                self.assertNotIn("portrait_score", reading)
+
+            # A preceding roster count is a plan, never a substitute for this
+            # frame's OCR. The strong x1 on the adjacent baby-dragon card is not
+            # the dragon's quantity either.
+            without_current_ocr = replace(snapshot, observations={**snapshot.observations,
+                "ocr": [item for item in snapshot.observations["ocr"]
+                        if not (item.get("bbox") and 180 < item["bbox"][0] < 235
+                                and item["bbox"][1] > 570)]})
+            rejected(snapshot=without_current_ocr)
+            strong = next(item for item in snapshot.observations["ocr"]
+                          if item.get("text") == "x1" and item.get("bbox")
+                          and 180 < item["bbox"][0] < 235 and item["bbox"][1] > 570)
+            for changed in (
+                {**strong, "text": "x2"},
+                {**strong, "confidence": .89},
+                {**strong, "bbox": [240, 594, 269, 621]},
+            ):
+                with self.subTest(ocr=changed):
+                    candidate = replace(snapshot, observations={**snapshot.observations,
+                        "ocr": [changed]})
+                    rejected(snapshot=candidate)
+            duplicate = replace(snapshot, observations={**snapshot.observations,
+                "ocr": [*snapshot.observations["ocr"], {**strong, "bbox": [193, 594, 226, 621]}]})
+            rejected(snapshot=duplicate)
+            conflict = original(snapshot.screenshot_path, tuple(dragon["bbox"]))
+            conflict["readings"].append({"source": "header_threshold_line", "text": "x2",
+                                         "confidence": .97})
+            with patch.object(session.recognizer, "recognize_slot_count", return_value=conflict):
+                rejected()
+            old_session, old_snapshot, old_dragon = self._current_dragon_header_fixture(
+                Path(directory), "old_035742")
+            old_local = old_session.recognizer.recognize_slot_count(
+                old_snapshot.screenshot_path, tuple(old_dragon["bbox"]))
+            self.assertEqual(old_local["count"], 1)
+            full_conflict = replace(old_snapshot, observations={**old_snapshot.observations,
+                "ocr": [{**strong, "text": "x2", "bbox": [194, 594, 226, 621]}]})
+            old_rejected = _verified_line_card_reading(old_session, full_conflict, old_dragon)
+            self.assertEqual(old_rejected["reason"], "strong_count_conflict")
+            self.assertIsNone(old_rejected["count"])
+            rejected(dragon={**dragon, "unit_id": "baby_dragon"})
+            session.client_version = "unknown"
+            rejected()
+            session.client_version = "18.647.2"
+            no_border = replace(snapshot, observations={**snapshot.observations,
+                "battle": {**snapshot.observations["battle"], "slots": [
+                    item for item in snapshot.observations["battle"]["slots"]
+                    if item.get("unit_id") != "dragon"]}})
+            rejected(snapshot=no_border)
+            not_full = replace(snapshot, observations={**snapshot.observations,
+                "recognition_scope": "troop_count"})
+            rejected(snapshot=not_full)
+
+            # Re-run the real current card detector after removing its bottom
+            # edge; the header OCR and portrait alone cannot close the card.
+            image = cv2.imread(str(snapshot.screenshot_path))
+            image[1402:1440, 284:460] = 0
+            damaged = Path(directory) / "missing-bottom.png"
+            self.assertTrue(cv2.imwrite(str(damaged), image))
+            resolution = session.recognizer._resolution(damaged)
+            texts = [session.recognizer._baseline_result(item, resolution)
+                     for item in session.recognizer.provider.recognize(damaged)]
+            damaged_battle = session.recognizer._battle_observation(damaged, texts, "enemy_village")
+            self.assertFalse(any(item.get("unit_id") == "dragon"
+                                 for item in damaged_battle["slots"]))
+            rejected(snapshot=SceneSnapshot("enemy_village", .95, damaged, {
+                "ocr": [asdict(item) for item in texts], "battle": damaged_battle,
+                "baseline_resolution": [1280, 720], "source_resolution": [2560, 1440],
+                "recognition_scope": "full"}))
 
     def test_boundary_error_reports_unverified_card_before_terrain(self):
         session = FakeSession(self.clock, [card(count=1)])
