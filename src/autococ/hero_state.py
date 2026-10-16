@@ -185,7 +185,25 @@ def recognize_hero_state(
             if health is not None:
                 break
     evidence["health_bar"] = health
-    if health is not None:
+    yellow_health = None
+    if client_version == "18.647.2" and unit_id == "grand_warden" and health is None:
+        # This client's sampled Warden card can show yellow HP after its
+        # initial green phase. Recheck the portrait and closed card in this
+        # exact frame before accepting colour inside the card as live HP.
+        located = locate_current_deployed_hero_card(path, unit_id, client_version=client_version)
+        evidence["closed_card"] = located
+        if located is not None and tuple(located["bbox"]) == box:
+            for py in range(592, 606):
+                for offset, width in ((5, 78), (8, 72)):
+                    if left + offset + 1 + width > right + 2:
+                        continue
+                    yellow_health = _yellow_health_bar(hsv, gray, [left + offset, py], frame_width=width)
+                    if yellow_health is not None:
+                        break
+                if yellow_health is not None:
+                    break
+    evidence["yellow_health_bar"] = yellow_health
+    if health is not None or yellow_health is not None:
         result.update(state="deployed", deployed=True, defeated=False)
     elif selected is not None:
         result["state"] = "selected"
@@ -197,7 +215,8 @@ def recognize_hero_state(
         if unit_id != "grand_warden" or health is None:
             evidence["ability_phase_reason"] = "current_warden_equipment_or_live_hp_unverified"
             return result
-        located = locate_current_deployed_hero_card(path, unit_id, client_version=client_version)
+        located = evidence.get("closed_card") or locate_current_deployed_hero_card(
+            path, unit_id, client_version=client_version)
         evidence["closed_card"] = located
         if located is None or tuple(located["bbox"]) != box:
             evidence["ability_phase_reason"] = "current_warden_card_not_independently_closed"
@@ -478,4 +497,35 @@ def _health_bar(hsv, gray, pet_bbox: list[int], *, frame_width: int = 78) -> dic
         return {"method": "green_fill_enclosed_by_dark_hp_frame", "fill_bbox": [gx, gy, gx + int(width), gy + int(height)],
                 "frame_span": [left, gy - 3, right, gy + int(height) + 3],
                 "frame_support": [top_support, bottom_support, *sides]}
+    return None
+
+
+def _yellow_health_bar(hsv, gray, pet_bbox: list[int], *, frame_width: int = 78) -> dict | None:
+    """The sampled current Warden's yellow fill inside its own dark HP frame."""
+    import cv2
+    import numpy as np
+
+    px, py = pet_bbox[:2]
+    left, top, right, bottom = px + 1, py - 22, px + 1 + frame_width, py - 1
+    if left < 1 or right >= hsv.shape[1] or top < 3:
+        return None
+    yellow = cv2.inRange(hsv[top:bottom, left:right], np.array([13, 170, 130]),
+                         np.array([29, 255, 255]))
+    _, _, stats, _ = cv2.connectedComponentsWithStats(yellow)
+    for x, y, width, height, area in stats[1:]:
+        if not (15 <= width <= 76 and 4 <= height <= 11 and area / (width * height) >= .85 and x <= 6):
+            continue
+        gx, gy = left + int(x), top + int(y)
+        top_support = max(float((gray[row, left + 1:right - 2] < 65).mean()) for row in range(gy - 3, gy))
+        bottom_support = max(float((gray[row, left + 1:right - 2] < 65).mean())
+                             for row in range(gy + height, gy + height + 3))
+        sides = [max(float((gray[gy:gy + height, column] < 65).mean()) for column in columns)
+                 for columns in (range(left - 1, left + 3), range(right - 5, right + 1))]
+        if min(top_support, bottom_support, *sides) < .85:
+            continue
+        return {"method": "yellow_fill_enclosed_by_dark_hp_frame",
+                "fill_bbox": [gx, gy, gx + int(width), gy + int(height)],
+                "frame_span": [left, gy - 3, right, gy + int(height) + 3],
+                "frame_support": [top_support, bottom_support, *sides],
+                "fill_density": round(float(area / (width * height)), 5)}
     return None

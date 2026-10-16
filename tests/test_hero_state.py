@@ -14,8 +14,95 @@ from autococ.hero_state import _match, locate_current_deployed_hero_card, recogn
 class HeroStateTests(unittest.TestCase):
     root = Path(__file__).resolve().parents[1]
     slot = [599, 595, 688, 711]
+    yellow_fixture_dir = root / "tests/fixtures/hero_yellow_hp_18_647_2"
 
     low_health_slot = [499, 588, 594, 713]
+
+    def test_current_warden_yellow_hp_proves_only_live_deployment(self) -> None:
+        for name, fill in (("green_24", "green"), ("yellow_25", "yellow"),
+                           ("yellow_26", "yellow")):
+            with self.subTest(frame=name):
+                path = self.yellow_fixture_dir / f"{name}.png"
+                locator = locate_current_deployed_hero_card(path, "grand_warden",
+                                                            client_version="18.647.2")
+                self.assertIsNotNone(locator)
+                self.assertEqual(locator["bbox"], [647, 595, 736, 711])
+                state = recognize_hero_state(path, locator["bbox"], unit_id="grand_warden",
+                                             client_version="18.647.2")
+                self.assertTrue(state["deployed"])
+                self.assertFalse(state["defeated"])
+                self.assertEqual(state["evidence"]["portrait_identity"]["unit_id"], "grand_warden")
+                if fill == "green":
+                    self.assertEqual(state["evidence"]["health_bar"]["method"],
+                                     "green_fill_enclosed_by_dark_hp_frame")
+                    self.assertIsNone(state["evidence"]["yellow_health_bar"])
+                    self.assertTrue(state["ability_ready"])
+                else:
+                    self.assertIsNone(state["evidence"]["health_bar"])
+                    self.assertEqual(state["evidence"]["yellow_health_bar"]["fill_bbox"],
+                                     [655, 573, 686, 582])
+                    self.assertGreaterEqual(min(state["evidence"]["yellow_health_bar"]["frame_support"]), .85)
+                    self.assertIsNone(state["ability_ready"])
+                    self.assertIsNone(state["ability_used"])
+
+    def test_current_warden_yellow_hp_requires_correct_frame_card_and_identity(self) -> None:
+        path = self.yellow_fixture_dir / "yellow_25.png"
+        source = cv2.imdecode(np.fromfile(path, np.uint8), cv2.IMREAD_COLOR)
+        cases = {}
+        empty = np.zeros_like(source)
+        cases["empty"] = empty
+        for name, box in {"missing_fill": (655, 573, 686, 582),
+                          "missing_top_frame": (654, 570, 730, 573),
+                          "missing_bottom_frame": (654, 582, 730, 585),
+                          "missing_card_side": (646, 625, 650, 695)}.items():
+            image = source.copy()
+            x1, y1, x2, y2 = box
+            image[y1:y2, x1:x2] = 100
+            cases[name] = image
+        clutter = source.copy()
+        clutter[573:582, 655:686] = 0
+        clutter[573:582, 690:721] = source[573:582, 655:686]
+        cases["yellow_clutter_elsewhere"] = clutter
+        with TemporaryDirectory() as directory:
+            modified = Path(directory) / "modified.png"
+            for name, image in cases.items():
+                with self.subTest(case=name):
+                    cv2.imencode(".png", image)[1].tofile(modified)
+                    state = recognize_hero_state(modified, [647, 595, 736, 711],
+                                                 unit_id="grand_warden", client_version="18.647.2")
+                    self.assertIsNot(state["deployed"], True)
+                    self.assertIsNone(state["evidence"].get("yellow_health_bar"))
+                    self.assertIsNot(state["ability_ready"], True)
+            for unit_id, version, box in (("grand_warden", "18.600.7", [647, 595, 736, 711]),
+                                          ("archer_queen", "18.647.2", [647, 595, 736, 711]),
+                                          ("grand_warden", "18.647.2", [744, 595, 833, 711])):
+                with self.subTest(unit_id=unit_id, version=version, box=box):
+                    state = recognize_hero_state(path, box, unit_id=unit_id, client_version=version)
+                    self.assertIsNone(state["evidence"].get("yellow_health_bar"))
+                    if version == "18.647.2":
+                        self.assertIsNot(state["deployed"], True)
+
+    def test_current_warden_yellow_card_fixture_provenance(self) -> None:
+        metadata = json.loads((self.yellow_fixture_dir / "provenance.json").read_text(encoding="utf-8"))
+        self.assertFalse(metadata["human_ground_truth"])
+        self.assertFalse(metadata["dynamic_event_validation"])
+        for name, record in metadata["fixtures"].items():
+            with self.subTest(frame=name):
+                fixture = self.yellow_fixture_dir / f"{name}.png"
+                self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(), record["fixture_sha256"])
+                image = cv2.imdecode(np.fromfile(fixture, np.uint8), cv2.IMREAD_COLOR)
+                x1, y1, x2, y2 = record["card_bbox_1280"]
+                mask = np.ones(image.shape[:2], dtype=bool)
+                mask[y1:y2, x1:x2] = False
+                self.assertFalse(np.any(image[mask]))
+                source = Path("E:/projects/AutoCOC/reports/completion-20261015") / record["source_relative_to_reports"]
+                if source.is_file():
+                    self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), record["source_sha256"])
+                    raw = cv2.imdecode(np.fromfile(source, np.uint8), cv2.IMREAD_COLOR)
+                    baseline = cv2.resize(raw, (1280, 720), interpolation=cv2.INTER_AREA)
+                    crop = baseline[y1:y2, x1:x2]
+                    self.assertEqual(hashlib.sha256(crop.tobytes()).hexdigest(), record["card_pixels_sha256"])
+                    self.assertTrue(np.array_equal(image[y1:y2, x1:x2], crop))
 
     def current_skill_fixture(self, number: int) -> Path:
         return self.root / f"tests/fixtures/hero_skill_035742_{number:05d}_18_647_2.png"

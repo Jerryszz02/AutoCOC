@@ -842,9 +842,22 @@ def _verify_frozen_line_post(session: Any, plan: FrozenLinePlan, receipt: dict,
         receipt["heroes"] = hero_results
         receipt["verified"] = receipt["completed"] = (receipt["input_sent"] and
             all(item["verified"] for item in troop_results + hero_results))
+        hero_frame_details = []
+        for item in hero_results:
+            state = item["state"]
+            hero_evidence = state.get("evidence") or {}
+            identity = hero_evidence.get("portrait_identity") or {}
+            health = hero_evidence.get("health_bar") or hero_evidence.get("yellow_health_bar") or {}
+            hero_frame_details.append({"unit_id": item["unit_id"], "verified": item["verified"],
+                                       "locator_bbox": (item["card_locator"] or {}).get("bbox"),
+                                       "state": state.get("state"), "deployed": state.get("deployed"),
+                                       "identity": identity.get("unit_id"),
+                                       "health_method": health.get("method"),
+                                       "reason": (hero_evidence.get("reason") or hero_evidence.get("ability_phase_reason"))
+                                       if not item["verified"] else None})
         receipt.setdefault("verification_frames", []).append(
             {"frame": str(post.screenshot_path), "troops": [r["verified"] for r in troop_results],
-             "heroes": [r["verified"] for r in hero_results]})
+             "heroes": [r["verified"] for r in hero_results], "hero_details": hero_frame_details})
         if receipt["verified"] or attempt == 2 or count_conflict:
             break
         try:

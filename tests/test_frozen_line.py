@@ -297,6 +297,12 @@ def test_post_hero_animation_reobserves_only_after_burst_with_fresh_frame(monkey
     assert session.observes == ["frozen-line-post", "frozen-line-post-recheck"]
     assert len(session.inputs) == len(plan.actions)
     assert [row["heroes"] for row in session.frozen_line_receipt["verification_frames"]] == [[False], [True]]
+    details = [row["hero_details"][0] for row in session.frozen_line_receipt["verification_frames"]]
+    assert details[0]["reason"] == "current_hero_card_unlocated"
+    assert details[0]["locator_bbox"] is None
+    assert details[1]["identity"] == "grand_warden"
+    assert details[1]["locator_bbox"] == [610, 595, 699, 711]
+    assert details[1]["verified"] is True
     assert session.frozen_line_receipt["completed"] is True
 
 
@@ -448,6 +454,9 @@ def test_rechecks_never_combine_troops_and_hero_from_different_frames(monkeypatc
     rows = error.value.partial_receipt["verification_frames"]
     assert len(rows) == 3 and rows[0]["troops"] == [True] * 4 and rows[0]["heroes"] == [False]
     assert all(row["troops"] == [False] * 4 and row["heroes"] == [True] for row in rows[1:])
+    assert rows[0]["hero_details"][0]["reason"] == "current_hero_card_unlocated"
+    assert rows[0]["hero_details"][0]["verified"] is False
+    assert all(row["hero_details"][0]["verified"] is True for row in rows[1:])
     assert len(session.inputs) == len(plan.actions)
 
 
