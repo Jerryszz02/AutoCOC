@@ -1,0 +1,22 @@
+{
+  "client_version": "18.647.2",
+  "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-024858-453163-d946a9d8\\frames\\00024-probed-anchor-1-post-1.png",
+  "source_sha256": "2d39842eb37f6875096180fa2d847e2a39b887b68fb139ffc3e20d111260b91e",
+  "template_sha256": "a43b2aa24a3c73ada03aa6646c2c4142a88411740c902c19bc473f6a7f606ce8",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "template_shape": [
+    7,
+    72
+  ],
+  "baseline_roi_xyxy": [
+    343,
+    706,
+    415,
+    713
+  ],
+  "transform": "Decode BGR with OpenCV IMREAD_COLOR; resize source to 1280x720 with cv2.INTER_AREA; convert BGR to grayscale with cv2.COLOR_BGR2GRAY; crop rows y=706..712 and columns x=343..414; encode grayscale PNG with cv2.imwrite.",
+  "purpose": "Version-specific spent balloon card bottom-edge shape, not a troop portrait or quantity label."
+}

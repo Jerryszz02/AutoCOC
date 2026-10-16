@@ -8,6 +8,7 @@ on the frozen plan is to authorize the two *already compiled* exact points.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import hashlib
 import math
 import time
 from typing import Any, Callable
@@ -313,7 +314,7 @@ def _remaining_roster_checkpoint(session: Any, plan: ProbedAnchorPlan, snapshot:
 
 
 def _spent_balloon_dark_border(current: Any, bbox: tuple[int, int, int, int]) -> dict | None:
-    """A narrow 18.647.2 gray-card alternative with two sides and one closed dark bottom."""
+    """18.647.2 gray-card outline, with a versioned shape for dark backgrounds."""
     import cv2
     import numpy as np
 
@@ -359,13 +360,48 @@ def _spent_balloon_dark_border(current: Any, bbox: tuple[int, int, int, int]) ->
         if np.all((above - trough >= 20) & (below - trough >= 20) & (trough <= 16)):
             candidates.append((row, float(np.median(above - trough)),
                                float(np.median(below - trough))))
-    if len(candidates) != 1:
+    if len(candidates) == 1:
+        row, upper_contrast, lower_contrast = candidates[0]
+        return {"method": "spent_balloon_dark_outline", "left_edge": left_edge,
+                "right_edge": right_edge, "dark_row": row,
+                "corner_endpoints": [left_position, right_position],
+                "upper_contrast": upper_contrast, "lower_contrast": lower_contrast,
+                "continuous_columns": right - left - 16}
+
+    # The lower scene may be dark enough that a complete gray card has less
+    # than 20 levels of contrast below its stroke. Compare the card's own
+    # bottom shape to real 18.647.2 pixels; do not infer a border from x0.
+    from .unit_catalog import CATALOG_ROOT
+
+    template_path = CATALOG_ROOT / "units" / "balloon_spent_bottom_18_647_2.png"
+    try:
+        template_bytes = template_path.read_bytes()
+    except OSError:
         return None
-    row, upper_contrast, lower_contrast = candidates[0]
-    return {"method": "spent_balloon_dark_outline", "left_edge": left_edge,
-            "right_edge": right_edge, "dark_row": row,
+    template_sha = hashlib.sha256(template_bytes).hexdigest()
+    if template_sha != "a43b2aa24a3c73ada03aa6646c2c4142a88411740c902c19bc473f6a7f606ce8":
+        return None
+    template = cv2.imdecode(np.frombuffer(template_bytes, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+    core = gray[bottom - 5:bottom + 2, interior]
+    if template is None or template.shape != core.shape or template.shape != (7, 72):
+        return None
+    core_max_error = int(np.abs(core.astype(np.int16) - template.astype(np.int16)).max())
+    if core_max_error > 4:
+        return None
+    trough = gray[bottom:bottom + 2, interior].mean(axis=0)
+    below = gray[bottom + 2:bottom + 5, interior].mean(axis=0)
+    farther = gray[bottom + 5:bottom + 8, interior].mean(axis=0)
+    rebound = below - trough
+    background_jump = np.abs(below - farther)
+    if (np.any(rebound < 7) or np.percentile(background_jump, 95) > 5 or
+            np.any(background_jump > 10)):
+        return None
+    return {"method": "spent_balloon_versioned_bottom_shape", "left_edge": left_edge,
+            "right_edge": right_edge, "dark_row": bottom,
             "corner_endpoints": [left_position, right_position],
-            "upper_contrast": upper_contrast, "lower_contrast": lower_contrast,
+            "core_template_sha256": template_sha, "core_max_error": core_max_error,
+            "lower_rebound_min": float(rebound.min()),
+            "background_jump_p95": float(np.percentile(background_jump, 95)),
             "continuous_columns": right - left - 16}
 
 

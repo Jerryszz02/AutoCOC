@@ -1,0 +1,20 @@
+{
+  "client_version": "18.647.2",
+  "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-035742-manual-probed-skill\\frames\\00019-probed-anchor-1-post-1.png",
+  "source_sha256": "5432396b71cb52fde537bb620e2d9c65eb4da942acc791b60e9dfaa5fea9e6e9",
+  "fixture_sha256": "ecf8c7c871cca164f34c436251843eb414af77d8004d7b42115b18e9b4f7c38a",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "retained_native_xyxy": [
+    0,
+    1090,
+    2560,
+    1440
+  ],
+  "transform": "Decode BGR with OpenCV IMREAD_COLOR; overwrite native rows y=0..1089 inclusive with BGR (50,115,77); retain x=0..2559,y=1090..1439; encode PNG with cv2.imwrite.",
+  "purpose": "Independent prior session gray balloon toolbar only; upper scene anonymized, not a full-scene fixture.",
+  "card_state": "spent",
+  "source_group": "20261016-035742-manual-probed-skill"
+}

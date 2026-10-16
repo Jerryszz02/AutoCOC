@@ -1343,6 +1343,23 @@ class CollectionVisionTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), fixture["sha256"])
         self.assertEqual(detect_collectibles(path), [])
 
+    def test_current_client_real_empty_village_keeps_decorations_without_bubble_matches(self) -> None:
+        import cv2
+
+        path = Path(__file__).parent / "fixtures/home_collect_empty_current_18_647_2_052135.png"
+        provenance = json.loads(path.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), provenance["fixture_sha256"])
+        image = cv2.imread(str(path))
+        self.assertEqual(image.shape, (1440, 2560, 3))
+        for mask in provenance["masks_at_native_2560x1440"]:
+            left, top, right, bottom = mask["xyxy"]
+            self.assertFalse(image[top:bottom, left:right].any())
+        # The event droplet, decorative objects and generic collect label remain
+        # visible in the original map; none is a resource bubble.
+        self.assertTrue(image[50:210, 990:1080].any())
+        self.assertTrue(image[480:590, 390:520].any())
+        self.assertEqual(detect_collectibles(path), [])
+
     def test_collectibles_scale_and_exclude_hud_and_building_menu(self) -> None:
         import cv2
         import numpy as np

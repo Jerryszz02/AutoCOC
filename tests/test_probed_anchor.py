@@ -14,6 +14,7 @@ from autococ.errors import DeploymentError, FlowError, StopRequested
 from autococ.frozen_line import FrozenLinePlan, _file_sha256, _plan_digest
 from autococ.prepared_battle import FramePacket, PreparedInput
 from autococ.probed_anchor import (_balloon_count, _current_frame, _remaining_roster_checkpoint,
+                                   _spent_balloon_dark_border,
                                    _current_card_edges,
                                    execute_probed_anchor_line,
                                    freeze_probed_anchor_line, remainder_burst_limit,
@@ -838,6 +839,124 @@ def test_real_024858_spent_balloon_requires_independent_gray_border(tmp_path):
     assert reading["portrait_score"] >= .92
     assert reading["source_portrait_identity"]["unit_id"] == "balloon"
     assert reading["current_card_border"]["method"] == "spent_balloon_dark_outline"
+
+
+def test_real_050614_dark_background_keeps_complete_spent_card(tmp_path):
+    from autococ.images import read_frame
+    from autococ.vision import ScreenshotRecognizer
+    from autococ.frozen_line import _closed_card_border
+
+    paths = {name: FIXTURES / f"probed_balloon_050614_{name}.png"
+             for name in ("before", "source", "pending", "spent")}
+    for path in paths.values():
+        provenance = json.loads(path.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+        assert provenance["client_version"] == "18.647.2"
+        assert provenance["retained_native_xyxy"] == [0, 1090, 2560, 1440]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == provenance["fixture_sha256"]
+    bbox = (335, 595, 423, 711)
+    pending = cv2.resize(read_frame(paths["pending"]), (1280, 720), interpolation=cv2.INTER_AREA)
+    spent = cv2.resize(read_frame(paths["spent"]), (1280, 720), interpolation=cv2.INTER_AREA)
+    assert _spent_balloon_dark_border(pending, bbox) is None  # Real x1 is not a spent card.
+    assert _closed_card_border(spent, bbox) is None  # Reproduce the failed live gate.
+    base, _ = frozen_base(tmp_path)
+    frame = replace(base.frame, frame_id=str(paths["source"]), screenshot_path=paths["source"])
+    base = replace(base, frame=frame, frame_sha256=_file_sha256(paths["source"]),
+                   toolbar_before_frame_id=str(paths["before"]),
+                   toolbar_before_sha256=_file_sha256(paths["before"]))
+    plan = SimpleNamespace(base=base, balloon_point=(379, 653), balloon_bbox=bbox)
+    recognizer = ScreenshotRecognizer()
+    recognizer.client_version = "18.647.2"
+    snapshot = SceneSnapshot("battle", .99, paths["spent"], {
+        "recognition_scope": "battle_hud", "fast_fallback": False,
+        "matched_reasons": ["two_current_hud_anchors"],
+        "ocr": [], "battle": {"slots": []}})
+    session = SimpleNamespace(last_snapshot=snapshot, recognizer=recognizer,
+                              client_version="18.647.2")
+    reading = _balloon_count(session, plan, snapshot, 0)
+    assert reading["count"] == 0 and reading["confidence"] >= .9
+    assert reading["portrait_score"] >= .92
+    assert reading["source_portrait_identity"]["unit_id"] == "balloon"
+    assert reading["current_card_border"]["method"] == "spent_balloon_versioned_bottom_shape"
+    assert reading["current_card_border"]["core_max_error"] <= 4
+    assert reading["current_card_border"]["lower_rebound_min"] >= 7
+    for invalid_base in (replace(base, client_version="18.600.7"),
+                         replace(base, frame_sha256="0" * 64)):
+        with pytest.raises(FlowError):
+            invalid_plan = SimpleNamespace(base=invalid_base, balloon_point=plan.balloon_point,
+                                           balloon_bbox=bbox)
+            _balloon_count(session, invalid_plan, snapshot, 0)
+
+
+@pytest.mark.parametrize("damage", ("bottom_occluded", "bottom_truncated", "black_below",
+                                     "left_corner", "right_corner", "left_side",
+                                     "shifted_bbox", "adjacent_card"))
+def test_real_050614_spent_shape_rejects_damage(damage):
+    from autococ.images import read_frame
+
+    source = FIXTURES / "probed_balloon_050614_spent.png"
+    image = cv2.resize(read_frame(source), (1280, 720), interpolation=cv2.INTER_AREA).copy()
+    bbox = (335, 595, 423, 711)
+    if damage == "bottom_occluded":
+        image[711:713, 365:378] = (40, 40, 40)
+    elif damage == "bottom_truncated":
+        image[712:720, 343:415] = 0
+    elif damage == "black_below":
+        image[713:720, 343:415] = 0
+    elif damage == "left_corner":
+        image[704:713, 335:344] = (40, 40, 40)
+    elif damage == "right_corner":
+        image[704:713, 414:423] = (40, 40, 40)
+    elif damage == "left_side":
+        image[625:695, 335:337] = (40, 40, 40)
+    elif damage == "shifted_bbox":
+        bbox = (336, 595, 424, 711)
+    else:
+        bbox = (432, 595, 520, 711)
+    assert _spent_balloon_dark_border(image, bbox) is None
+
+
+def test_real_050614_spent_shape_rejects_changed_template(monkeypatch, tmp_path):
+    from autococ.images import read_frame
+    from autococ.unit_catalog import CATALOG_ROOT
+
+    image = cv2.resize(read_frame(FIXTURES / "probed_balloon_050614_spent.png"),
+                       (1280, 720), interpolation=cv2.INTER_AREA)
+    template = CATALOG_ROOT / "units" / "balloon_spent_bottom_18_647_2.png"
+    provenance = json.loads(template.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+    assert hashlib.sha256(template.read_bytes()).hexdigest() == provenance["template_sha256"]
+    changed = tmp_path / "units"
+    changed.mkdir()
+    (changed / template.name).write_bytes(template.read_bytes() + b"changed")
+    monkeypatch.setattr("autococ.unit_catalog.CATALOG_ROOT", tmp_path)
+    assert _spent_balloon_dark_border(image, (335, 595, 423, 711)) is None
+
+
+def test_versioned_spent_shape_thresholds_cover_three_real_backgrounds():
+    from autococ.images import read_frame
+    from autococ.unit_catalog import CATALOG_ROOT
+
+    template_path = CATALOG_ROOT / "units" / "balloon_spent_bottom_18_647_2.png"
+    provenance = json.loads(template_path.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+    template = cv2.imread(str(template_path), cv2.IMREAD_GRAYSCALE)
+    assert provenance["source_sha256"] == "2d39842eb37f6875096180fa2d847e2a39b887b68fb139ffc3e20d111260b91e"
+    assert hashlib.sha256(template_path.read_bytes()).hexdigest() == provenance["template_sha256"]
+    assert provenance["baseline_roi_xyxy"] == [343, 706, 415, 713]
+    for group in ("024858", "035742", "050614"):
+        path = FIXTURES / f"probed_balloon_{group}_spent.png"
+        source = json.loads(path.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == source["fixture_sha256"]
+        image = cv2.resize(read_frame(path), (1280, 720), interpolation=cv2.INTER_AREA)
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        core = gray[706:713, 343:415]
+        if group == "024858":
+            assert np.array_equal(core, template)  # Rebuild template from its anonymized source pixels.
+        assert np.max(np.abs(core.astype(np.int16) - template.astype(np.int16))) <= 4
+        trough = gray[711:713, 343:415].mean(axis=0)
+        below = gray[713:716, 343:415].mean(axis=0)
+        farther = gray[716:719, 343:415].mean(axis=0)
+        assert np.all(below - trough >= 7)
+        assert np.percentile(np.abs(below - farther), 95) <= 5
+        assert np.all(np.abs(below - farther) <= 10)
 
 
 @pytest.mark.parametrize("damage", ("bottom", "left_corner", "right_corner",
