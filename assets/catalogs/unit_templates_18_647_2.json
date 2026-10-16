@@ -670,6 +670,42 @@
       "housing_label_bbox_1280": [1103, 653, 1148, 688],
       "source_sha256": "8dfddbce496f2c38df972d639d7b61dedcc6aa55dda5d483724b7361409c5ceb",
       "template_sha256": "acb985d6855c12015208a86e5d306927574fe4f902fa9fd38ada3bdf9446dd3e"
+    },
+    {
+      "unit_id": "grand_warden",
+      "surface": "battle",
+      "path": "units/grand_warden_battle_deployed_005304_18_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261016-005304-767109-058a9bfa/frames/00018-battle-settlement.png",
+      "source_bbox_1280": [676, 632, 713, 673],
+      "source_card_bbox_1280": [647, 595, 736, 711],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "dcb374d3c1d15d7d312d1322c606f20dd5f76cd7fafb24cb7cf0082f4e21ca66",
+      "template_sha256": "df6ff633b6be323cedb9542417badf9e86dc84afb5d8edc2b714d953d3078853"
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "battle",
+      "path": "units/minion_prince_battle_deployed_005304_18_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261016-005304-767109-058a9bfa/frames/00018-battle-settlement.png",
+      "source_bbox_1280": [864, 632, 903, 675],
+      "source_card_bbox_1280": [840, 595, 929, 711],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "dcb374d3c1d15d7d312d1322c606f20dd5f76cd7fafb24cb7cf0082f4e21ca66",
+      "template_sha256": "50f804214b65a1f0a1e51e0d84321c2f9cb0fe631f607c06fc687ffe9e9c09f6"
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "battle",
+      "path": "units/archer_queen_battle_deployed_005304_20_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261016-005304-767109-058a9bfa/frames/00020-battle-settlement.png",
+      "source_bbox_1280": [964, 632, 1001, 674],
+      "source_card_bbox_1280": [937, 595, 1026, 711],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "65d611e23b0151a72ef8b6b3711d81b0f41325697c749ec9d4e4b68c783df68b",
+      "template_sha256": "2821147b3d5b0354af98cedf6cf4c0282e4ea03610981de4a56ad048c61f3e98"
     }
   ]
 }
