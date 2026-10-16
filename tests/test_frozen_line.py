@@ -147,6 +147,53 @@ def test_mixed_furnace_freeze_uses_distinct_planner_and_conserves_exact_roster(t
     assert len(plan.hero_cards) == 4
 
 
+@pytest.mark.parametrize("archers", [1, 3, 9])
+def test_mixed_furnace_filler_is_last_and_post_requires_every_spent_card(tmp_path, monkeypatch, archers):
+    import numpy as np
+    import autococ.hero_state  # Bind its real frame reader before the local freeze stub.
+
+    troops = (("electro_dragon", 10), ("dragon", 1), ("furnace", 1),
+              ("balloon", 1), ("archer", archers))
+    before = frame("mixed-archer-before", 99, root=tmp_path, troops=troops)
+    selected = frame("mixed-archer-selected", 100, root=tmp_path, troops=troops)
+    post = frame("mixed-archer-post", 103, root=tmp_path, post=True, troops=troops)
+    hero_ids = ("grand_warden", "archer_queen", "dragon_duke", "minion_prince")
+    for item in (before, selected):
+        item.observations["battle"]["slots"].extend(
+            slot(unit_id, None, 650 + index * 97, kind="hero")
+            for index, unit_id in enumerate(hero_ids))
+    by_left = {610 + index * 97: unit_id for index, unit_id in enumerate(hero_ids)}
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_args: [100, 580, 180, 710])
+    monkeypatch.setattr("autococ.images.read_frame", lambda _path: np.zeros((720, 1280, 3), dtype=np.uint8))
+    monkeypatch.setattr("autococ.unit_catalog.recognize_card_identity",
+                        lambda _image, bbox, *_a, **_kw: {"unit_id": by_left[bbox[0]],
+                                                               "version_verified": True,
+                                                               "confidence": .99})
+    monkeypatch.setattr("autococ.hero_state.locate_current_deployed_hero_card",
+                        lambda path, unit_id, **_kw: {"frame": str(path),
+                                                      "bbox": [650 + 97 * hero_ids.index(unit_id), 580,
+                                                               730 + 97 * hero_ids.index(unit_id), 710],
+                                                      "template_client_version": "18.647.2"})
+    monkeypatch.setattr("autococ.hero_state.recognize_hero_state",
+                        lambda _path, _bbox, *, unit_id, **_kw: {"deployed": True,
+                            "frame": str(post.screenshot_path), "evidence": {"portrait_identity": {
+                                "unit_id": unit_id, "version_verified": True,
+                                "template_client_version": "18.647.2"}}})
+    session = Session(selected, post)
+    plan = freeze(session, selected, before, heroes=hero_ids,
+                  line_tactics="two_edge_furnace_mixed_probes")
+    deployments = [action.unit_id for action in plan.actions if action.kind == "deploy"]
+    assert deployments[:13] == ["balloon", "dragon", "furnace"] + ["electro_dragon"] * 10
+    assert deployments[13:13 + archers] == ["archer"] * archers
+    assert deployments[-4:] == list(hero_ids)
+    assert plan.troop_budgets[-1] == ("archer", "army", archers)
+    assert plan.burst_limit_sec == min(15., 1. + .25 * len(plan.actions))
+    # This synthetic post check does not establish live x0 OCR readiness.
+    assert execute_frozen_line(session, plan, clock=lambda: 102., sleep=lambda _seconds: None) is post
+    assert session.frozen_line_receipt["deployed_units"] == 13 + archers
+    assert {row["unit_id"] for row in session.frozen_line_receipt["troops"]} == dict(troops).keys()
+
+
 @pytest.fixture(autouse=True)
 def offline_post_reader(monkeypatch):
     monkeypatch.setattr("autococ.frozen_line._post_troop_reading",

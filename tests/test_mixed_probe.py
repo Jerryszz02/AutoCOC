@@ -62,16 +62,17 @@ def proof(frame):
             "camera": {"stationary": True}}
 
 
-def base_plan(tmp_path):
+def base_plan(tmp_path, *, archers=0):
     source = snapshot(tmp_path, "source", "enemy_village", 9.)
     before = snapshot(tmp_path, "before", "enemy_village", 8.)
+    troop_counts = TROOPS + (("archer", archers),) if archers else TROOPS
     troop_cards = tuple((unit_id, "army", count, (150 + i * 90, 650),
                          (110 + i * 90, 595, 190 + i * 90, 711))
-                        for i, (unit_id, count) in enumerate(TROOPS))
+                        for i, (unit_id, count) in enumerate(troop_counts))
     hero_cards = tuple((unit_id, (600 + i * 90, 595, 680 + i * 90, 711))
                        for i, unit_id in enumerate(HEROES))
     troops = tuple({"unit_id": unit_id, "count": count, "source": "army", "point": card[3]}
-                   for card, (unit_id, count) in zip(troop_cards, TROOPS))
+                   for card, (unit_id, count) in zip(troop_cards, troop_counts))
     heroes = tuple({"unit_id": unit_id, "source": "army", "point": (640 + i * 90, 650)}
                   for i, unit_id in enumerate(HEROES))
     placement = TwoEdgeFurnaceStrategy().build_plan(BattleContext(troops, heroes, TERRAIN))
@@ -97,7 +98,7 @@ def base_plan(tmp_path):
     base = FrozenLinePlan("plan", "battle", packet, _file_sha256(source.screenshot_path),
                           str(before.screenshot_path), _file_sha256(before.screenshot_path),
                           "18.647.2", 9., 11., 10., "cards", "terrain", tuple(actions),
-                          tuple((name, "army", count) for name, count in TROOPS), troop_cards,
+                          tuple((name, "army", count) for name, count in troop_counts), troop_cards,
                           HEROES, hero_cards, None, None, None, "zoom",
                           "two_edge_furnace_mixed_probes", "")
     return replace(base, plan_sha256=_plan_digest(base)), source, before
@@ -133,8 +134,8 @@ class Session:
         return self.last_snapshot
 
 
-def make_plan(monkeypatch, tmp_path):
-    base, source, before = base_plan(tmp_path)
+def make_plan(monkeypatch, tmp_path, *, archers=0):
+    base, source, before = base_plan(tmp_path, archers=archers)
     monkeypatch.setattr("autococ.mixed_probe.freeze_model_free_line", lambda *_a, **_kw: base)
     monkeypatch.setattr("autococ.mixed_probe._cards", lambda *_a, **_kw: tuple(
         {"kind": "troop", "unit_id": unit_id, "source": source_kind,
@@ -157,6 +158,66 @@ def test_mixed_plan_preserves_exact_two_edges_and_remainder(monkeypatch, tmp_pat
     with pytest.raises(FlowError, match="permission"):
         execute_mixed_probe_line(Session(source, []), replace(plan, dragon_point=(1, 2)),
                                  clock=lambda: 10.)
+
+
+@pytest.mark.parametrize("archers", [1, 3, 9])
+def test_mixed_filler_keeps_both_probes_and_places_archers_last(monkeypatch, tmp_path, archers):
+    plan, _source = make_plan(monkeypatch, tmp_path, archers=archers)
+    assert plan.anchors == ((375, 250), (525, 450))
+    assert [row[0] for row in plan.checkpoint_cards] == ["electro_dragon", "furnace", "archer"]
+    deployments = [action for action in plan.remaining if action.kind == "deploy"]
+    assert [action.unit_id for action in deployments[-4:]] == list(HEROES)
+    assert [action.unit_id for action in deployments[-4 - archers:-4]] == ["archer"] * archers
+    assert len(deployments) == 15 + archers
+    assert sum(action.point == plan.anchors[0] for action in deployments if action.unit_id == "archer") == \
+           (archers + 1) // 2
+    assert sum(action.point == plan.anchors[1] for action in deployments if action.unit_id == "archer") == \
+           archers // 2
+    assert remainder_burst_limit(plan) <= 10
+
+
+@pytest.mark.parametrize("fault", [None, "missing_archer", "archer_count_conflict", "archer_identity",
+                                    "duplicate_checkpoint"])
+def test_mixed_filler_checkpoint_requires_third_independent_card(monkeypatch, tmp_path, fault):
+    # A synthetic plumbing check; real five-card toolbar and x0 OCR are not yet sampled.
+    plan, source = make_plan(monkeypatch, tmp_path, archers=3)
+    base = replace(plan.base, hero_cards=())
+    plan = replace(plan, base=base)
+    cards = {unit_id: (point, bbox, count) for unit_id, _source, count, point, bbox
+             in base.troop_cards}
+    current = snapshot(tmp_path, "synthetic-five-card-checkpoint", "battle", 10.5)
+    current.observations["battle"]["slots"] = [
+        {"unit_id": unit_id, "source": "army", "bbox": list(cards[unit_id][1]),
+         "count": cards[unit_id][2], "confidence": .99,
+         "evidence": {"identity": {"unit_id": unit_id, "version_verified": True,
+                                   "template_client_version": "18.647.2"},
+                      "count": {"text": f"x{cards[unit_id][2]}"}}}
+        for unit_id in ("electro_dragon", "furnace", "archer")]
+    if fault == "missing_archer":
+        current.observations["battle"]["slots"].pop()
+    elif fault == "archer_count_conflict":
+        current.observations["battle"]["slots"][-1]["count"] = 2
+    elif fault == "duplicate_checkpoint":
+        plan = replace(plan, checkpoint_cards=plan.checkpoint_cards[:-1] +
+                       (plan.checkpoint_cards[0],))
+    monkeypatch.setattr("autococ.images.read_frame",
+                        lambda _p: np.zeros((1440, 2560, 3), dtype=np.uint8))
+    monkeypatch.setattr("autococ.mixed_probe._current_card_edges", lambda *_a: {"closed": True})
+    monkeypatch.setattr("autococ.mixed_probe._count_proves",
+                        lambda reading, *_a: bool(reading.get("text")))
+    monkeypatch.setattr("autococ.mixed_probe._post_troop_reading", lambda *_a, **_kw: {})
+    by_bbox = {bbox: unit_id for unit_id, (_point, bbox, _count) in cards.items()}
+    monkeypatch.setattr("autococ.unit_catalog.recognize_card_identity",
+                        lambda _image, bbox, *_a, **_kw: {
+                            "unit_id": ("balloon" if fault == "archer_identity" and
+                                        by_bbox[tuple(bbox)] == "archer" else by_bbox[tuple(bbox)]),
+                            "version_verified": True, "confidence": .99})
+    if fault is None:
+        result = _remaining_checkpoint(Session(source, []), plan, current)
+        assert [row["unit_id"] for row in result["troops"]] == ["electro_dragon", "furnace", "archer"]
+    else:
+        with pytest.raises(FlowError):
+            _remaining_checkpoint(Session(source, []), plan, current)
 
 
 @pytest.mark.parametrize("failure", ["duplicate_number", "wrong_number", "conflict",

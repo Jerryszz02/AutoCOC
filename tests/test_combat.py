@@ -364,7 +364,13 @@ class CombatTests(unittest.TestCase):
         self.assertFalse(_retryable_boundary_preflight(active, self._probed_boundary_error()))
 
     def test_mixed_probe_boundary_rejection_can_rescout_without_input(self):
-        frames = complete_frames()[:3] + [self._preview(83), self._preview(84),
+        from autococ.reporting import TaskResult
+
+        # This test isolates scout-boundary retry. Its synthetic 100/100 army
+        # predates the strict mixed-roster preflight, so supply its read-only
+        # verified result and a distinct post-preflight army frame.
+        frames = complete_frames()[:3] + [frame(82, "training", army=deepcopy(ARMY)),
+                  self._preview(83), self._preview(84),
                   frame(85, "enemy_village", resources={"gold": 170, "elixir": 100,
                                                          "dark_elixir": 10}),
                   frame(86, "battle", deployment=deepcopy(DEPLOYMENT)),
@@ -372,6 +378,7 @@ class CombatTests(unittest.TestCase):
                   frame(88, "village", resources={**BEFORE, "gold": 1100,
                                                   "elixir": 2055, "dark_elixir": 310})]
         session = FakeSession(frames)
+        session.client_version = "18.647.2"
         session.config.battle = replace(session.config.battle, strategy="edrag_line",
                                         line_execution_mode="continuous",
                                         line_tactics="two_edge_furnace_mixed_probes", max_searches=2)
@@ -384,8 +391,13 @@ class CombatTests(unittest.TestCase):
 
         session.deploy = deploy
         with patch("autococ.combat._read_continuous_line_army",
-                   side_effect=lambda active, current, evidence: (current, _read_army(current))):
+                   side_effect=lambda active, current, evidence: (current, _read_army(current))), \
+             patch("autococ.army_control.ensure_mixed_archer_army", return_value=TaskResult(
+                 "prepare_army", "succeeded", "preflight fixture",
+                 evidence=[Path("mixed-army-preflight.png")])) as fill, \
+             patch("autococ.army_control.mixed_archer_attack_guard", return_value=None):
             result = battle(session)
+        fill.assert_called_once_with(session)
         self.assertEqual(result.status, "succeeded")
         self.assertEqual(session.deploy_calls, 2)
         self.assertEqual(result.metrics["search_count"], 2)

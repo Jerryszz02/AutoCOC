@@ -559,7 +559,7 @@ def freeze_model_free_line(session: Any, selected: SceneSnapshot, *,
                            hero_ids: Sequence[str] = (), hero_manifest: dict | None = None,
                             line_tactics: str = "single_edge",
                            clock: Callable[[], float] = time.monotonic) -> FrozenLinePlan:
-    """Freeze the existing line roster, optionally with a bounded archer filler row."""
+    """Freeze the line roster with its mode-specific bounded archer filler."""
     if getattr(getattr(session.config, "vision_agent", None), "enabled", False):
         raise FlowError("Model-free line cannot replace vision-mode model release")
     if line_tactics not in {"single_edge", "two_edge_split", "two_edge_furnace_mixed_probes"}:
@@ -609,11 +609,14 @@ def freeze_model_free_line(session: Any, selected: SceneSnapshot, *,
     expected = {(row["unit_id"], row["source"]): row["count"] for row in troops}
     if len(expected) != len(troops):
         raise FlowError("Frozen line army manifest repeats a troop identity")
-    if line_tactics == "two_edge_furnace_mixed_probes" and expected != {
-            ("electro_dragon", "army"): 10, ("dragon", "army"): 1,
-            ("furnace", "army"): 1, ("balloon", "army"): 1}:
-        raise FlowError("Mixed furnace probes require exact current army counts")
-    if len(troops) == 5:
+    if line_tactics == "two_edge_furnace_mixed_probes":
+        from .mixed_roster import mixed_archer_count
+
+        try:
+            mixed_archer_count(troops)
+        except FlowError as exc:
+            raise FlowError("Mixed furnace probes require exact current army counts") from exc
+    elif len(troops) == 5:
         expected_five_ids = {
             (unit_id, "army") for unit_id in _BASE_LINE_TROOP_IDS | {_ARCHER_FILLER_UNIT_ID}
         }

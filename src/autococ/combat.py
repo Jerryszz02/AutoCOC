@@ -212,6 +212,26 @@ def run_battle(session: GameSession) -> TaskResult:
         army = _read_army(army_frame)
         if getattr(session.config.battle, "line_execution_mode", "verified") == "continuous":
             army_frame, army = _read_continuous_line_army(session, army_frame, evidence)
+        mixed_furnace = (definition is None and not vision_mode and
+                         session.config.battle.strategy == "edrag_line" and
+                         session.config.battle.line_execution_mode == "continuous" and
+                         session.config.battle.line_tactics == "two_edge_furnace_mixed_probes")
+        if mixed_furnace:
+            from .army_control import ensure_mixed_archer_army, mixed_archer_attack_guard
+            progress("核对并补齐弓箭手")
+            prepared = ensure_mixed_archer_army(session)
+            evidence.extend(prepared.evidence)
+            metrics["army_preparation"] = {"status": prepared.status,
+                                           "reason": prepared.reason, **prepared.metrics}
+            if prepared.status != "succeeded":
+                raise FlowError(f"Mixed army fill stopped: {prepared.reason}")
+            session.check_deadline()
+            army_frame = session.observe("battle-army-after-fill")
+            evidence.append(army_frame.screenshot_path)
+            army_frame, army = _read_continuous_line_army(session, army_frame, evidence)
+            issue = mixed_archer_attack_guard(army_frame, prepared, session.client_version)
+            if issue is not None or not army["troops_full"]:
+                raise FlowError(f"Mixed army changed after fill; no paid search started: {issue}")
         metrics["army"] = army
         if definition is None and (not army["troops_full"] or not line_mode and not army["spells_full"]):
             raise FlowError("Army troop/spell recipe is not full")

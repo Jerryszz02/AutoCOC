@@ -83,7 +83,8 @@ class StrategyTests(unittest.TestCase):
 
     def test_mixed_furnace_planner_is_exact_and_separate(self):
         counts = {"electro_dragon": 10, "dragon": 1, "furnace": 1, "balloon": 1}
-        troops = tuple({"unit_id": unit_id, "count": count, "point": [100 + i * 90, 650]}
+        troops = tuple({"unit_id": unit_id, "source": "army", "count": count,
+                        "point": [100 + i * 90, 650]}
                        for i, (unit_id, count) in enumerate(counts.items()))
         heroes = tuple({"unit_id": unit_id, "point": [600 + i * 90, 650]}
                       for i, unit_id in enumerate(("grand_warden", "archer_queen",
@@ -99,6 +100,19 @@ class StrategyTests(unittest.TestCase):
                          [1, 0, 1, 6])
         self.assertEqual([sum(y > 300 for _, y in row.points) for row in plan.troops],
                          [0, 1, 0, 4])
+        for archers in (1, 3, 9):
+            with self.subTest(archers=archers):
+                filler = {"unit_id": "archer", "source": "army", "count": archers,
+                          "point": [550, 650]}
+                filled = TwoEdgeFurnaceStrategy().build_plan(BattleContext(
+                    (*troops, filler), heroes, terrain))
+                self.assertEqual([row.card["unit_id"] for row in filled.troops],
+                                 ["balloon", "dragon", "furnace", "electro_dragon", "archer"])
+                self.assertEqual(len(filled.troops[-1].points), archers)
+                self.assertEqual(sum(y < 300 for _, y in filled.troops[-1].points),
+                                 (archers + 1) // 2)
+                self.assertEqual(sum(y > 300 for _, y in filled.troops[-1].points),
+                                 archers // 2)
         for changed in (troops[:-1], tuple({**row, "count": 2} if row["unit_id"] == "balloon" else row
                                             for row in troops)):
             with self.assertRaises(FlowError):

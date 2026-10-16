@@ -17,6 +17,7 @@ from .frozen_line import (_COUNT, _cards, _closed_card_border,
                           _digest, _file_sha256, _plan_digest, _post_troop_reading,
                           _verify_frozen_line_post, freeze_model_free_line)
 from .prepared_battle import PreparedInput
+from .mixed_roster import MIXED_CORE_COUNTS, mixed_archer_count
 from .probed_anchor import (ProbedAnchorPlan, _current_card_edges, _current_frame,
                             _distance_to_segment, _foreground_now,
                             _spent_balloon_dark_border, remainder_burst_limit)
@@ -50,9 +51,14 @@ def freeze_mixed_probe_line(session: Any, selected: Any, *, terrain: list[dict],
         raise FlowError("Mixed probes require the sampled 1280×720 layout")
     base = freeze_model_free_line(session, selected, terrain=terrain,
                                   line_tactics="two_edge_furnace_mixed_probes", **kwargs)
-    expected = {"electro_dragon": 10, "dragon": 1, "furnace": 1, "balloon": 1}
-    if ({unit_id: count for unit_id, source, count in base.troop_budgets if source == "army"} != expected or
-            len(base.troop_cards) != 4 or len(base.hero_ids) != 4):
+    archers = mixed_archer_count([
+        {"unit_id": unit_id, "source": source, "count": count}
+        for unit_id, source, count in base.troop_budgets])
+    expected = {**MIXED_CORE_COUNTS, **({"archer": archers} if archers else {})}
+    card_archers = mixed_archer_count([
+        {"unit_id": unit_id, "source": source, "count": count}
+        for unit_id, source, count, _point, _bbox in base.troop_cards])
+    if (card_archers != archers or len(base.troop_cards) != len(expected) or len(base.hero_ids) != 4):
         raise FlowError("Mixed probes require the exact current troop and hero roster")
     segments = []
     for edge in (0, 1):
@@ -223,10 +229,14 @@ def _remaining_checkpoint(session: Any, plan: MixedProbePlan, snapshot: Any) -> 
     base = plan.base
     image = cv2.resize(read_frame(snapshot.screenshot_path), (1280, 720), interpolation=cv2.INTER_AREA)
     slots = (snapshot.observations.get("battle") or {}).get("slots")
-    if not isinstance(slots, list) or len(plan.checkpoint_cards) != 2:
+    archers = mixed_archer_count([
+        {"unit_id": unit_id, "source": source, "count": count}
+        for unit_id, source, count in base.troop_budgets])
+    ordinary_ids = {"electro_dragon", "furnace"} | ({"archer"} if archers else set())
+    if not isinstance(slots, list) or len(plan.checkpoint_cards) != len(ordinary_ids):
         raise FlowError("Mixed checkpoint lacks complete ordinary cards")
     ordinary = {unit_id: (point, bbox) for unit_id, point, bbox in plan.checkpoint_cards}
-    if set(ordinary) != {"electro_dragon", "furnace"}:
+    if set(ordinary) != ordinary_ids:
         raise FlowError("Mixed checkpoint ordinary identities are incomplete")
     positive = []
     for unit_id, source, initial, _point, _bbox in base.troop_cards:
