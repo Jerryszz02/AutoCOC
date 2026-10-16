@@ -127,6 +127,44 @@ def attach_preparation_countdown(snapshot: SceneSnapshot,
                                       "source": "current_frame_ocr"}
 
 
+def _static_preparation_label_box(snapshot: SceneSnapshot,
+                                  baseline_resolution: tuple[int, int],
+                                  label: dict) -> tuple[int, int, int, int] | None:
+    """Exclude overlapping timer digits from a source-bound preparation label."""
+    battle = snapshot.observations.get("battle")
+    if snapshot.scene != "enemy_village" or not isinstance(battle, dict):
+        return None
+    items = _preparation_countdown_items(snapshot, baseline_resolution, 0)
+    anchors, candidates = _preparation_countdown_candidates(items, baseline_resolution)
+    if len(anchors) != 1 or len(candidates) != 1:
+        return None
+    anchor, _ = anchors[0]
+    seconds, timer = candidates[0]
+    if (anchor["confidence"] < .9 or timer is anchor or timer["confidence"] < .9 or
+            tuple(anchor["bbox"]) != tuple(label["bbox"]) or
+            anchor["text"] != re.sub(r"\s+", "", str(label["text"]).lower()) or
+            any(item is not anchor and item is not timer and
+                _preparation_seconds(item["text"]) is not None for item in items)):
+        return None
+    evidence = battle.get("countdown_evidence")
+    if "countdown_evidence" in battle or "countdown_seconds" in battle:
+        if (not isinstance(evidence, dict) or
+                evidence.get("frame") != str(snapshot.screenshot_path) or
+                evidence.get("source") != "current_frame_ocr" or
+                battle.get("countdown_seconds") != seconds or
+                evidence.get("label") != anchor or evidence.get("timer") != timer):
+            return None
+    label_box, timer_box = anchor["bbox"], timer["bbox"]
+    if not (label_box[1] < timer_box[1] < label_box[3] and
+            timer_box[1] - label_box[1] >= .6 * (label_box[3] - label_box[1])):
+        return None
+    static_box = scale_box((label_box[0], label_box[1], label_box[2], timer_box[1]),
+                           from_resolution=baseline_resolution, to_resolution=(1280, 720))
+    if static_box[2] - static_box[0] < 40 or static_box[3] - static_box[1] < 12:
+        return None
+    return static_box
+
+
 def selected_card_bbox(path, bbox, baseline_resolution=(1280, 720)):
     """Require the closed white selection outline on the current frame."""
     image = cv2.resize(read_frame(path), (1280, 720), interpolation=cv2.INTER_AREA)
@@ -243,6 +281,9 @@ class BattleObserver:
         for item in (timer[0], buttons[0]):
             box = scale_box(tuple(item["bbox"]), from_resolution=self.recognizer.baseline_resolution,
                             to_resolution=(1280, 720))
+            if item is timer[0] and snapshot.scene == "enemy_village":
+                box = (_static_preparation_label_box(snapshot, self.recognizer.baseline_resolution,
+                                                      item) or box)
             x0, y0, x1, y1 = box
             anchors.append((box, image[y0:y1, x0:x1].copy()))
         self.anchors[snapshot.scene] = anchors
