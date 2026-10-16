@@ -350,7 +350,9 @@ class ScreenshotRecognizer:
             from .ore_inventory import observe_ore_inventory
             ore_inventory = observe_ore_inventory(
                 path, [asdict(item) for item in texts], client_version=self.client_version,
-                baseline_resolution=self.baseline_resolution)
+                baseline_resolution=self.baseline_resolution,
+                line_reader=lambda frame, roi: [asdict(item) for item in
+                                                self.recognize_region(frame, roi, single_line=True)])
             if ore_inventory is not None:
                 scene, confidence, reasons = SCENE_POPUP, .95, ["current_ore_inventory_verified"]
         battle_reward_claim = None
@@ -686,11 +688,58 @@ class ScreenshotRecognizer:
             "ocr": ocr_finished - decoded, "details": time.monotonic() - ocr_finished}
         from .battle_vision import attach_preparation_countdown
         snapshot = SceneSnapshot(scene, confidence, path, observations)
+        self._recover_preparation_timer(snapshot, resolution)
         self._recover_preparation_heading(snapshot, resolution)
         attach_preparation_countdown(snapshot, self.baseline_resolution)
         observations["recognition_seconds"] = round(time.monotonic() - started, 3)
         observations["recognition_timings_sec"]["details"] = time.monotonic() - ocr_finished
         return snapshot
+
+    def _recover_preparation_timer(self, snapshot: SceneSnapshot,
+                                   resolution: tuple[int, int]) -> None:
+        """Read one intact timer line on this frame if full OCR added a stray dot."""
+        if (self.client_version != "18.647.2" or type(snapshot.confidence) not in (int, float)
+                or not math.isfinite(snapshot.confidence) or snapshot.confidence < .8):
+            return
+        from .battle_vision import preparation_timer_line_recovery_candidate, _preparation_seconds
+
+        candidate = preparation_timer_line_recovery_candidate(snapshot, self.baseline_resolution)
+        if candidate is None:
+            return
+        receipt = {**candidate, "trigger": candidate["reason"], "status": "unproved",
+                   "source": "current_frame_timer_line_roi"}
+        snapshot.observations["preparation_timer_recovery"] = receipt
+        read_line = getattr(self.provider, "recognize_line", None)
+        if not callable(read_line):
+            receipt["reason"] = "line_reader_unavailable"
+            return
+        roi = tuple(candidate["baseline_roi"])
+        native_roi = scale_box(roi, from_resolution=self.baseline_resolution,
+                               to_resolution=resolution)
+        receipt["native_roi"] = list(native_roi)
+        try:
+            reads = read_line(snapshot.screenshot_path, native_roi)
+        except OCRError:
+            receipt["reason"] = "line_reader_failed"
+            return
+        receipt["readings"] = ([asdict(item) for item in reads]
+                               if isinstance(reads, list) and all(isinstance(item, OCRText) for item in reads)
+                               else [])
+        if not isinstance(reads, list) or len(reads) != 1 or not isinstance(reads[0], OCRText):
+            receipt["reason"] = "line_reader_not_unique"
+            return
+        local = self._baseline_result(reads[0], resolution)
+        if (local.text.strip() != candidate["expected_full_text"]
+                or _preparation_seconds(local.text.strip()) is None
+                or not math.isfinite(local.confidence)
+                or not max(.9, self.ocr_config.confidence_threshold) <= local.confidence <= 1
+                or local.bbox is None or any(abs(a - b) > 1 for a, b in zip(local.bbox, roi))):
+            receipt["reason"] = "line_reader_not_exact_strong_timer"
+            return
+        corrected = {**asdict(local), "frame": str(snapshot.screenshot_path),
+                     "source": "current_frame_timer_line_roi"}
+        snapshot.observations["ocr"].append(corrected)
+        receipt.update(status="exact_current_frame_timer", correction=corrected)
 
     def _recover_preparation_heading(self, snapshot: SceneSnapshot,
                                      resolution: tuple[int, int]) -> None:

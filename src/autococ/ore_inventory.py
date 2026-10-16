@@ -8,10 +8,12 @@ fully recognized page supplied by the session recognizer.
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 from pathlib import Path
 import re
 import time
+from typing import Callable
 
 import cv2
 import numpy as np
@@ -35,6 +37,7 @@ _ORES = {
 }
 _CLOSE_VISUAL_ROI = (1200, 58, 1247, 105)
 _COUNT_RE = re.compile(r"([0-9]{1,6})/([0-9]{1,6})\Z")
+_LINE_ROIS = {"starry": (764, 621, 856, 652)}
 
 
 def _sha256(path: Path) -> str:
@@ -85,18 +88,109 @@ def _unique_text(ocr: list[dict], text: str, roi: tuple[int, int, int, int],
     return matches[0]
 
 
+def _canonical_ocr(item: object, roi: tuple[int, int, int, int]) -> dict | None:
+    if not isinstance(item, dict) or not isinstance(item.get("text"), str) or not _inside(item.get("bbox"), roi):
+        return None
+    confidence = item.get("confidence")
+    if type(confidence) not in (int, float) or not math.isfinite(confidence) or not 0 <= confidence <= 1:
+        return None
+    return {"text": item["text"], "confidence": confidence, "bbox": list(item["bbox"])}
+
+
+def _line_digest(evidence: dict) -> str:
+    payload = json.dumps(evidence, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _local_count(frame: Path, frame_sha: str, name: str, zone: list[dict],
+                 line_reader: Callable[[Path, tuple[int, int, int, int]], list[dict]] | None,
+                 cached_local: dict) -> tuple[dict, dict] | None:
+    """Use one same-frame line read only when the full-frame count is invalid.
+
+    A previously bound local result is revalidated without running OCR again.
+    Both paths keep the original full-frame text; neither edits or reverses it.
+    """
+    roi = _LINE_ROIS.get(name)
+    if roi is None:
+        return None
+    full = [_canonical_ocr(item, _ORES[name]["roi"]) for item in zone]
+    if any(item is None for item in full):
+        return None
+    if name in cached_local:
+        evidence = cached_local[name]
+        if (not isinstance(evidence, dict) or set(evidence) !=
+                {"source", "frame", "frame_sha256", "roi", "full_ocr", "readings", "evidence_sha256"}):
+            return None
+        fields = {key: value for key, value in evidence.items() if key != "evidence_sha256"}
+        if (fields.get("source") != "same_frame_line_roi"
+                or fields.get("frame") != str(frame)
+                or fields.get("frame_sha256") != frame_sha
+                or fields.get("roi") != list(roi)
+                or fields.get("full_ocr") != full):
+            return None
+        readings = fields.get("readings")
+        if (not isinstance(readings, list) or len(readings) != 1
+                or _canonical_ocr(readings[0], roi) != readings[0]):
+            return None
+        if (not isinstance(evidence.get("evidence_sha256"), str)
+                or evidence["evidence_sha256"] != _line_digest(fields)):
+            return None
+    else:
+        if line_reader is None:
+            return None
+        try:
+            readings = line_reader(frame, roi)
+        except Exception:
+            return None
+        if not isinstance(readings, list) or len(readings) != 1:
+            return None
+        reading = _canonical_ocr(readings[0], roi)
+        if reading is None:
+            return None
+        readings = [reading]
+        if _sha256(frame) != frame_sha:
+            return None
+        fields = {"source": "same_frame_line_roi", "frame": str(frame),
+                  "frame_sha256": frame_sha, "roi": list(roi),
+                  "full_ocr": full, "readings": readings}
+        evidence = {**fields, "evidence_sha256": _line_digest(fields)}
+    item = _canonical_ocr(readings[0], roi)
+    if item is None or item["confidence"] < .99:
+        return None
+    match = _COUNT_RE.fullmatch(item["text"])
+    if match is None:
+        return None
+    amount, capacity = map(int, match.groups())
+    if capacity != _ORES[name]["capacity"] or amount > capacity:
+        return None
+    # A weak but syntactically valid full-frame value may corroborate the
+    # local line; a different value is still a conflict, regardless of score.
+    if any(_COUNT_RE.fullmatch(raw["text"]) is not None and raw["text"] != item["text"]
+           for raw in full):
+        return None
+    return item, evidence
+
+
 def observe_ore_inventory(frame_path: str | Path, ocr: list[dict], *,
                           client_version: str,
-                          baseline_resolution: tuple[int, int] = BASELINE) -> dict | None:
+                          baseline_resolution: tuple[int, int] = BASELINE,
+                          line_reader: Callable[[Path, tuple[int, int, int, int]], list[dict]] | None = None,
+                          cached_local: dict | None = None) -> dict | None:
     """Recognize a complete page and exactly one strong count per ore.
 
     The caller supplies full-frame OCR with boxes in 1280x720 coordinates.
     None means the surface or a number is ambiguous. No value is inferred from
     another frame or from the event reward amount.
     """
-    if client_version != CLIENT_VERSION or tuple(baseline_resolution) != BASELINE:
+    if (client_version != CLIENT_VERSION or
+            not isinstance(baseline_resolution, (list, tuple)) or tuple(baseline_resolution) != BASELINE):
         return None
     if not isinstance(ocr, list) or any(not isinstance(item, dict) for item in ocr):
+        return None
+    cache_supplied = cached_local is not None
+    if cached_local is None:
+        cached_local = {}
+    if not isinstance(cached_local, dict) or set(cached_local) - set(_LINE_ROIS):
         return None
     if any("另一个设备正在连接这个村庄" in str(item.get("text", "")) for item in ocr):
         return None
@@ -116,7 +210,9 @@ def observe_ore_inventory(frame_path: str | Path, ocr: list[dict], *,
     if any(item["ncc"] < .97 or item["mad"] > 8 or item["mean_delta"] > 6
            for item in visual.values()):
         return None
+    frame_sha = _sha256(frame)
     ores: dict[str, dict] = {}
+    local_counts: dict[str, dict] = {}
     used: set[int] = set()
     for name, spec in _ORES.items():
         # Any slash-like OCR in the count zone is a conflict, including malformed
@@ -124,21 +220,38 @@ def observe_ore_inventory(frame_path: str | Path, ocr: list[dict], *,
         zone = [item for item in ocr if _inside(item.get("bbox"), spec["roi"])
                 and ("/" in str(item.get("text", "")) or
                      any(char.isdigit() for char in str(item.get("text", ""))))]
-        if len(zone) != 1 or id(zone[0]) in used:
+        if len(zone) > 1 or any(id(item) in used for item in zone):
             return None
-        item = zone[0]
-        used.add(id(item))
-        match = _COUNT_RE.fullmatch(item.get("text", "")) if isinstance(item.get("text"), str) else None
-        confidence = item.get("confidence")
-        if (match is None or type(confidence) not in (int, float)
-                or not math.isfinite(confidence) or not .99 <= confidence <= 1):
-            return None
+        item = zone[0] if zone else None
+        if item is not None:
+            used.add(id(item))
+        match = (_COUNT_RE.fullmatch(item["text"])
+                 if item is not None and isinstance(item.get("text"), str) else None)
+        confidence = item.get("confidence") if item is not None else None
+        strong = (match is not None and type(confidence) in (int, float)
+                  and math.isfinite(confidence) and .99 <= confidence <= 1)
+        if strong:
+            if name in cached_local:
+                return None  # A cached local value must not override a strong full read.
+            source = "full_ocr"
+        else:
+            local = _local_count(frame, frame_sha, name, zone, line_reader, cached_local)
+            if local is None:
+                return None
+            item, evidence = local
+            local_counts[name] = evidence
+            match = _COUNT_RE.fullmatch(item["text"])
+            confidence = item["confidence"]
+            source = "same_frame_line_roi"
         amount, capacity = map(int, match.groups())
         if capacity != spec["capacity"] or amount > capacity:
             return None
         ores[name] = {"amount": amount, "capacity": capacity,
                       "text": item["text"], "bbox": list(item["bbox"]),
-                      "confidence": confidence, "icon_score": visual[name]["ncc"]}
+                      "confidence": confidence, "icon_score": visual[name]["ncc"],
+                      "source": source}
+    if (cache_supplied and set(local_counts) != set(cached_local)) or _sha256(frame) != frame_sha:
+        return None
     # A second complete count in the inventory strip outside the known zones
     # suggests a shifted page or a fourth/duplicated reading.
     if any(id(item) not in used and _overlaps(item.get("bbox"), (380, 605, 900, 665))
@@ -148,8 +261,9 @@ def observe_ore_inventory(frame_path: str | Path, ocr: list[dict], *,
         return None
     close = anchors["close"]["bbox"]
     return {"surface": "hero_equipment_ore_inventory", "client_version": client_version,
-            "frame": str(frame), "frame_sha256": _sha256(frame),
+            "frame": str(frame), "frame_sha256": frame_sha,
             "anchors": anchors, "visual": visual, "ores": ores,
+            "local_counts": local_counts,
             "balances": {name: item["amount"] for name, item in ores.items()},
             "capacities": {name: item["capacity"] for name, item in ores.items()},
             "button": {"name": "close_ore_inventory", "text": "关闭英雄装备", "bbox": close,
@@ -165,9 +279,11 @@ def read_ore_inventory_snapshot(snapshot, *, client_version: str) -> dict | None
     baseline = observations.get("baseline_resolution", BASELINE)
     if not isinstance(baseline, (list, tuple)) or len(baseline) != 2:
         return None
+    bound = observations.get("ore_inventory")
+    cached_local = bound.get("local_counts") if isinstance(bound, dict) else None
     result = observe_ore_inventory(snapshot.screenshot_path, observations.get("ocr"),
                                    client_version=client_version,
-                                   baseline_resolution=tuple(baseline))
+                                   baseline_resolution=tuple(baseline), cached_local=cached_local)
     if result is None:
         return None
     frame_id = observations.get("frame_id")

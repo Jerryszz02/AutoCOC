@@ -47,8 +47,18 @@ def _preparation_seconds(text: str) -> int | None:
     return None
 
 
-def _preparation_countdown_candidates(items: list[dict], baseline_resolution: tuple[int, int]):
+def _preparation_timer_aligned(box: tuple | list, label_box: tuple | list,
+                               baseline_resolution: tuple[int, int]) -> bool:
     width, height = baseline_resolution
+    # Preserve the same bounded OCR-box overlap and center alignment used by
+    # ordinary countdown recognition; neither path may invent a new timer.
+    allowed_overlap = min(14 * height / 720, (label_box[3] - label_box[1]) * .40,
+                          (box[3] - box[1]) * .25)
+    return (-allowed_overlap <= box[1] - label_box[3] <= height * .10 and
+            abs((box[0] + box[2] - label_box[0] - label_box[2]) / 2) <= width * .07)
+
+
+def _preparation_countdown_candidates(items: list[dict], baseline_resolution: tuple[int, int]):
     labels = ("战斗开始倒计时", "开战倒计时", "battlestartsin")
     anchors = [(item, prefix) for item in items for prefix in labels if item["text"].startswith(prefix)]
     if len(anchors) != 1:
@@ -63,15 +73,59 @@ def _preparation_countdown_candidates(items: list[dict], baseline_resolution: tu
             continue
         value = _preparation_seconds(item["text"])
         box, label_box = item["bbox"], anchor["bbox"]
-        # OCR boxes for the live timer can overlap the smaller heading by a
-        # few pixels even though the glyphs are on separate lines. Bound the
-        # overlap by their own text heights as well as 14 baseline pixels.
-        allowed_overlap = min(14, (label_box[3] - label_box[1]) * .40,
-                              (box[3] - box[1]) * .25)
-        if (value is not None and -allowed_overlap <= box[1] - label_box[3] <= height * .10
-                and abs((box[0] + box[2] - label_box[0] - label_box[2]) / 2) <= width * .07):
+        if value is not None and _preparation_timer_aligned(box, label_box, baseline_resolution):
             candidates.append((value, item))
     return anchors, candidates
+
+
+def preparation_timer_line_recovery_candidate(snapshot: SceneSnapshot,
+                                              baseline_resolution: tuple[int, int] = (1280, 720)) -> dict | None:
+    """Locate one damaged full-OCR timer for a fresh line read, never infer its value."""
+    battle = snapshot.observations.get("battle")
+    if (snapshot.scene != "enemy_village" or not isinstance(battle, dict)
+            or battle.get("phase") != "scout"
+            or battle.get("countdown_seconds") is not None
+            or battle.get("countdown_evidence") is not None):
+        return None
+    items = _preparation_countdown_items(snapshot, baseline_resolution, 0)
+    anchors, candidates = _preparation_countdown_candidates(items, baseline_resolution)
+    if len(anchors) != 1 or candidates:
+        return None
+    label, _ = anchors[0]
+    label_box = scale_box(tuple(label["bbox"]), from_resolution=baseline_resolution,
+                          to_resolution=(1280, 720))
+    if (label["text"] != "开战倒计时" or not .9 <= label["confidence"] <= 1
+            or not (575 <= label_box[0] <= 590 and 8 <= label_box[1] <= 16
+                    and 670 <= label_box[2] <= 690 and 35 <= label_box[3] <= 45)):
+        return None
+    # The leading dot is evidence of a damaged full OCR line, not punctuation
+    # to strip. The complete number must be independently read below.
+    malformed = []
+    for item in items:
+        if item is label:
+            continue
+        if item["confidence"] >= .9 and _preparation_seconds(item["text"]) is not None:
+            return None  # A separate strong valid timer must never be overridden.
+        match = re.fullmatch(r"\.(\d{1,2}秒)", item["text"])
+        if match is not None:
+            box = scale_box(tuple(item["bbox"]), from_resolution=baseline_resolution,
+                            to_resolution=(1280, 720))
+            if not _preparation_timer_aligned(box, label_box, (1280, 720)):
+                continue
+            if (not 590 <= box[0] <= 600 or not 29 <= box[1] <= 39
+                    or not 680 <= box[2] <= 700 or not 78 <= box[3] <= 95):
+                return None
+            malformed.append((item, match.group(1)))
+    if len(malformed) != 1 or malformed[0][0]["confidence"] < .9:
+        return None
+    raw, suffix = malformed[0]
+    if _preparation_seconds(suffix) is None:
+        return None
+    roi = scale_box((599, 30, 690, 89), from_resolution=(1280, 720),
+                    to_resolution=baseline_resolution)
+    return {"reason": "one_strong_heading_one_damaged_timer", "frame": str(snapshot.screenshot_path),
+            "raw_label": label, "raw_timer": raw, "expected_full_text": suffix,
+            "baseline_roi": roi}
 
 
 def preparation_countdown_retry_candidate(snapshot: SceneSnapshot,

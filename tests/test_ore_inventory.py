@@ -17,12 +17,19 @@ import cv2
 from autococ.errors import FlowError
 from autococ.ore_inventory import (close_ore_inventory, observe_ore_inventory,
                                    read_ore_inventory_snapshot, verify_stable_ore_inventory)
+from autococ.ocr import OCRText
 from autococ.scene import SceneSnapshot
+from autococ.vision import ScreenshotRecognizer
 
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "hero_equipment_18_647_2"
 VERSION = "18.647.2"
+LINE_ROI = (764, 621, 856, 652)
+
+
+def line_reading(text: str = "77/1000", confidence: float = .99994) -> list[dict]:
+    return [{"text": text, "confidence": confidence, "bbox": list(LINE_ROI)}]
 
 
 def ocr(name: str = "first") -> list[dict]:
@@ -105,6 +112,89 @@ class OreInventoryTests(unittest.TestCase):
                 self.assertFalse(result["reward_inventory_verified"])
                 self.assertFalse(result["formal_success"])
 
+    def test_current_frames_require_strong_same_frame_line_read(self):
+        first = None
+        second = None
+        for name in ("current_first", "current_second"):
+            with self.subTest(name=name):
+                frame = FIXTURES / f"{name}.png"
+                raw = ocr(name)
+                self.assertEqual(raw[-1]["text"], "000L/LL")
+                self.assertIsNone(observe_ore_inventory(frame, raw, client_version=VERSION))
+                reader = Mock(return_value=line_reading())
+                result = observe_ore_inventory(frame, raw, client_version=VERSION,
+                                               line_reader=reader)
+                self.assertIsNotNone(result)
+                reader.assert_called_once_with(frame, LINE_ROI)
+                self.assertEqual(result["balances"], {"shiny": 15662, "glowy": 1225, "starry": 77})
+                self.assertEqual(result["ores"]["starry"]["source"], "same_frame_line_roi")
+                self.assertEqual(result["local_counts"]["starry"]["full_ocr"][0]["text"], "000L/LL")
+                self.assertEqual(result["local_counts"]["starry"]["readings"], line_reading())
+                self.assertEqual(result["local_counts"]["starry"]["frame_sha256"],
+                                 hashlib.sha256(frame.read_bytes()).hexdigest())
+                if name == "current_first":
+                    first = result
+                else:
+                    second = result
+        self.assertNotEqual(first["frame_sha256"], second["frame_sha256"])
+        self.assertFalse(first["reward_inventory_verified"])
+        self.assertFalse(second["formal_success"])
+
+    def test_line_read_is_not_used_for_valid_full_count_or_conflicting_full_count(self):
+        reader = Mock(return_value=line_reading())
+        self.assertIsNotNone(observe_ore_inventory(FIXTURES / "first.png", ocr(),
+                                                   client_version=VERSION, line_reader=reader))
+        reader.assert_not_called()
+        frame = FIXTURES / "current_first.png"
+        base = ocr("current_first")
+        for text, confidence in (("78/1000", .88), ("77/1001", .88)):
+            changed = [dict(item, text=text, confidence=confidence) if item["text"] == "000L/LL"
+                       else item for item in base]
+            with self.subTest(text=text):
+                self.assertIsNone(observe_ore_inventory(frame, changed, client_version=VERSION,
+                                                        line_reader=reader))
+        self.assertEqual(reader.call_count, 2)
+        valid = observe_ore_inventory(frame, base, client_version=VERSION,
+                                      line_reader=Mock(return_value=line_reading()))
+        strong_conflict = [dict(item, text="78/1000", confidence=.999)
+                           if item["text"] == "000L/LL" else item for item in base]
+        self.assertIsNone(observe_ore_inventory(frame, strong_conflict, client_version=VERSION,
+                                                cached_local=valid["local_counts"]))
+
+    def test_local_reading_and_cache_are_bound_to_original_frame_roi_and_ocr(self):
+        first_frame = FIXTURES / "current_first.png"
+        base = ocr("current_first")
+        accepted = observe_ore_inventory(first_frame, base, client_version=VERSION,
+                                         line_reader=Mock(return_value=line_reading()))
+        cache = accepted["local_counts"]
+        self.assertIsNone(observe_ore_inventory(first_frame, base, client_version=VERSION,
+                                                cached_local={}))
+        same = observe_ore_inventory(first_frame, base, client_version=VERSION,
+                                     cached_local=cache)
+        self.assertEqual(same, accepted)
+        self.assertIsNone(observe_ore_inventory(FIXTURES / "current_second.png",
+                                                ocr("current_second"), client_version=VERSION,
+                                                cached_local=cache))
+        for mutation in (
+                lambda c: c["starry"].update(roi=[765, 622, 854, 650]),
+                lambda c: c["starry"]["readings"][0].update(text="78/1000"),
+                lambda c: c["starry"]["full_ocr"][0].update(text="77/1000"),
+                lambda c: c["starry"].update(frame_sha256="0" * 64),
+                lambda c: c["starry"].update(evidence_sha256="0" * 64),
+        ):
+            with self.subTest(mutation=mutation):
+                changed = copy.deepcopy(cache)
+                mutation(changed)
+                self.assertIsNone(observe_ore_inventory(first_frame, base, client_version=VERSION,
+                                                        cached_local=changed))
+        for readings in ([], line_reading(confidence=.989), line_reading(text="77/1001"),
+                         line_reading(text="78/1000") + line_reading(),
+                         [{"text": "77/1000", "confidence": .99994, "bbox": [0, 0, 1, 1]}],
+                         [{"text": "77/1000", "confidence": True, "bbox": list(LINE_ROI)}]):
+            with self.subTest(readings=readings):
+                self.assertIsNone(observe_ore_inventory(first_frame, base, client_version=VERSION,
+                                                        line_reader=Mock(return_value=readings)))
+
     def test_version_page_anchors_and_icons_fail_closed(self):
         path = FIXTURES / "first.png"
         base = ocr()
@@ -182,6 +272,40 @@ class OreInventoryTests(unittest.TestCase):
             self.assertIsNone(verify_stable_ore_inventory(first, changed))
         self.assertIsNone(verify_stable_ore_inventory(first, second, max_gap_sec=float("nan")))
 
+    def test_current_line_readings_stabilize_without_repeating_ocr(self):
+        now = time.monotonic()
+        captured = []
+        for name, frame_id, observed in (("current_first", "first-current", now - 2),
+                                         ("current_second", "second-current", now - 1)):
+            shot = snapshot(name, frame_id=frame_id, observed=observed)
+            shot.observations["ore_inventory"] = observe_ore_inventory(
+                shot.screenshot_path, shot.observations["ocr"], client_version=VERSION,
+                line_reader=Mock(return_value=line_reading()))
+            captured.append(read_ore_inventory_snapshot(shot, client_version=VERSION))
+        self.assertIsNotNone(captured[0])
+        self.assertIsNotNone(captured[1])
+        stable = verify_stable_ore_inventory(*captured)
+        self.assertEqual(stable["ores"]["starry"], {"amount": 77, "capacity": 1000})
+        self.assertNotEqual(stable["frames"][0]["frame_sha256"], stable["frames"][1]["frame_sha256"])
+        self.assertFalse(stable["account_verified"])
+        self.assertFalse(stable["reward_inventory_verified"])
+
+    def test_vision_uses_same_frame_roi_for_current_full_ocr_regression(self):
+        frame = FIXTURES / "current_first.png"
+        provider = Mock()
+        provider.recognize.return_value = [OCRText(item["text"], item["confidence"],
+                                                   tuple(item["bbox"]))
+                                           for item in ocr("current_first")]
+        provider.recognize_line.return_value = [OCRText("77/1000", .99994, LINE_ROI)]
+        recognizer = ScreenshotRecognizer(provider=provider)
+        recognizer.client_version = VERSION
+        result = recognizer.recognize(frame, battle_details=False)
+        self.assertEqual(result.scene, "popup")
+        self.assertEqual(result.observations["ore_inventory"]["balances"]["starry"], 77)
+        self.assertEqual([button["name"] for button in result.observations["buttons"]],
+                         ["close_ore_inventory"])
+        provider.recognize_line.assert_called_once_with(frame, LINE_ROI)
+
     def test_stable_read_malformed_frame_and_reordered_ores(self):
         now = time.monotonic()
         first = read_ore_inventory_snapshot(snapshot("first", frame_id="one", observed=now - 2),
@@ -228,6 +352,33 @@ class OreInventoryTests(unittest.TestCase):
                     with self.assertRaises(FlowError):
                         close_ore_inventory(blocked, altered)
                 self.assertEqual(blocked.taps, [])
+
+    def test_close_revalidates_cached_line_read_without_second_ocr(self):
+        shot = snapshot("current_first", frame_id="current-live", observed=time.monotonic())
+        reader = Mock(return_value=line_reading())
+        shot.observations["ore_inventory"] = observe_ore_inventory(
+            shot.screenshot_path, shot.observations["ocr"], client_version=VERSION,
+            line_reader=reader)
+        reader.assert_called_once()
+        home = SceneSnapshot("village", .95, FIXTURES / "second.png",
+                             {"village_type": "home", "resource_source": "village_inventory",
+                              "buttons": [{"name": "attack"}, {"name": "shop"}]})
+        session = FakeSession(shot, [home])
+        with patch("autococ.ore_inventory.foreground_package",
+                   return_value=session.config.game.package_name):
+            self.assertEqual(close_ore_inventory(session, shot)["status"], "home")
+        reader.assert_called_once()
+        self.assertEqual(len(session.taps), 1)
+
+        tampered = snapshot("current_first", frame_id="tampered", observed=time.monotonic())
+        tampered.observations["ore_inventory"] = copy.deepcopy(shot.observations["ore_inventory"])
+        tampered.observations["ore_inventory"]["local_counts"]["starry"]["readings"][0]["text"] = "78/1000"
+        blocked = FakeSession(tampered, [])
+        with patch("autococ.ore_inventory.foreground_package",
+                   return_value=blocked.config.game.package_name):
+            with self.assertRaises(FlowError):
+                close_ore_inventory(blocked, tampered)
+        self.assertEqual(blocked.taps, [])
 
     def test_close_rechecks_after_foreground_work(self):
         def current(path=FIXTURES / "first.png", *, age=0):

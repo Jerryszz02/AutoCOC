@@ -1,0 +1,50 @@
+{
+  "client_version": "18.647.2",
+  "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-215558-827993-c3f29156\\frames\\00009-scout-camera-ready.png",
+  "source_sha256": "bf0ba8f507b64f42f36f6b575d7f7609fbac7ea17f765bd265cf35cc8b9cc424",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "native_preserved_xyxy": [
+    1120,
+    0,
+    1420,
+    190
+  ],
+  "native_preserved_pixel_sha256": "1b6d5cf5dc927ea9130263dea308fdeb9f613f60a8d6eb7cf18316e2f99d22d0",
+  "output_sha256": "b73df7b4791f6144982c754fbaec5af3d354431c3691003c9810270eaa498eb7",
+  "output_preserved_pixel_sha256": "1b6d5cf5dc927ea9130263dea308fdeb9f613f60a8d6eb7cf18316e2f99d22d0",
+  "outside_preserved_area": "black masked",
+  "events_source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-215558-827993-c3f29156\\events.jsonl",
+  "events_sha256": "9c43151bae4ed8ebf916d612b25205265d27a6d7b41bfe70018353b68bf71982",
+  "cached_ocr": [
+    {
+      "text": "开战倒计时",
+      "confidence": 0.99986,
+      "bbox": [
+        581,
+        12,
+        680,
+        40
+      ]
+    },
+    {
+      "text": ".24秒",
+      "confidence": 0.90243,
+      "bbox": [
+        594,
+        32,
+        685,
+        87
+      ]
+    }
+  ],
+  "cached_ocr_filter": "Only full-OCR boxes fully contained in native_preserved_xyxy scaled to 1280x720; original text and confidence retained.",
+  "purpose": "Development-only timer/header fixture, not human truth or formal heldout.",
+  "capture_metadata": {
+    "observed_at_monotonic": 1225982.0820336,
+    "captured_at_utc": "2026-10-16T20:56:24.059947+00:00",
+    "frame_id": "e23c670fe1224f629fde9e4cdddf99ff"
+  }
+}
