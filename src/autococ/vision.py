@@ -1523,6 +1523,69 @@ class ScreenshotRecognizer:
             if bottom is not None:
                 boxes.append((left, top + 595, right, bottom))
 
+        if self.client_version == "18.647.2":
+            # A connected blue toolbar can start a card at the preceding
+            # card's *right* border. That edge has the wrong direction, yet
+            # its wide coloured contour and count still look plausible.
+            # Refine only a complete, independently named troop card with one
+            # current strong header, its own opposite long edges and bottom.
+            from .unit_catalog import recognize_card_identity
+
+            corrected = []
+            for left, top, right, bottom in boxes:
+                box = (left, top, right, bottom)
+                headers_here = []
+                for item in count_texts:
+                    if (item.bbox is None or type(item.confidence) not in (int, float) or
+                            not math.isfinite(item.confidence) or
+                            not threshold <= item.confidence <= 1 or
+                            not re.fullmatch(r"[xX×]\s*[1-9][0-9]*", item.text.strip())):
+                        continue
+                    header = scale_box(item.bbox, from_resolution=self.baseline_resolution,
+                                       to_resolution=(1280, 720))
+                    center = (header[0] + header[2]) / 2
+                    if left < center < right and 588 <= (header[1] + header[3]) / 2 <= 627:
+                        headers_here.append(item)
+                if not (590 <= top <= 605 and bottom == 711):
+                    corrected.append(box)
+                    continue
+                if len(headers_here) != 1:
+                    if edge_direction[left] >= 150:
+                        corrected.append(box)
+                    continue
+                identity = recognize_card_identity(image, box, "troop", surface="battle",
+                                                   client_version=self.client_version)
+                if (identity.get("unit_id") is None or identity.get("version_verified") is not True or
+                        identity.get("template_client_version") != self.client_version or
+                        type(identity.get("confidence")) not in (int, float) or
+                        not math.isfinite(identity["confidence"]) or identity["confidence"] < .97):
+                    if edge_direction[left] >= 150:
+                        corrected.append(box)
+                    continue
+                candidates = []
+                for actual_left in range(left, min(left + 11, right - 79)):
+                    if (edge_direction[actual_left] < 150 or edge_direction[right - 1] > -150 or
+                            not supported_sides(actual_left, right) or
+                            colored_bottom(actual_left, right) != bottom):
+                        continue
+                    actual = (actual_left, top, right, bottom)
+                    candidates.append((float(edge_direction[actual_left]), actual))
+                if candidates:
+                    actual = max(candidates, key=lambda row: row[0])[1]
+                    named = recognize_card_identity(image, actual, "troop", surface="battle",
+                                                    client_version=self.client_version)
+                    if (named.get("unit_id") == identity["unit_id"] and
+                            named.get("version_verified") is True and
+                            named.get("template_client_version") == self.client_version and
+                            type(named.get("confidence")) in (int, float) and
+                            math.isfinite(named["confidence"]) and named["confidence"] >= .97):
+                        corrected.append(actual)
+                elif edge_direction[left] >= 150:
+                    corrected.append(box)
+                # A named contour beginning at its neighbour's negative
+                # right edge is not a card when no own left edge survives.
+            boxes = corrected
+
         # Adjacent spell art can extend a coloured contour a few pixels into
         # its neighbour. Rebuild only collided groups from independent current
         # quantities; otherwise the final overlap guard rejects the whole group.
