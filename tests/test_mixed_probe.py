@@ -6,11 +6,16 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import cv2
+import numpy as np
 
+from autococ.battle_vision import selected_card_bbox
 from autococ.errors import DeploymentError, FlowError
 from autococ.frozen_line import FrozenLinePlan, _file_sha256, _plan_digest
 from autococ.mixed_probe import (execute_mixed_probe_line, freeze_mixed_probe_line,
-                                 _probe_count, _remaining_checkpoint, remainder_burst_limit)
+                                 ProbeEvidenceConflict, ProbeSelectionPending,
+                                 _probe_count, _remaining_checkpoint,
+                                 remainder_burst_limit)
 from autococ.ocr import OCRText
 from autococ.prepared_battle import FramePacket, PreparedInput
 from autococ.scene import SceneSnapshot
@@ -23,6 +28,19 @@ TERRAIN = ({"edge": 0, "point": (400, 200)}, {"edge": 0, "point": (350, 300)},
 TROOPS = (("electro_dragon", 10), ("dragon", 1), ("furnace", 1), ("balloon", 1))
 HEROES = ("grand_warden", "archer_queen", "dragon_duke", "minion_prince")
 ROOT = Path(__file__).resolve().parents[1]
+SOURCE_ROOT = Path(r"E:\projects\AutoCOC")
+SELECTION_METADATA = ROOT / "tests/fixtures/mixed_balloon_selection_18_647_2_20261016.json"
+
+
+def _selection_rows():
+    return json.loads(SELECTION_METADATA.read_text(encoding="utf-8"))["frames"]
+
+
+def _retained_ocr(items, rectangles):
+    return [item for item in items if item.get("bbox") and
+            any(left <= item["bbox"][0] < item["bbox"][2] <= right and
+                top <= item["bbox"][1] < item["bbox"][3] <= bottom
+                for left, top, right, bottom in rectangles)]
 
 
 def snapshot(tmp_path, name, scene, observed, *, fast=None):
@@ -166,8 +184,10 @@ def test_mixed_card_count_requires_exact_current_evidence(monkeypatch, tmp_path,
                                                 "template_client_version": "18.647.2",
                                                 "confidence": .99})
     monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_a: None)
-    with pytest.raises(FlowError):
+    with pytest.raises(FlowError) as failure_error:
         _probe_count(session, plan, current, "dragon", 1, selected=True)
+    assert isinstance(failure_error.value, ProbeSelectionPending) is \
+           (failure == "open_selected_border")
 
 
 def test_real_anonymous_furnace_toolbar_proves_unspent_checkpoint_without_new_ocr(
@@ -344,3 +364,180 @@ def test_mixed_failures_do_not_repeat_input_or_start_remainder(monkeypatch, tmp_
         execute_mixed_probe_line(session, plan, clock=lambda: 10., sleep=lambda _s: None)
     assert len(session.inputs) == expected_inputs
     assert not any(kind == "frozen" for kind, _point in session.inputs)
+
+
+def test_live_selected_transition_fixtures_are_anonymous_and_source_bound():
+    metadata = json.loads(SELECTION_METADATA.read_text(encoding="utf-8"))
+    assert metadata["client_version"] == "18.647.2"
+    assert metadata["human_reviewed"] is False
+    assert metadata["counts_toward_acceptance"] is False
+    assert metadata["cached_ocr_filter"] == (
+        "Retain only OCR items whose entire xyxy bbox lies inside one of the "
+        "frame's retained_baseline_rectangles_xyxy; preserve original order and values.")
+    assert [Path(row["source_frame"]).name[:5] for row in metadata["frames"]] == [
+        "00015", "00016"]
+    for row in metadata["frames"]:
+        path = ROOT / row["path"]
+        image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        assert image.shape == (720, 1280, 3)
+        assert _file_sha256(path) == row["sha256"]
+        mask = np.zeros(image.shape[:2], dtype=bool)
+        for left, top, right, bottom in row["retained_baseline_rectangles_xyxy"]:
+            mask[top:bottom, left:right] = True
+        assert np.all(image[~mask] == 45)
+        assert row["cached_ocr"] == _retained_ocr(
+            row["cached_ocr"], row["retained_baseline_rectangles_xyxy"])
+        source = SOURCE_ROOT / row["source_frame"]
+        if source.is_file():
+            assert _file_sha256(source) == row["source_sha256"]
+            original = cv2.resize(cv2.imdecode(np.fromfile(source, dtype=np.uint8),
+                                               cv2.IMREAD_COLOR), (1280, 720),
+                                  interpolation=cv2.INTER_AREA)
+            assert np.array_equal(image[mask], original[mask])
+        events = SOURCE_ROOT / row["source_events"]
+        if events.is_file():
+            assert _file_sha256(events) == row["source_events_sha256"]
+            records = [event for line in events.read_text(encoding="utf-8").splitlines()
+                       if (event := json.loads(line)).get("kind") == "observation"
+                       and Path(str(event.get("frame"))) == source]
+            assert len(records) == 1
+            observation = records[0]["observations"]
+            assert row["cached_ocr"] == _retained_ocr(
+                observation["ocr"], row["retained_baseline_rectangles_xyxy"])
+            if "cached_fast_count" in row:
+                assert len(observation["deployment_count_reads"]) == 1
+                assert row["cached_fast_count"] == {
+                    key: value for key, value in observation["deployment_count_reads"][0].items()
+                    if key != "frame"}
+
+
+def test_real_pixels_and_cached_count_prove_pending_then_selected(monkeypatch, tmp_path):
+    from autococ.images import read_frame
+    from autococ.unit_catalog import recognize_card_identity
+
+    plan, source = make_plan(monkeypatch, tmp_path)
+    first, second = _selection_rows()
+    first_path, second_path = ROOT / first["path"], ROOT / second["path"]
+    bbox = (383, 595, 472, 711)
+    image = cv2.resize(read_frame(first_path), (1280, 720), interpolation=cv2.INTER_AREA)
+    identity = recognize_card_identity(image, bbox, "troop", surface="battle",
+                                       client_version="18.647.2")
+    assert identity["unit_id"] == "balloon"
+    assert identity["version_verified"] is True
+    assert selected_card_bbox(first_path, bbox, (1280, 720)) is None
+    assert selected_card_bbox(second_path, bbox, (1280, 720)) == (380, 589, 475, 709)
+    assert first["cached_fast_count"]["count"] == 1
+    assert first["cached_fast_count"]["portrait_score"] == 1.0
+    full_count = [item for item in second["cached_ocr"] if item["text"] == "x1" and
+                  380 <= item["bbox"][0] < 475]
+    assert len(full_count) == 1 and full_count[0]["confidence"] >= .9
+
+    base = replace(plan.base, frame=replace(plan.base.frame,
+                                            frame_id=str(first_path),
+                                            screenshot_path=first_path),
+                   frame_sha256=_file_sha256(first_path),
+                   toolbar_before_frame_id=str(first_path),
+                   toolbar_before_sha256=_file_sha256(first_path))
+    plan = replace(plan, base=base, balloon_bbox=bbox, balloon_point=(427, 653))
+    # The OCR provider only replays each frame's recorded x1; actual source
+    # and current portrait matching, source identity and outline stay live code.
+    active_confidence = {"value": first["cached_fast_count"]["confidence"]}
+    provider = SimpleNamespace(recognize_line_image=lambda _crop: [
+        OCRText("x1", active_confidence["value"], (0, 0, 1, 1))])
+    recognizer = ScreenshotRecognizer(provider=provider)
+    recognizer.client_version = "18.647.2"
+    session = Session(source, [])
+    session.recognizer = recognizer
+    first_read = {**first["cached_fast_count"], "frame": str(first_path)}
+    first_snapshot = SceneSnapshot("enemy_village", .99, first_path, {
+        "recognition_scope": "troop_count", "fast_fallback": False,
+        "matched_reasons": ["two_current_hud_anchors"],
+        "deployment_count_reads": [first_read], "battle": {"slots": []},
+        "ocr": first["cached_ocr"]})
+    session.last_snapshot = first_snapshot
+    with pytest.raises(ProbeSelectionPending, match="closed card border"):
+        _probe_count(session, plan, first_snapshot, "balloon", 1, selected=True)
+    active_confidence["value"] = full_count[0]["confidence"]
+    second_snapshot = SceneSnapshot("enemy_village", .99, second_path, {
+        "recognition_scope": "full", "fast_fallback": True,
+        "recognition_requested": "troop_count", "battle": {"slots": []},
+        "ocr": second["cached_ocr"]})
+    session.last_snapshot = second_snapshot
+    reading = _probe_count(session, plan, second_snapshot, "balloon", 1, selected=True)
+    assert reading["count"] == 1
+    assert reading["portrait_score"] >= .92
+    assert reading["portrait_source"] == "current_frame_saved_battle_portrait"
+    assert reading["source_identity"]["unit_id"] == "balloon"
+    assert all(reading["roi"][index] <= full_count[0]["bbox"][index] for index in (0, 1))
+    assert all(full_count[0]["bbox"][index] <= reading["roi"][index] for index in (2, 3))
+    assert reading["selected_card_border"] == [380, 589, 475, 709]
+
+
+@pytest.mark.parametrize("outcome,selected_frames,expected_inputs", [
+    ("resolved", 2, 2), ("always_pending", 3, 1),
+    ("strong_conflict", 2, 1), ("source_conflict", 2, 1),
+    ("camera_conflict", 2, 1), ("expired", 1, 1)])
+def test_pending_selection_only_reobserves_within_existing_budget(
+        monkeypatch, tmp_path, outcome, selected_frames, expected_inputs):
+    plan, source = make_plan(monkeypatch, tmp_path)
+    selected = [snapshot(tmp_path, f"selected-{index}", "enemy_village",
+                         10.1 + index * .1, fast="troop_count")
+                for index in range(selected_frames)]
+    posts = [snapshot(tmp_path, f"post-{index}", "battle", 10.5 + index * .1,
+                      fast="battle_hud") for index in range(2)] if outcome == "resolved" else []
+    session = Session(source, selected + posts)
+    now = {"value": 10.}
+    observe = session.observe
+
+    def timed_observe(label, **kwargs):
+        frame = observe(label, **kwargs)
+        if outcome == "expired" and frame is selected[0]:
+            now["value"] = 13.1
+        return frame
+
+    session.observe = timed_observe
+
+    def current(_session, _plan, frame, **_kwargs):
+        if outcome == "camera_conflict" and frame is selected[1]:
+            raise FlowError("camera proof changed")
+        return proof(frame)
+
+    monkeypatch.setattr("autococ.mixed_probe._current_frame", current)
+    monkeypatch.setattr("autococ.mixed_probe._foreground_now", lambda _s: None)
+
+    def count(_session, _plan, frame, unit_id, expected, **kwargs):
+        assert unit_id == "balloon"
+        if frame in selected:
+            index = selected.index(frame)
+            if index == 0 or outcome == "always_pending":
+                raise ProbeSelectionPending("closed card border pending")
+            if outcome == "strong_conflict":
+                raise ProbeEvidenceConflict("strong current count conflict")
+            if outcome == "source_conflict":
+                raise FlowError("source identity changed")
+            return {"count": 1}
+        assert frame in posts and expected == 0
+        return {"count": 1}  # Never claims an unproved 1→0 placement.
+
+    monkeypatch.setattr("autococ.mixed_probe._probe_count", count)
+    with pytest.raises(DeploymentError):
+        execute_mixed_probe_line(session, plan, clock=lambda: now["value"],
+                                 sleep=lambda _s: None)
+    assert len(session.inputs) == expected_inputs
+    assert session.inputs[0] == ("tap", plan.balloon_point)
+    assert session.inputs.count(("tap", plan.balloon_point)) == 1
+    assert not any(kind == "frozen" for kind, _point in session.inputs)
+    assert session.frozen_line_receipt["actions"][0]["pending_frames"][0] == {
+        "frame": str(selected[0].screenshot_path),
+        "sha256": _file_sha256(selected[0].screenshot_path),
+        "message": "closed card border pending"}
+    if outcome == "resolved":
+        assert session.inputs[1] == ("tap", plan.anchors[0])
+        assert session.last_snapshot is posts[-1]
+    elif outcome == "always_pending":
+        assert session.last_snapshot is selected[-1]
+        assert len(session.frozen_line_receipt["actions"][0]["pending_frames"]) == 3
+    elif outcome == "expired":
+        assert session.last_snapshot is selected[0]
+    else:
+        assert session.last_snapshot is selected[1]

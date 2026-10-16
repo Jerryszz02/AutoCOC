@@ -32,6 +32,10 @@ class ProbeEvidenceConflict(FlowError):
     """A strong contradictory count or identity cannot be cured by another frame."""
 
 
+class ProbeSelectionPending(FlowError):
+    """Only the selected outline is absent from an otherwise proved fresh card."""
+
+
 def _mixed_digest(plan: MixedProbePlan) -> str:
     return _digest({"base": plan.base.plan_sha256, "anchors": plan.anchors,
                     "balloon_point": plan.balloon_point, "balloon_bbox": plan.balloon_bbox,
@@ -191,7 +195,7 @@ def _probe_count(session: Any, plan: MixedProbePlan, snapshot: Any, unit_id: str
             raise FlowError(f"Mixed {unit_id} is not independently selected")
         border = selected_card_bbox(snapshot.screenshot_path, bbox, base.frame.resolution)
         if border is None:
-            raise FlowError(f"Mixed selected {unit_id} lacks a closed card border")
+            raise ProbeSelectionPending(f"Mixed selected {unit_id} lacks a closed card border")
         reading["selected_card_border"] = list(border)
     else:
         image = cv2.resize(read_frame(snapshot.screenshot_path), (1280, 720), interpolation=cv2.INTER_AREA)
@@ -392,7 +396,13 @@ def execute_mixed_probe_line(session: Any, plan: MixedProbePlan, *,
                 _guard_fast(current, "troop_count")
                 proof = _current_frame(session, plan, current, after=select_done,
                                        scene="enemy_village" if index == 0 else "battle")
-                reading = _probe_count(session, plan, current, unit_id, 1, selected=True)
+                try:
+                    reading = _probe_count(session, plan, current, unit_id, 1, selected=True)
+                except ProbeSelectionPending as exc:
+                    selection.setdefault("pending_frames", []).append({
+                        "frame": proof["frame"], "sha256": proof["sha256"],
+                        "message": str(exc)})
+                    continue  # No input is repeated; only another fresh frame may prove selection.
                 if clock() >= selection_deadline:
                     raise FlowError("Mixed selected-card proof exceeded three seconds")
                 selected_proof = proof
