@@ -1,3 +1,5 @@
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -38,6 +40,84 @@ def test_live_002_slightly_overlapping_ocr_boxes_keep_current_timer():
     assert result["countdown_seconds"] == 23
     assert result["countdown_evidence"]["frame"] == "current.png"
     assert result["countdown_evidence"]["source"] == "current_frame_ocr"
+
+
+def _live_countdown_fixture():
+    path = Path(__file__).parent / "fixtures" / "preparation_countdown_18_647_2_20261016.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == (
+        "0e664eb0913c454568846762ded1733e81f0c81c0fa5aaa0b4bdf057137587bc")
+    assert data["source_events_sha256"] == (
+        "aeaafc055d9580e322d6a3790c90cd7a56b37987f227f24eef4bf145a5c2fec1")
+    assert [frame["source_sha256"] for frame in data["frames"]] == [
+        "88a5742dfd5af664122f7b0443d9c3fb583c38e4be2f0cbce50b2f866496ae2c",
+        "f8ecf873ed790852201ef8b1991bb57f914bbf560e7af4c0e47db2d5814c0805",
+    ]
+    assert all([item["text"] for item in frame["cached_ocr"]] ==
+               ["开战倒计时", "25秒"] for frame in data["frames"])
+    return data["frames"]
+
+
+def test_live_cached_countdown_fixture_matches_source_when_available():
+    metadata = json.loads((Path(__file__).parent / "fixtures" /
+                           "preparation_countdown_18_647_2_20261016.json").read_text(encoding="utf-8"))
+    source_root = Path(r"E:\projects\AutoCOC")
+    events = source_root / metadata["source_events"]
+    if not events.is_file():
+        pytest.skip("Original local live evidence is unavailable")
+    assert hashlib.sha256(events.read_bytes()).hexdigest() == metadata["source_events_sha256"]
+    observations = [event for line in events.read_text(encoding="utf-8").splitlines()
+                    if (event := json.loads(line)).get("kind") == "observation"]
+    for frame in metadata["frames"]:
+        source = source_root / frame["source_frame"]
+        assert source.is_file()
+        assert hashlib.sha256(source.read_bytes()).hexdigest() == frame["source_sha256"]
+        (observation,) = [event for event in observations if Path(event["frame"]) == source]
+        retained = [item for item in observation["observations"]["ocr"]
+                    if item.get("text") in ("开战倒计时", "25秒")
+                    and len(item.get("bbox", [])) == 4
+                    and 500 <= item["bbox"][0] < item["bbox"][2] <= 750
+                    and 0 <= item["bbox"][1] < item["bbox"][3] <= 100]
+        assert retained == frame["cached_ocr"]
+
+
+@pytest.mark.parametrize("frame_index,overlap", [(0, 7), (1, 10)])
+def test_live_cached_countdown_geometry_accepts_current_frame(frame_index, overlap):
+    frame = _live_countdown_fixture()[frame_index]
+    label, timer = frame["cached_ocr"]
+    assert label["bbox"][3] - timer["bbox"][1] == overlap
+    snapshot = SceneSnapshot(frame["scene"], .92, Path(frame["source_frame"]),
+                             {"battle": {}, "ocr": frame["cached_ocr"]})
+    attach_preparation_countdown(snapshot)
+    battle = snapshot.observations["battle"]
+    assert battle["countdown_seconds"] == frame["expected_seconds"]
+    assert battle["countdown_evidence"]["label"] == label
+    assert battle["countdown_evidence"]["timer"] == timer
+    assert battle["countdown_evidence"]["frame"] == str(Path(frame["source_frame"]))
+
+
+@pytest.mark.parametrize("change", ["excessive_overlap", "misaligned", "duplicate_timer",
+                                            "duplicate_anchor", "low_confidence", "wrong_scene"])
+def test_live_cached_countdown_rejects_ambiguous_or_unrelated_timer(change):
+    frame = _live_countdown_fixture()[1]
+    ocr = [dict(item) for item in frame["cached_ocr"]]
+    scene = frame["scene"]
+    if change == "excessive_overlap":
+        ocr[1]["bbox"] = [594, 28, 686, 88]  # 12px > 28 * .40 = 11.2px.
+    elif change == "misaligned":
+        ocr[1]["bbox"] = [700, 30, 792, 88]
+    elif change == "duplicate_timer":
+        ocr.append({"text": "24秒", "confidence": .99, "bbox": [594, 40, 686, 88]})
+    elif change == "duplicate_anchor":
+        ocr.append(dict(ocr[0]))
+    elif change == "low_confidence":
+        ocr[1]["confidence"] = .89
+    else:
+        scene = "battle"
+    snapshot = SceneSnapshot(scene, .92, Path(frame["source_frame"]),
+                             {"battle": {}, "ocr": ocr})
+    attach_preparation_countdown(snapshot)
+    assert "countdown_seconds" not in snapshot.observations["battle"]
 
 
 def test_large_overlap_does_not_claim_a_timer():

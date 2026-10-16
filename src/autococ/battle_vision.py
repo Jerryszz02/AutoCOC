@@ -72,7 +72,7 @@ def attach_preparation_countdown(snapshot: SceneSnapshot,
         # OCR boxes for the live timer can overlap the smaller heading by a
         # few pixels even though the glyphs are on separate lines. Bound the
         # overlap by their own text heights as well as 14 baseline pixels.
-        allowed_overlap = min(14, (label_box[3] - label_box[1]) * .30,
+        allowed_overlap = min(14, (label_box[3] - label_box[1]) * .40,
                               (box[3] - box[1]) * .25)
         if (value is not None and -allowed_overlap <= box[1] - label_box[3] <= height * .10
                 and abs((box[0] + box[2] - label_box[0] - label_box[2]) / 2) <= width * .07):
