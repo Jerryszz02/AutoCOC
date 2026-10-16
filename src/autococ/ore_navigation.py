@@ -245,6 +245,45 @@ def _looks_selected(snapshot) -> bool:
         for item in ocr)
 
 
+def _wrong_selected_building(snapshot) -> bool:
+    """A readable, different building title is a hard stop during selection."""
+    ocr = snapshot.observations.get("ocr")
+    return isinstance(ocr, list) and any(
+        isinstance(item, dict) and _overlaps(item.get("bbox"), _TITLE_ROI)
+        and item.get("text") != _TITLE
+        and ("级" in str(item.get("text", "")) or "铁匠" in str(item.get("text", "")))
+        for item in ocr)
+
+
+def _observe_transition(session, label: str, previous, end: float):
+    """Accept only a new, ordered capture while waiting for a page transition."""
+    session.check_deadline()
+    if time.monotonic() >= end:
+        raise FlowError("Ore navigation transition deadline exceeded")
+    current = session.observe(label, purpose="full")
+    session.check_deadline()
+    o = current.observations
+    prior = previous.observations
+    captured = o.get("observed_at_monotonic")
+    earlier = prior.get("observed_at_monotonic")
+    if (time.monotonic() >= end or current is not session.last_snapshot
+            or session.client_version != CLIENT_VERSION
+            or tuple(session.config.game.baseline_resolution) != BASELINE
+            or o.get("account_in_use") is not None
+            or not isinstance(o.get("ocr"), list)
+            or any(isinstance(item, dict) and "另一个设备正在连接这个村庄" in str(item.get("text", ""))
+                   for item in o["ocr"])
+            or not isinstance(o.get("frame_id"), str) or not o["frame_id"]
+            or o["frame_id"] == prior.get("frame_id")
+            or str(current.screenshot_path) == str(previous.screenshot_path)
+            or type(captured) not in (int, float) or not math.isfinite(captured)
+            or type(earlier) not in (int, float) or not math.isfinite(earlier)
+            or not earlier < captured <= time.monotonic()
+            or time.monotonic() - captured > 8):
+        raise FlowError("Ore navigation transition frame is stale, changed or account-blocked")
+    return current
+
+
 def _guard_current(session, snapshot, evidence: dict, end: float) -> None:
     """Check freshness again after the bounded foreground lookup before tap."""
     def current() -> bool:
@@ -344,22 +383,36 @@ def read_current_ore_inventory(session, *, timeout_sec: float = 90) -> dict:
                 continue  # At most two further no-input observations for a moving hero.
             _guard_current(session, current, candidate, end)
             session.tap(current, tuple(candidate["point"]), reason="Select current visible blacksmith front")
-            remaining()
-            current = session.observe("ore-navigation-selected", purpose="full")
-            selected = recognize_selected_blacksmith(
-                current, client_version=session.client_version, line_reader=line_reader)
+            for selected_attempt in range(3):
+                remaining()
+                current = _observe_transition(session, f"ore-navigation-selected-{selected_attempt + 1}",
+                                              current, end)
+                if _wrong_selected_building(current):
+                    raise FlowError("Selected a different building, not the verified blacksmith")
+                selected = recognize_selected_blacksmith(
+                    current, client_version=session.client_version, line_reader=line_reader)
+                if selected is not None:
+                    break
             if selected is None:
-                raise FlowError("Selected building is not a verified blacksmith Equipment menu")
+                raise FlowError("Selected building was not verified across three fresh captures")
             break
         if selected is None:
             raise FlowError("No unique visible blacksmith front across three current HOME captures")
         _guard_current(session, current, selected, end)
         session.tap(current, tuple(selected["point"]), reason="Open verified blacksmith Equipment menu")
-        remaining()
-        first_snapshot = session.observe("ore-navigation-first", purpose="full")
-        first = read_ore_inventory_snapshot(first_snapshot, client_version=session.client_version)
-        if first is None or first_snapshot.scene != "popup":
-            raise FlowError("First ore inventory frame is not verified")
+        first = None
+        for ore_attempt in range(3):
+            remaining()
+            first_snapshot = _observe_transition(session, f"ore-navigation-first-{ore_attempt + 1}",
+                                                 current, end)
+            current = first_snapshot
+            first = read_ore_inventory_snapshot(first_snapshot, client_version=session.client_version)
+            if first is not None:
+                if first_snapshot.scene != "popup":
+                    raise FlowError("Ore inventory evidence is not a popup")
+                break
+        if first is None:
+            raise FlowError("First ore inventory frame was not verified across three fresh captures")
         remaining()
         second_snapshot = session.observe("ore-navigation-second", purpose="full")
         second = read_ore_inventory_snapshot(second_snapshot, client_version=session.client_version)

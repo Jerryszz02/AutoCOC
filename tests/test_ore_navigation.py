@@ -188,6 +188,12 @@ class OreNavigationTests(unittest.TestCase):
             self.assertIsNone(recognize_selected_blacksmith(changed, client_version=VERSION))
         self.assertIsNone(recognize_selected_blacksmith(shot("home_failed"), client_version=VERSION))
 
+    def test_actual_immediate_post_tap_frame_is_transition_then_delayed_selection(self):
+        immediate = shot("home_immediate_after_tap")
+        delayed = shot("selected_delayed_after_tap")
+        self.assertIsNone(recognize_selected_blacksmith(immediate, client_version=VERSION))
+        self.assertIsNotNone(recognize_selected_blacksmith(delayed, client_version=VERSION))
+
     def test_wrong_version_account_foreground_and_stale_frames_never_tap(self):
         home = shot("home_visible")
         self.assertIsNone(locate_blacksmith(home, client_version="18.647.3"))
@@ -209,7 +215,8 @@ class OreNavigationTests(unittest.TestCase):
             self.assertEqual(session.taps, [])
 
     def test_full_navigation_reads_two_fresh_frames_and_closes_home(self):
-        session = FakeSession(["home_visible", "selected_strong", "ore_first",
+        session = FakeSession(["home_visible", "home_immediate_after_tap",
+                               "selected_delayed_after_tap", "ore_first",
                                "ore_second", "home_new", "home_visible", "home_old"])
         with patch("autococ.ore_navigation.foreground_package",
                    return_value=session.config.game.package_name), patch(
@@ -229,7 +236,7 @@ class OreNavigationTests(unittest.TestCase):
         self.assertFalse(result["formal_success"])
 
     def test_already_selected_shortcut_and_wrong_selection_stop(self):
-        session = FakeSession(["selected_strong", "ore_first", "ore_second", "home_new",
+        session = FakeSession(["selected_strong", "selected_mid", "ore_first", "ore_second", "home_new",
                                "home_visible", "home_old"])
         with patch("autococ.ore_navigation.foreground_package",
                    return_value=session.config.game.package_name), patch(
@@ -239,7 +246,8 @@ class OreNavigationTests(unittest.TestCase):
         self.assertTrue(result["returned_home"])
         self.assertEqual(len(session.taps), 2)
 
-        wrong = FakeSession(["home_visible", "home_failed"])
+        wrong = FakeSession(["home_visible", "home_immediate_after_tap", "home_failed",
+                             "home_occluded"])
         with patch("autococ.ore_navigation.foreground_package",
                    return_value=wrong.config.game.package_name):
             with self.assertRaises(FlowError):
@@ -256,6 +264,62 @@ class OreNavigationTests(unittest.TestCase):
         with self.assertRaises(FlowError):
             read_current_ore_inventory(wrong_selected)
         self.assertEqual(wrong_selected.taps, [])
+
+        wrong_after_tap = FakeSession(["home_visible", "selected_delayed_after_tap"])
+        original = wrong_after_tap.observe
+        def changed_after_tap(label, *, purpose="full"):
+            value = original(label, purpose=purpose)
+            if label == "ore-navigation-selected-1":
+                value.observations["ocr"][0]["text"] = "研究所（10级）"
+            return value
+        wrong_after_tap.observe = changed_after_tap
+        with patch("autococ.ore_navigation.foreground_package",
+                   return_value=wrong_after_tap.config.game.package_name):
+            with self.assertRaises(FlowError):
+                read_current_ore_inventory(wrong_after_tap)
+        self.assertEqual([point for point, _ in wrong_after_tap.taps], [(759, 207)])
+
+    def test_transition_account_stale_and_reused_frames_stop_without_extra_taps(self):
+        for mode in ("account", "stale", "reused"):
+            with self.subTest(mode=mode):
+                names = (["home_visible", "home_immediate_after_tap"] if mode != "reused"
+                         else ["home_visible", "home_visible"])
+                session = FakeSession(names)
+                original = session.observe
+                def changed(label, *, purpose="full"):
+                    value = original(label, purpose=purpose)
+                    if label == "ore-navigation-selected-1":
+                        if mode == "account":
+                            value.observations["account_in_use"] = {"warning": True}
+                        elif mode == "stale":
+                            value.observations["observed_at_monotonic"] -= 10
+                    return value
+                session.observe = changed
+                with patch("autococ.ore_navigation.foreground_package",
+                           return_value=session.config.game.package_name):
+                    with self.assertRaises(FlowError):
+                        read_current_ore_inventory(session)
+                self.assertEqual([point for point, _ in session.taps], [(759, 207)])
+
+    def test_first_ore_page_never_opens_again_and_unknown_three_frames_stop(self):
+        session = FakeSession(["selected_strong", "selected_mid", "home_immediate_after_tap",
+                               "ore_first", "ore_second", "home_new",
+                               "home_visible", "home_old"])
+        with patch("autococ.ore_navigation.foreground_package",
+                   return_value=session.config.game.package_name), patch(
+                   "autococ.ore_inventory.foreground_package",
+                   return_value=session.config.game.package_name):
+            result = read_current_ore_inventory(session)
+        self.assertTrue(result["returned_home"])
+        self.assertEqual([point for point, _ in session.taps], [(708, 562), (1223, 81)])
+
+        unknown = FakeSession(["selected_strong", "selected_mid", "home_immediate_after_tap",
+                               "home_failed"])
+        with patch("autococ.ore_navigation.foreground_package",
+                   return_value=unknown.config.game.package_name):
+            with self.assertRaises(FlowError):
+                read_current_ore_inventory(unknown)
+        self.assertEqual([point for point, _ in unknown.taps], [(708, 562)])
 
     def test_close_home_needs_two_new_ordered_clean_frames(self):
         for mode in ("account_overlay", "reused_path", "reused_id", "expired"):

@@ -136,6 +136,37 @@
         "home_zone": "7bea9e0a618f67f546e3319adf6e764a705e1835ed6be51c64521c022d15010e",
         "selected_menu": "7339a72c9ce01a9fc2f6d2db92c7c11c09d0d29fade7e4a281ad299e75894a3c"
       }
+    },
+    "home_immediate_after_tap": {
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-224105-027202-f362718d\\frames\\00007-ore-navigation-selected.png",
+      "source_frame_sha256": "c6855c9a34cc208e166ffe07f606d0ae41dc99f880ea0a4a4e391779284456cf",
+      "source_events": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-224105-027202-f362718d\\events.jsonl",
+      "source_events_sha256": "81fb0857233510e7d4996b7eba62de1dc7a2669d2a7af103fd782febc3975d62",
+      "derived_path": "tests/fixtures/blacksmith_navigation_18_647_2/home_immediate_after_tap.png",
+      "derived_sha256": "4ef36bf7433a1a7f6e7840bcaff48b1e790cd0ff22276eaa747a4428b59456f0",
+      "context_path": "tests/fixtures/blacksmith_navigation_18_647_2/home_immediate_after_tap.json",
+      "context_sha256": "3a9b0e0f0f66ed34a6a8b17aa11709008044a64e7fb859ece7875af5b7b8cd00",
+      "retained_roi_pixel_sha256": {
+        "home_zone": "4416855bcb1fce46e85147d2c805594ffcf28e692a49c837afc8da378ff46a16"
+      },
+      "source_run_report": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\run-20261016-224105-027202-f362718d.json",
+      "source_run_report_sha256": "e8345c6114953d3390accc167cd411672b4f40b5e5e4f2d578d3a3e1c971a775"
+    },
+    "selected_delayed_after_tap": {
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-224229-observe\\frames\\00001-before.png",
+      "source_frame_sha256": "e54a968b61a26ff888da22d7e38dbd19ec4feaecb3ebc93ae03cc4e7d82f9c3a",
+      "source_events": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-224229-observe\\events.jsonl",
+      "source_events_sha256": "dad13d87db4f27a5288c1145a5e9e3e8229ff1f6c2ab370e8cd832092b5ce4fc",
+      "derived_path": "tests/fixtures/blacksmith_navigation_18_647_2/selected_delayed_after_tap.png",
+      "derived_sha256": "3f7bbdba48c24a8c97fb596ae6f2d2d056592921f9b8a68c183da5ed4840f396",
+      "context_path": "tests/fixtures/blacksmith_navigation_18_647_2/selected_delayed_after_tap.json",
+      "context_sha256": "9db753a10a60a9c5f4148401cceb1201a45744e8ebcbd7adcedd66cc9aae81f6",
+      "retained_roi_pixel_sha256": {
+        "home_zone": "9bc00be4db0b8f4da86a5d91040466d81dd1052c45dbd7a0ad2650339cfacb39",
+        "selected_menu": "3d7a12473e0f7bf05cf36ead9d3814b7751e2cd413e81d4367669db0c0fd3c3b"
+      },
+      "source_summary": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-224229-observe\\summary.json",
+      "source_summary_sha256": "91572ec16bde6ee117e89163bf1030f79319836db3150f3be2dcef35672083de"
     }
   },
   "templates": {
