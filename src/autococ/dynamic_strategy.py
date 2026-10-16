@@ -13,12 +13,16 @@ import hashlib
 import math
 from pathlib import Path
 import re
+from tempfile import TemporaryDirectory
 
 import cv2
 import numpy as np
 
-from .dynamic_tracking import DynamicStep, HeroDeploymentEvidence, TrackedObservation
-from .dynamic_vision import DynamicFrame, DynamicObservation, hero_skill_identity
+from .dynamic_tracking import (DynamicStep, DynamicTracker, HeroDeploymentEvidence,
+                               TrackedObservation, read_hero_deployment_evidence)
+from .dynamic_vision import (CARD_STATES, DynamicFrame, DynamicModel,
+                             DynamicObservation, dynamic_contract_sha256,
+                             hero_skill_identity)
 from .strategy_config import StrategyDefinition
 
 
@@ -39,6 +43,74 @@ def _original_matches(path: Path, frame: DynamicFrame) -> bool:
     except (OSError, ValueError, cv2.error):
         return False
     return image is not None and image.shape == (frame.height, frame.width, 3)
+
+
+def _read_bound_source(
+    path: Path, frame: DynamicFrame,
+) -> tuple[Path, bytes, np.ndarray, DynamicFrame] | None:
+    """Read one original byte sequence and bind its decoded pixels to metadata."""
+    if (not isinstance(frame, DynamicFrame) or
+            not all(isinstance(value, str) and value for value in
+                    (frame.session_id, frame.camera_epoch, frame.frame_id,
+                     frame.client_version)) or
+            type(frame.captured_at_monotonic) not in (int, float) or
+            not math.isfinite(frame.captured_at_monotonic) or
+            frame.captured_at_monotonic < 0 or
+            type(frame.width) is not int or type(frame.height) is not int or
+            frame.width <= 0 or frame.height <= 0 or
+            frame.camera_stable is not True or frame.zoom_verified is not True):
+        return None
+    try:
+        source_path = Path(path).resolve(strict=True)
+        source = source_path.read_bytes()
+        digest = hashlib.sha256(source).hexdigest()
+        image = cv2.imdecode(np.frombuffer(source, dtype=np.uint8), cv2.IMREAD_COLOR)
+    except (OSError, TypeError, ValueError, cv2.error):
+        return None
+    if (image is None or image.shape != (frame.height, frame.width, 3) or
+            frame.source_sha256 not in (None, digest)):
+        return None
+    return source_path, source, image, replace(frame, source_sha256=digest)
+
+
+def _source_model_tracker(model: object, client_version: str) -> DynamicTracker | None:
+    """Accept only a loaded R-card package with the existing formal metadata gates."""
+    if not isinstance(model, DynamicModel) or not callable(getattr(model, "infer", None)):
+        return None
+    validation = getattr(model, "validation", None)
+    rules = getattr(model, "event_rules", None)
+    manifest = getattr(model, "manifest", None)
+    model_sha = getattr(model, "model_sha256", None)
+    contract_sha = getattr(model, "contract_sha256", None)
+    try:
+        manifest_contract_sha = dynamic_contract_sha256(manifest) if isinstance(manifest, dict) else None
+    except (TypeError, ValueError):
+        return None
+    if (getattr(model, "kind", None) != "r_card" or
+            getattr(model, "client_version", None) != client_version or
+            getattr(model, "classes", None) != list(CARD_STATES) or
+            not isinstance(validation, dict) or validation.get("status") != "evaluated" or
+            validation.get("prototype_only") is not False or
+            not isinstance(validation.get("report_id"), str) or
+            not validation["report_id"].strip() or
+            not isinstance(manifest, dict) or manifest.get("kind") != "r_card" or
+            manifest.get("validation") != validation or
+            manifest.get("sha256") != model_sha or
+            manifest.get("classes") != getattr(model, "classes", None) or
+            manifest.get("event_rules") != rules or
+            manifest_contract_sha != contract_sha or
+            not isinstance(manifest.get("client_versions"), list) or
+            client_version not in manifest["client_versions"] or
+            not isinstance(model_sha, str) or _SHA256.fullmatch(model_sha) is None or
+            not isinstance(contract_sha, str) or _SHA256.fullmatch(contract_sha) is None or
+            not isinstance(rules, dict) or rules.get("consecutive_frames") != 2):
+        return None
+    try:
+        return DynamicTracker(**{key: rules[key] for key in
+            ("min_iou", "max_gap_seconds", "max_missed_frames",
+             "event_min_confidence", "max_frame_age_seconds")})
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 @dataclass(frozen=True)
@@ -207,6 +279,116 @@ def _propose_bound_hero_ready_wait(
     return DynamicStrategyResult(candidate, "offline_candidate_only_release_unverified")
 
 
+def propose_configured_hero_ready_wait_from_sources(
+    *, definition: StrategyDefinition, wait_step_index: int,
+    first_source_path: Path, first_frame: DynamicFrame,
+    confirmed_source_path: Path, confirmed_frame: DynamicFrame,
+    roi_bbox: tuple[int, int, int, int], model: object,
+) -> DynamicStrategyResult:
+    """Run the offline R-card path from two original frames, without caller steps.
+
+    Capture metadata (frame IDs, camera epoch and monotonic times) remains supplied
+    by the caller. Original bytes, SHA-256, decoded pixels, model inference, hero
+    checks and both tracker updates are performed here. The hero checker accepts
+    paths only, so it reads private temporary copies of the exact bytes already
+    hashed and decoded; the original source paths are never reopened. This result
+    remains an offline candidate and is never an execution or release approval.
+    """
+    reject = lambda reason: DynamicStrategyResult(None, reason)
+    if (not isinstance(definition, StrategyDefinition) or
+            not isinstance(definition.steps, tuple) or
+            type(wait_step_index) is not int or wait_step_index < 0 or
+            wait_step_index + 1 >= len(definition.steps)):
+        return reject("configured_wait_missing")
+    wait, following = definition.steps[wait_step_index:wait_step_index + 2]
+    hero_id = wait.unit_id
+    if (wait.action != "wait" or wait.target != "hero_ready" or
+            hero_skill_identity(f"hero_skill:{hero_id}") != hero_id or
+            following.action != "activate_ability" or following.unit_id != hero_id):
+        return reject("configured_hero_ability_pair_missing")
+    if not isinstance(first_frame, DynamicFrame) or not isinstance(confirmed_frame, DynamicFrame):
+        return reject("frame_or_camera_binding_invalid")
+    tracker = _source_model_tracker(model, confirmed_frame.client_version)
+    if tracker is None:
+        return reject("formal_r_card_evaluation_claim_missing")
+    first_source = _read_bound_source(first_source_path, first_frame)
+    confirmed_source = _read_bound_source(confirmed_source_path, confirmed_frame)
+    if first_source is None or confirmed_source is None:
+        return reject("original_source_unverified")
+    first_path, first_bytes, first_image, first_bound_frame = first_source
+    confirmed_path, confirmed_bytes, confirmed_image, confirmed_bound_frame = confirmed_source
+    if (first_bound_frame.client_version != confirmed_bound_frame.client_version or
+            first_bound_frame.client_version != getattr(model, "client_version", None)):
+        return reject("frame_or_camera_binding_invalid")
+    if (not isinstance(roi_bbox, tuple) or len(roi_bbox) != 4 or
+            any(type(value) is not int for value in roi_bbox) or
+            not (0 <= roi_bbox[0] < roi_bbox[2] <= first_bound_frame.width and
+                 0 <= roi_bbox[1] < roi_bbox[3] <= first_bound_frame.height) or
+            first_bound_frame.width != confirmed_bound_frame.width or
+            first_bound_frame.height != confirmed_bound_frame.height):
+        return reject("source_roi_invalid")
+
+    try:
+        with TemporaryDirectory(prefix="autococ-dynamic-source-") as temp_dir:
+            temp_root = Path(temp_dir)
+            first_snapshot = temp_root / "first-source.png"
+            confirmed_snapshot = temp_root / "confirmed-source.png"
+            first_snapshot.write_bytes(first_bytes)
+            confirmed_snapshot.write_bytes(confirmed_bytes)
+            first_hero = read_hero_deployment_evidence(
+                first_snapshot, first_bound_frame, roi_bbox, hero_id)
+            confirmed_hero = read_hero_deployment_evidence(
+                confirmed_snapshot, confirmed_bound_frame, roi_bbox, hero_id)
+            if first_hero is None or confirmed_hero is None:
+                return reject("friendly_hero_deployment_unverified")
+
+            # Inference gets isolated read-only copies. The unchanged check keeps
+            # a mutating implementation from changing pixels tied to the source SHA.
+            first_model_image = first_image.copy(order="C")
+            confirmed_model_image = confirmed_image.copy(order="C")
+            first_model_image.setflags(write=False)
+            confirmed_model_image.setflags(write=False)
+            target_id = f"hero_skill:{hero_id}"
+            first_observations = model.infer(
+                first_model_image, roi_bbox, first_bound_frame,
+                target_id=target_id, offline_replay=True)
+            if not np.array_equal(first_model_image, first_image):
+                return reject("source_model_modified_input")
+            if (not isinstance(first_observations, (list, tuple)) or
+                    any(not isinstance(item, DynamicObservation) for item in first_observations)):
+                return reject("source_model_inference_invalid")
+            first_step = tracker.update(
+                first_bound_frame, list(first_observations), offline_replay=True,
+                hero_deployments=(first_hero,))
+
+            confirmed_observations = model.infer(
+                confirmed_model_image, roi_bbox, confirmed_bound_frame,
+                target_id=target_id, offline_replay=True)
+            if not np.array_equal(confirmed_model_image, confirmed_image):
+                return reject("source_model_modified_input")
+            if (not isinstance(confirmed_observations, (list, tuple)) or
+                    any(not isinstance(item, DynamicObservation) for item in confirmed_observations)):
+                return reject("source_model_inference_invalid")
+            confirmed_step = tracker.update(
+                confirmed_bound_frame, list(confirmed_observations), offline_replay=True,
+                hero_deployments=(confirmed_hero,))
+    except Exception:
+        # Source replay is fail-closed; model/backend and current-frame verifier
+        # errors must not be replaced with caller-supplied events.
+        return reject("source_replay_failed")
+
+    result = _propose_bound_hero_ready_wait(
+        definition=definition, wait_step_index=wait_step_index,
+        first_frame=first_bound_frame, first_step=first_step, first_hero=first_hero,
+        confirmed_frame=confirmed_bound_frame, confirmed_step=confirmed_step,
+        confirmed_hero=confirmed_hero, model=model)
+    if result.candidate is None:
+        return result
+    return DynamicStrategyResult(
+        replace(result.candidate,
+                source_paths=(str(first_path), str(confirmed_path))), result.reason)
+
+
 def propose_configured_hero_ready_wait(
     *, definition: StrategyDefinition, wait_step_index: int,
     first_source_path: Path, first_frame: DynamicFrame, first_step: DynamicStep,
@@ -215,10 +397,13 @@ def propose_configured_hero_ready_wait(
     confirmed_step: DynamicStep, confirmed_hero: HeroDeploymentEvidence | None,
     model: object,
 ) -> DynamicStrategyResult:
-    """Check both original files, then produce only a non-executable hint.
+    """Legacy mapper for caller-supplied steps; not an inference provenance API.
 
-    File hashes and decoded sizes are checked here. The model's validation
-    metadata is not a release certificate; no result can authorize an action.
+    File hashes and decoded sizes are checked, but this function cannot prove
+    that the supplied DynamicStep values came from inference on those files or
+    from one tracker. Use ``propose_configured_hero_ready_wait_from_sources``
+    for a source-bound offline replay. The model metadata remains a claim, not a
+    release certificate; no result can authorize an action.
     """
     if (not _original_matches(first_source_path, first_frame) or
             not _original_matches(confirmed_source_path, confirmed_frame)):
