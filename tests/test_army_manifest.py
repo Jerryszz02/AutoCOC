@@ -176,7 +176,7 @@ class ArmyManifestTests(unittest.TestCase):
                          [("electro_dragon", 10), ("dragon", 1),
                           ("baby_dragon", 1), ("balloon", 2)])
         self.assertEqual([(card["unit_id"], card["count"]) for card in result["spells"]],
-                         [("lightning_spell", 6), ("earthquake_spell", 5)])
+                         [("lightning_spell", 6), ("totem_spell", 5)])
         heroes = recognize_army_heroes(path, {"used": 4, "capacity": 4},
                                        client_version="18.647.2")
         self.assertEqual([card["unit_id"] for card in heroes["cards"]],

@@ -741,6 +741,102 @@ class SceneTests(unittest.TestCase):
         negative.client_version = "18.647.2"
         self.assertIsNone(negative.recognize(picker).observations["spell_detail"])
 
+    def test_current_totem_detail_exposes_only_verified_close(self) -> None:
+        import cv2
+        import numpy as np
+
+        fixture = Path(__file__).parent / "fixtures/totem_spell_detail_close_18_647_2.png"
+        metadata = json.loads(fixture.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+        self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(),
+                         metadata["fixture"]["sha256"])
+        source = Path(metadata["source"]["path"])
+        if source.is_file():
+            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(),
+                             metadata["source"]["sha256"])
+            original = cv2.imdecode(np.fromfile(source, dtype=np.uint8), cv2.IMREAD_COLOR)
+            base = cv2.resize(original, (1280, 720), interpolation=cv2.INTER_AREA)
+            reconstructed = np.full_like(base, 45)
+            for left, top, right, bottom in metadata["fixture"]["derivation"][
+                    "retained_baseline_rectangles_xyxy"]:
+                reconstructed[top:bottom, left:right] = base[top:bottom, left:right]
+            self.assertTrue(np.array_equal(
+                reconstructed, cv2.imdecode(np.fromfile(fixture, dtype=np.uint8), cv2.IMREAD_COLOR)))
+        provider = RapidOCRProvider()
+        texts = provider.recognize(fixture)
+        recognizer = ScreenshotRecognizer(provider=provider)
+        recognizer.client_version = "18.647.2"
+        snapshot = recognizer.recognize(fixture)
+        self.assertEqual(snapshot.scene, "popup")
+        detail = snapshot.observations["spell_detail"]
+        self.assertEqual(detail["unit_id"], "totem_spell")
+        self.assertEqual((detail["title"]["text"], detail["stun_seconds"]["text"],
+                          parse_resource_number(detail["hitpoints"]["text"])),
+                         ("2级图腾法术", "0.2", 11000))
+        self.assertNotIn("housing_space", detail)  # The detail's numeric space was not read.
+        self.assertEqual([item["name"] for item in snapshot.observations["buttons"]],
+                         ["close_spell_details"])
+        self.assertTrue(1104 <= snapshot.observations["buttons"][0]["point"][0] <= 1156)
+        with_upgrade = Mock()
+        with_upgrade.recognize.return_value = texts + [
+            OCRText("升级", .999, (674, 590, 712, 615))]
+        observed_upgrade = ScreenshotRecognizer(provider=with_upgrade)
+        observed_upgrade.client_version = "18.647.2"
+        self.assertEqual([item["name"] for item in observed_upgrade.recognize(fixture).observations["buttons"]],
+                         ["close_spell_details"])
+
+        wrong_version = ScreenshotRecognizer(provider=provider)
+        wrong_version.client_version = "18.647.3"
+        self.assertIsNone(wrong_version.recognize(fixture).observations["spell_detail"])
+
+        for missing in ("2级图腾法术", "击晕/瘫痪时间（秒）：", "0.2",
+                        "生命值：", "11000", "所需空间："):
+            with self.subTest(missing=missing):
+                mocked = Mock()
+                mocked.recognize.return_value = [item for item in texts if item.text != missing]
+                observed = ScreenshotRecognizer(provider=mocked)
+                observed.client_version = "18.647.2"
+                result = observed.recognize(fixture)
+                self.assertIsNone(result.observations["spell_detail"])
+                self.assertNotIn("close_spell_details",
+                                 {item["name"] for item in result.observations["buttons"]})
+
+        for original, replacement in (("2级图腾法术", "3级图腾法术"),
+                                      ("0.2", "0.3"), ("11000", "12000"),
+                                      ("11000", "11.000"), ("11000", "1 1000")):
+            with self.subTest(replacement=replacement):
+                mocked = Mock()
+                mocked.recognize.return_value = [
+                    OCRText(replacement, item.confidence, item.bbox)
+                    if item.text == original else item for item in texts]
+                observed = ScreenshotRecognizer(provider=mocked)
+                observed.client_version = "18.647.2"
+                self.assertIsNone(observed.recognize(fixture).observations["spell_detail"])
+
+        title = next(item for item in texts if item.text == "2级图腾法术")
+        mocked = Mock()
+        mocked.recognize.return_value = [OCRText(title.text, title.confidence, (30, 30, 190, 75))
+                                         if item is title else item for item in texts]
+        moved = ScreenshotRecognizer(provider=mocked)
+        moved.client_version = "18.647.2"
+        self.assertIsNone(moved.recognize(fixture).observations["spell_detail"])
+
+        image = cv2.imdecode(np.fromfile(fixture, dtype=np.uint8), cv2.IMREAD_COLOR)
+        image[15:95, 1095:1165] = 45
+        with TemporaryDirectory() as tmp:
+            hidden = Path(tmp) / "totem-no-X.png"
+            cv2.imencode(".png", image)[1].tofile(hidden)
+            mocked = Mock()
+            mocked.recognize.return_value = texts
+            observed = ScreenshotRecognizer(provider=mocked)
+            observed.client_version = "18.647.2"
+            self.assertIsNone(observed.recognize(hidden).observations["spell_detail"])
+
+        # Stale title/stat OCR cannot authorize X on a picker or another surface.
+        picker = Path(__file__).parent / "fixtures/totem_spell_picker_gray_18_647_2.png"
+        stale = ScreenshotRecognizer(provider=mocked)
+        stale.client_version = "18.647.2"
+        self.assertIsNone(stale.recognize(picker).observations["spell_detail"])
+
     def test_current_siege_barracks_detail_exposes_only_verified_close(self) -> None:
         import cv2
         import numpy as np

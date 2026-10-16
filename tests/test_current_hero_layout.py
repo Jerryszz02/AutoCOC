@@ -76,7 +76,7 @@ class CurrentHeroLayoutTests(unittest.TestCase):
                 self.assertTrue(duke["evidence"]["hero_pet_icon"])
                 self.assertEqual({slot["unit_id"]: slot["count"] for slot in slots
                                   if slot["kind"] == "spell"},
-                                 {"lightning_spell": 6, "earthquake_spell": 5})
+                                 {"lightning_spell": 6, "totem_spell": 5})
                 self.assertEqual([(slot["unit_id"], slot["count"]) for slot in slots
                                   if slot["kind"] == "troop" and slot["unit_id"] != "archer"],
                                  [("electro_dragon", 10), ("dragon", 1),

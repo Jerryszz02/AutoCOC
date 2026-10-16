@@ -17,6 +17,14 @@ python scripts/review_vision_scenes.py export --root C:\data\scene-source --jour
 
 服务仅监听 `127.0.0.1`，页面地址仅供本机复核。日志追加保存每次明确操作，绑定原图、来源清单和标注哈希；来源变动会拒绝提交或导出。导出只包含最新操作为确认或改标签的图，保留原始来源与全部复核历史；目标须是新目录，全部写入和校验成功后才发布。零确认时拒绝导出。导出结果还须经过既有分组、覆盖检查、`split` 和 `export` 才成为训练快照；它不自动满足正式数量门槛，也不会把原型模型改为正式模型。
 
+未冻结候选池可先用 `scripts/vision_candidate_coverage.py` 检查每类的独立来源组、完整标注范围及预计拆分缺口。输入必须明确为 `split=unassigned`，工具拒绝已有快照或拆分目录；它只生成诊断报告，不写标签、split 或快照，也不启动训练。Agent 标注仅可计入原型资格，正式资格另列；近似重复待复核时不预测拆分。报告必须保存在候选根目录外的新文件中。
+
+```powershell
+python scripts/vision_candidate_coverage.py --root C:\data\building-candidates --manifest C:\data\building-candidates\manifest.jsonl --annotations C:\data\building-candidates\annotations.jsonl --task building --classes town_hall air_defense --output C:\reports\building-candidate-coverage.json
+```
+
+这里的预计 train/val/test 覆盖仅使用传入的未分配候选，不读取已封存测试集；类别缺口需要补样本，不能用拆散同组或降低验收门槛消除。
+
 建筑可按明确的类别范围制作快照。逐张标注中的 `buildings.complete=false` 和 `buildings.complete_classes=["town_hall","air_defense"]` 表示审核者已在**整张图**穷尽这两类，包括该类确实为零实例的图；它不表示只框出了目前看见的几个目标。若遮挡、裁切或证据不足以确认某类已穷尽，不要把该类写进 `complete_classes`。该字段只接受非空、无重复的注册类别，且必须保留审核人、方法与证据。旧的 `complete=true` 仍表示全部建筑类已穷尽。
 
 对类别子集，`split` 与 `export` 必须以相同顺序显式传 `--classes town_hall air_defense`。拆分仅选择每张图都对这两类完整复核的样本；快照保留原标注供核查，但训练标签只含启用类，且 split、snapshot、class mapping 三处固定类别顺序与稳定 ID。任何类别或 taxonomy ID 变化均拒绝导出或训练前验证。没有显式 `--classes` 的旧拆分仍只接受 `complete=true`，不会自动放宽到部分标注；正式训练仍要求人工复核和已知客户端版本，`--prototype-only` 不会升格为正式数据。

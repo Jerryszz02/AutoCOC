@@ -31,6 +31,10 @@ class ProbedAnchorPlan:
     digest: str
 
 
+class ExactCameraError(FlowError):
+    """Only an exact map/camera proof failed; other frame gates stay separate."""
+
+
 def _digest_plan(plan: ProbedAnchorPlan) -> str:
     return _digest({"base": plan.base.plan_sha256, "anchors": plan.anchors,
                     "balloon_point": plan.balloon_point, "balloon_bbox": plan.balloon_bbox,
@@ -131,7 +135,7 @@ def verify_exact_anchor_camera(source_path: Any, current_path: Any,
     points_a, descriptors_a = detector.detectAndCompute(cv2.cvtColor(prior, cv2.COLOR_BGR2GRAY), None)
     points_b, descriptors_b = detector.detectAndCompute(cv2.cvtColor(current, cv2.COLOR_BGR2GRAY), None)
     if descriptors_a is None or descriptors_b is None:
-        raise FlowError("Probe camera has too few independent map features")
+        raise ExactCameraError("Probe camera has too few independent map features")
     # The old camera proof used Hamming<40 to discard changed troop/particle
     # texture. In actual 18.647.2 preview→battle frames it leaves hundreds of
     # independent map features; unmatched animations cannot dilute inliers.
@@ -139,34 +143,34 @@ def verify_exact_anchor_camera(source_path: Any, current_path: Any,
         descriptors_a, descriptors_b) if item.distance < 40]
     pairs = sorted(pairs, key=lambda item: item.distance)
     if len(pairs) < 80:
-        raise FlowError("Probe camera has too few independent map matches")
+        raise ExactCameraError("Probe camera has too few independent map matches")
     coordinates_a = np.float32([points_a[m.queryIdx].pt for m in pairs])
     coordinates_b = np.float32([points_b[m.trainIdx].pt for m in pairs])
     transform, mask = cv2.estimateAffinePartial2D(coordinates_a, coordinates_b,
                                                     method=cv2.RANSAC, ransacReprojThreshold=1.0)
     if transform is None or mask is None:
-        raise FlowError("Probe camera transform is unverified")
+        raise ExactCameraError("Probe camera transform is unverified")
     inliers = mask.ravel().astype(bool)
     if int(inliers.sum()) < 80 or float(inliers.mean()) < .9:
-        raise FlowError("Probe camera has insufficient stationary map inliers")
+        raise ExactCameraError("Probe camera has insufficient stationary map inliers")
     projected = coordinates_a @ transform[:, :2].T + transform[:, 2]
     residual = float(np.percentile(np.linalg.norm(projected[inliers] - coordinates_b[inliers], axis=1), 95))
     if not math.isfinite(residual) or residual > .5:
-        raise FlowError("Probe camera map residual is too large")
+        raise ExactCameraError("Probe camera map residual is too large")
     offsets = []
     for x, y in anchors:
         mapped = transform @ np.array([x - 240, y - 150, 1.]) + np.array([240., 150.])
         shift = float(np.linalg.norm(mapped - np.array([x, y])))
         if not math.isfinite(shift) or shift > .25 or tuple(np.rint(mapped).astype(int)) != (x, y):
-            raise FlowError("Probe camera moved an exact deployment anchor")
+            raise ExactCameraError("Probe camera moved an exact deployment anchor")
         offsets.append(shift)
     return {"matches": len(pairs), "inliers": int(inliers.sum()),
             "residual_p95": residual, "anchor_offsets": offsets}
 
 
-def _current_frame(session: Any, plan: ProbedAnchorPlan, snapshot: Any, *, after: float,
-                   scene: str | None = None) -> dict:
-    """One fresh, current-display and foreground observation; no old frame grants input."""
+def _frame_envelope(session: Any, plan: ProbedAnchorPlan, snapshot: Any, *, after: float,
+                    scene: str | None = None) -> dict:
+    """Fresh battle, version, display, source pixels and foreground, without camera permission."""
     from .device import foreground_package
 
     if not isinstance(plan, ProbedAnchorPlan):
@@ -191,8 +195,20 @@ def _current_frame(session: Any, plan: ProbedAnchorPlan, snapshot: Any, *, after
                           timeout_sec=min(5, session.config.runtime.step_timeout_sec)) != session.config.game.package_name:
         raise FlowError("Probe game foreground is not independently verified")
     return {"frame": str(snapshot.screenshot_path), "sha256": _file_sha256(snapshot.screenshot_path),
-            "observed_at": observed,
-            "camera": verify_exact_anchor_camera(base.frame.screenshot_path, snapshot.screenshot_path, plan.anchors)}
+            "observed_at": observed}
+
+
+def _current_frame(session: Any, plan: ProbedAnchorPlan, snapshot: Any, *, after: float,
+                   scene: str | None = None) -> dict:
+    """The usual unchanged exact-point camera proof remains mandatory."""
+    proof = _frame_envelope(session, plan, snapshot, after=after, scene=scene)
+    try:
+        proof["camera"] = verify_exact_anchor_camera(plan.base.frame.screenshot_path,
+                                                       snapshot.screenshot_path, plan.anchors)
+    except ExactCameraError as exc:
+        exc.frame_proof = proof  # The sole recoverable failure follows all stronger frame gates.
+        raise
+    return proof
 
 
 def _foreground_now(session: Any) -> None:
@@ -528,6 +544,100 @@ def _balloon_count(session: Any, plan: ProbedAnchorPlan, snapshot: Any, expected
     return reading
 
 
+def _recover_original_anchors(session: Any, plan: ProbedAnchorPlan, receipt: dict, *,
+                              after: float, clock: Callable[[], float]) -> tuple:
+    """Observe only: two fresh full frames must return to the *old* exact points."""
+    started = clock()
+    burst = remainder_burst_limit(plan)
+    latest = min(started + 12., session.deadline - 90. - burst,
+                 session.task_deadline - 90. - burst)
+    recovery = {"status": "observing", "started_at": started, "limit_sec": 12.,
+                "deadline": latest, "frames": [], "elapsed_sec": None,
+                "authorized_at": None, "old_points_only": True, "input_count": 0}
+    receipt["recovery"] = recovery
+    candidate = None
+    try:
+        if started >= latest:
+            raise FlowError("Probe recovery lacks a twelve-second window and settlement reserve")
+        for index in range(3):
+            session.check_deadline()
+            if clock() >= latest:
+                raise FlowError("Probe original-anchor recovery deadline expired")
+            current = session.observe(f"probed-anchor-recovery-full-{index}")
+            session.check_deadline()
+            receipt["evidence"].append(str(current.screenshot_path))
+            row = {"observation_index": index, "frame": str(current.screenshot_path),
+                   "sha256": None, "status": "checking"}
+            recovery["frames"].append(row)
+            try:
+                row["sha256"] = _file_sha256(current.screenshot_path)
+                if current.scene == "account_in_use":
+                    raise FlowError("Game interruption: account_in_use")
+                if (current.scene != "battle" or
+                        current.observations.get("recognition_scope") not in (None, "full") or
+                        current.observations.get("fast_fallback") is True):
+                    raise FlowError("Probe recovery requires one independent full battle frame")
+                proof = _frame_envelope(session, plan, current, after=after, scene="battle")
+                after = proof["observed_at"]
+                row["sha256"] = proof["sha256"]
+                balloon = _balloon_count(session, plan, current, 0)
+                checkpoint = _remaining_roster_checkpoint(session, plan, current)
+                row.update(balloon_count=balloon["count"], roster_sha256=checkpoint["sha256"])
+                if (_file_sha256(current.screenshot_path) != proof["sha256"] or
+                        _file_sha256(checkpoint["frame"]) != checkpoint["sha256"] or
+                        _file_sha256(plan.base.frame.screenshot_path) != plan.base.frame_sha256):
+                    raise FlowError("Probe recovery frame pixels changed during the full roster proof")
+                if clock() >= latest:
+                    raise FlowError("Probe recovery proof exceeded its bounded window")
+                try:
+                    proof["camera"] = verify_exact_anchor_camera(plan.base.frame.screenshot_path,
+                                                                   current.screenshot_path, plan.anchors)
+                except ExactCameraError as exc:
+                    if _file_sha256(plan.base.frame.screenshot_path) != plan.base.frame_sha256:
+                        raise FlowError("Probe recovery frozen camera source pixels changed") from exc
+                    row.update(status="camera_rejected", reason=str(exc))
+                    candidate = None
+                    continue
+                row["source_camera"] = proof["camera"]
+                if (_file_sha256(plan.base.frame.screenshot_path) != plan.base.frame_sha256 or
+                        _file_sha256(current.screenshot_path) != proof["sha256"]):
+                    raise FlowError("Probe recovery exact-camera proof pixels changed")
+                if candidate is None:
+                    row["status"] = "first_exact_frame"
+                    candidate = (current, proof)
+                    continue
+                previous, previous_proof = candidate
+                try:
+                    row["adjacent_camera"] = verify_exact_anchor_camera(previous.screenshot_path,
+                                                                          current.screenshot_path, plan.anchors)
+                except ExactCameraError as exc:
+                    if (_file_sha256(previous.screenshot_path) != previous_proof["sha256"] or
+                            _file_sha256(current.screenshot_path) != proof["sha256"]):
+                        raise FlowError("Probe recovery adjacent camera pixels changed") from exc
+                    row.update(status="camera_rejected", reason=str(exc))
+                    candidate = None
+                    continue
+                if (_file_sha256(previous.screenshot_path) != previous_proof["sha256"] or
+                        _file_sha256(current.screenshot_path) != proof["sha256"] or
+                        _file_sha256(plan.base.frame.screenshot_path) != plan.base.frame_sha256):
+                    raise FlowError("Probe recovery camera source pixels changed")
+                if clock() >= latest:
+                    raise FlowError("Probe recovery two-frame proof exceeded its deadline")
+                row["status"] = "second_exact_frame"
+                recovery["status"] = "two_frame_proved"
+                return current, proof, balloon, checkpoint, latest
+            except BaseException as exc:
+                if row["status"] == "checking":
+                    row.update(status="rejected", reason=str(exc))
+                raise
+        raise FlowError("Probe original-anchor recovery lacks two consecutive exact full frames")
+    except BaseException as exc:
+        recovery.update(status="failed", reason=str(exc))
+        raise
+    finally:
+        recovery["elapsed_sec"] = clock() - started
+
+
 def execute_probed_anchor_line(session: Any, plan: ProbedAnchorPlan, *,
                                clock: Callable[[], float] = time.monotonic,
                                sleep: Callable[[float], None] = time.sleep) -> Any:
@@ -569,6 +679,8 @@ def execute_probed_anchor_line(session: Any, plan: ProbedAnchorPlan, *,
     receipt.update(probe_started_at=started, probe_elapsed_sec=None, probe_authorized_at=None)
     try:
         current = session.last_snapshot
+        recovered_checkpoint = None
+        authorization_deadline = min(started + 12, session.deadline, session.task_deadline)
         balloon_select = clock()
         if balloon_select >= base.latest_start:
             raise FlowError("First probe selection missed the verified preview deadline")
@@ -692,7 +804,20 @@ def execute_probed_anchor_line(session: Any, plan: ProbedAnchorPlan, *,
                     raise FlowError("Probe post frame lacks a fresh full or guarded fast recognition")
                 if current.scene not in {"enemy_village", "battle"}:
                     continue
-                post = _current_frame(session, plan, current, after=done, scene=current.scene)
+                camera_error = None
+                try:
+                    post = _current_frame(session, plan, current, after=done, scene=current.scene)
+                except ExactCameraError as exc:
+                    if index != 1 or current.scene != "battle":
+                        raise
+                    # This is only a fresh same-display/count candidate. The
+                    # camera failure never authorizes either old point.
+                    post = getattr(exc, "frame_proof", None)
+                    if (not isinstance(post, dict) or post.get("frame") != str(current.screenshot_path) or
+                            _file_sha256(current.screenshot_path) != post.get("sha256") or
+                            _file_sha256(base.frame.screenshot_path) != base.frame_sha256):
+                        raise FlowError("Probe camera rejection lacks unchanged current frame proof") from exc
+                    camera_error = exc
                 try:
                     reading = _balloon_count(session, plan, current, 1 - index,
                                              source_bound=True, selected=True,
@@ -703,12 +828,29 @@ def execute_probed_anchor_line(session: Any, plan: ProbedAnchorPlan, *,
                         "frame": post["frame"], "sha256": post["sha256"],
                         "message": str(count_error),
                     })
+                    if camera_error is not None:
+                        raise  # Count failure is not an exact-camera-only recovery case.
                     if ("strong_count_conflict" in str(count_error) or
                             "differs from frozen" in str(count_error) or
                             "source balloon versioned identity" in str(count_error) or
                             "strong current-card identity conflicts" in str(count_error)):
                         raise
                     continue  # One more new frame, never one more input.
+                if camera_error is not None:
+                    receipt["probe_events"][-1]["camera_rejection"] = {
+                        "observation_index": observation, "frame": post["frame"],
+                        "sha256": post["sha256"], "message": str(camera_error),
+                        "same_frame_count": reading["count"]}
+                    if (reading["count"] != 0 or clock() >= stage_deadline or
+                            clock() >= started + 12):
+                        raise camera_error
+                    receipt["probe_elapsed_sec"] = clock() - started
+                    recovered_checkpoint = _recover_original_anchors(
+                        session, plan, receipt, after=post["observed_at"], clock=clock)
+                    current, recovered_proof, recovered_balloon, recovered_roster, authorization_deadline = recovered_checkpoint
+                    verified_at = clock()
+                    confirmed = (recovered_proof, recovered_balloon)
+                    break
                 if current.scene == "enemy_village":
                     if reading["count"] != 2 - index:
                         raise FlowError("Probe preview changed count without a positive battle scene")
@@ -716,23 +858,25 @@ def execute_probed_anchor_line(session: Any, plan: ProbedAnchorPlan, *,
                 if reading["count"] == 2 - index:
                     continue  # Game has not consumed this one tap yet; never replay it.
                 verified_at = clock()
-                if verified_at >= stage_deadline:
+                if verified_at >= stage_deadline and recovered_checkpoint is None:
                     raise FlowError("Probe complete same-frame proof exceeded its deadline")
                 confirmed = (post, reading)
                 break
             if confirmed is None:
                 raise FlowError("Probe lacks one fresh complete battle/count/camera proof")
-            receipt["probe_events"][-1].update(status="verified", after=confirmed[0],
+            receipt["probe_events"][-1].update(status="verified_after_recovery" if recovered_checkpoint is not None
+                                                else "verified", after=confirmed[0],
                                                 after_count=1 - index, reading=confirmed[1],
                                                 verified_at=verified_at)
             receipt["deployed_units"] = index + 1
         # The fast second-probe frame proves only that one balloon was consumed.
         # A separate, newer full frame must prove the entire remaining roster.
         session.check_deadline()
-        if clock() >= min(started + 12, session.deadline, session.task_deadline):
+        if clock() >= authorization_deadline:
             raise FlowError("Probed anchor final full checkpoint missed the total budget")
-        current = session.observe("probed-anchor-final-checkpoint")
-        receipt["evidence"].append(str(current.screenshot_path))
+        if recovered_checkpoint is None:
+            current = session.observe("probed-anchor-final-checkpoint")
+            receipt["evidence"].append(str(current.screenshot_path))
         # Ordinary full observation does not currently publish recognition_scope;
         # explicit fast scope/fallback is never enough for the roster checkpoint.
         if current.scene != "battle" or current.observations.get("recognition_scope") not in (None, "full") or \
@@ -740,9 +884,13 @@ def execute_probed_anchor_line(session: Any, plan: ProbedAnchorPlan, *,
             if current.scene == "account_in_use":
                 raise FlowError("Game interruption: account_in_use")
             raise FlowError("Probed anchor final checkpoint lacks an independent full battle frame")
-        final_proof = _current_frame(session, plan, current, after=verified_at, scene="battle")
-        final_balloon = _balloon_count(session, plan, current, 0)
-        receipt["checkpoint"] = _remaining_roster_checkpoint(session, plan, current)
+        if recovered_checkpoint is None:
+            final_proof = _current_frame(session, plan, current, after=verified_at, scene="battle")
+            final_balloon = _balloon_count(session, plan, current, 0)
+            receipt["checkpoint"] = _remaining_roster_checkpoint(session, plan, current)
+        else:
+            final_proof, final_balloon = recovered_proof, recovered_balloon
+            receipt["checkpoint"] = recovered_roster
         receipt["final_checkpoint"] = {"frame": final_proof["frame"],
                                         "sha256": final_proof["sha256"],
                                         "observed_at": final_proof["observed_at"],
@@ -750,7 +898,7 @@ def execute_probed_anchor_line(session: Any, plan: ProbedAnchorPlan, *,
                                         "balloon": final_balloon,
                                         "roster_sha256": receipt["checkpoint"]["sha256"],
                                         "verified_at": clock()}
-        if (clock() >= started + 12 or clock() >= min(session.deadline, session.task_deadline) or
+        if (clock() >= authorization_deadline or clock() >= min(session.deadline, session.task_deadline) or
                 current is not session.last_snapshot or
                 _digest_plan(plan) != plan.digest or _plan_digest(base) != base.plan_sha256 or
                 _file_sha256(current.screenshot_path) != final_proof["sha256"] or
@@ -765,14 +913,34 @@ def execute_probed_anchor_line(session: Any, plan: ProbedAnchorPlan, *,
             for key in ("before", "after"):
                 if _file_sha256(event[key]["frame"]) != event[key]["sha256"]:
                     raise FlowError("Probed anchor source proof pixels changed")
+        if receipt.get("recovery") is not None:
+            for row in receipt["recovery"]["frames"]:
+                if row["sha256"] is not None and _file_sha256(row["frame"]) != row["sha256"]:
+                    raise FlowError("Probed anchor recovery proof pixels changed")
+        session.check_deadline()
+        if clock() >= authorization_deadline:
+            raise FlowError("Probed anchor final proof hashing exceeded its deadline")
         _foreground_now(session)
-        if _file_sha256(current.screenshot_path) != final_proof["sha256"]:
-            raise FlowError("Probed anchor final frame pixels changed")
+        session.check_deadline()
+        if (current is not session.last_snapshot or
+                session.capture.input_display_id != base.frame.display_id or
+                session.client_version != base.client_version or
+                _digest_plan(plan) != plan.digest or _plan_digest(base) != base.plan_sha256 or
+                _file_sha256(current.screenshot_path) != final_proof["sha256"] or
+                _file_sha256(base.frame.screenshot_path) != base.frame_sha256 or
+                _file_sha256(base.toolbar_before_frame_id) != base.toolbar_before_sha256 or
+                base.hero_manifest_frame_id is not None and
+                _file_sha256(base.hero_manifest_frame_id) != base.hero_manifest_frame_sha256):
+            raise FlowError("Probed anchor final foreground proof or source changed")
         authorized_at = clock()  # All hashes and foreground proof have now finished.
-        if authorized_at >= min(started + 12, session.deadline, session.task_deadline):
+        if authorized_at >= authorization_deadline:
             raise FlowError("Probed anchor foreground proof exceeded total budget")
         receipt["probe_authorized_at"] = authorized_at
-        receipt["probe_elapsed_sec"] = authorized_at - started
+        if recovered_checkpoint is None:
+            receipt["probe_elapsed_sec"] = authorized_at - started
+        else:
+            receipt["recovery"].update(status="authorized", authorized_at=authorized_at,
+                                        total_authorization_elapsed_sec=authorized_at - started)
         # No scene, identity or count recognition occurs inside this remainder.
         start = clock()
         limit = remainder_burst_limit(plan)

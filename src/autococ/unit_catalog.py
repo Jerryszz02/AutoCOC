@@ -29,8 +29,8 @@ class Unit:
     housing_space: int | None = None
 
 
-# Independently observed information panels / picker space labels on 18.600.7
-# and the 18.647.2 troop picker (archer detail confirms one housing space).
+# Independently observed information panels / picker space labels on 18.600.7;
+# 18.647.2 archer and totem details also confirm one housing space each.
 # Unobserved units keep None; capacity checks must never treat that as zero.
 _SAMPLED_HOUSING = {"electro_dragon": 30, "dragon_rider": 25, "balloon": 5,
                     "dragon": 20, "baby_dragon": 10, "archer": 1,

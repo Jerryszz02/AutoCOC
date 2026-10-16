@@ -87,9 +87,9 @@
       "client_version": "18.647.2"
     },
     {
-      "unit_id": "earthquake_spell",
+      "unit_id": "totem_spell",
       "surface": "army",
-      "path": "units/earthquake_spell_army_18_647_2.png",
+      "path": "units/totem_spell_army_18_647_2.png",
       "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
       "source_bbox_1280": [
         683,
@@ -98,7 +98,13 @@
         447
       ],
       "state": "active",
-      "client_version": "18.647.2"
+      "client_version": "18.647.2",
+      "source_sha256": "4b5e1f39a49851cbc25eaabec68f6a0831dd6a95d3697a27d9b1a031f4fd072e",
+      "template_sha256": "a4eb0e6209087892b904ea1043321c93fcb05b4e4af8479bdf592a65e57fe2b8",
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261016-earthquake-info-v2/frames/00004-earthquake-info-after-3.png",
+      "identity_evidence_sha256": "ddddb41892feab0904ab9c289f97d2c2e2633cb6f5d4c2c3a3779c035ee522aa",
+      "identity_evidence_title": "2级图腾法术",
+      "identity_evidence_status": "agent_visual_detail_title_not_human_ground_truth"
     },
     {
       "unit_id": "siege_barracks",
@@ -187,6 +193,21 @@
       "client_version": "18.647.2",
       "source_sha256": "4b913255bbfccac2b15d6aea610d9b43778ad66630270a3efb74470ace6d73a4",
       "template_sha256": "7463b553e68e4cfb4583a10bec3866ba58ef40695ef78c1b699857f90e37b76a"
+    },
+    {
+      "unit_id": "totem_spell",
+      "surface": "current_picker",
+      "path": "units/totem_spell_picker_capacity_gray_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261016-earthquake-info-v2/frames/00001-earthquake-info-picker-before.png",
+      "source_bbox_1280": [570, 591, 610, 631],
+      "state": "capacity_gray",
+      "client_version": "18.647.2",
+      "source_sha256": "22823d99e548993c50e2d158fd524eef511e0d44d7b4712584c1796cd60f0173",
+      "template_sha256": "4890b5657845ca0a8660870b276831293533e4752b13a1ea8958957711f2d083",
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261016-earthquake-info-v2/frames/00004-earthquake-info-after-3.png",
+      "identity_evidence_sha256": "ddddb41892feab0904ab9c289f97d2c2e2633cb6f5d4c2c3a3779c035ee522aa",
+      "identity_evidence_title": "2级图腾法术",
+      "identity_evidence_status": "agent_visual_detail_title_not_human_ground_truth"
     },
     {
       "unit_id": "grand_warden",
@@ -464,9 +485,9 @@
       "client_version": "18.647.2"
     },
     {
-      "unit_id": "earthquake_spell",
+      "unit_id": "totem_spell",
       "surface": "battle",
-      "path": "units/earthquake_spell_battle_18_647_2.png",
+      "path": "units/totem_spell_battle_18_647_2.png",
       "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
       "source_bbox_1280": [
         1113,
@@ -475,7 +496,13 @@
         676
       ],
       "state": "initial_scout",
-      "client_version": "18.647.2"
+      "client_version": "18.647.2",
+      "source_sha256": "843f92ff6d8e56fafc897ef1e5c7725bcb0378777825829147987b27bf6cf131",
+      "template_sha256": "e606848d0b62ff752d0100d616107c3c079e6d8f053d47f7f5e3a94ac78e4f49",
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261016-earthquake-info-v2/frames/00004-earthquake-info-after-3.png",
+      "identity_evidence_sha256": "ddddb41892feab0904ab9c289f97d2c2e2633cb6f5d4c2c3a3779c035ee522aa",
+      "identity_evidence_title": "2级图腾法术",
+      "identity_evidence_status": "army_and_battle_lineup_correspondence_agent_visual_not_direct_battle_detail"
     },
     {
       "unit_id": "grand_warden",

@@ -170,13 +170,13 @@ precision/recall 的误拒识和有效图推理失败不能从分母消失；每
 
 | 阶段 | 应实现/执行的任务 | 产物与退出条件 |
 | --- | --- | --- |
-| T0 契约与盘点 | 新增 `training/vision/` 的清单/标签校验、旧清单导入、类映射、组级拆分；入口拟为 `scripts/vision_data.py` | `inspect/validate/split/export` 子命令、缺口报告；错误输入/泄漏退出非零；不修改旧图 |
+| T0 契约与盘点 | `training/vision/` 的清单/标签校验、旧清单导入、类映射、组级拆分及 `scripts/vision_data.py` 已实现 | 已有 `inspect/validate/split/export` 子命令和缺口报告；正式数据定稿仍属 T1 |
 | T1 数据定稿 | 按采集计划 D0–D4 试标、补采、复核；冻结支持范围与第 7 节配置 | 数据快照、taxonomy、split、验收配置及哈希；数据不足明确停在原型 |
-| T2 管线冒烟 | 新增 `scripts/train_vision.py` 与 `scripts/export_vision_model.py`；S/B 各 32 张、2 epoch；验证断点与导出 | 两种可加载的冒烟包，标 `unvalidated/prototype_only`；不把过拟合成绩当精度 |
+| T2 管线冒烟 | `scripts/train_vision.py` 与 `scripts/export_vision_model.py` 已实现，S/B 各 32 张、2 epoch 冒烟已执行；恢复及导出另有验证 | 已有可加载原型包，保持 `unvalidated/prototype_only`；不把过拟合成绩当精度 |
 | T3 S/B 正式训练 | 执行第 5 节有限实验，验证集选参数与模型，补跨种子复现 | 最佳/最后 checkpoint、日志、训练配置、导出包、PyTorch/ONNX 对比 |
-| T4 独立离线与 Windows | 冻结模型后评估封存测试集；按第 7 节补独立 AP/mAP 路径、运行点指标及回归，并新增 `scripts/validate_vision_release.py` 判门槛 | PASS/FAIL/INSUFFICIENT_DATA 及逐类证据；独立 AP/mAP 评估配置与报告、最终运行配置的 precision/recall、Windows 耗时与失败统计 |
+| T4 独立离线与 Windows | 独立 AP/mAP、运行点指标及 `scripts/validate_vision_release.py` 已实现；正式模型冻结后再评估封存测试集及第 7 节 Windows 门槛 | 工具已有 PASS/FAIL/INSUFFICIENT_DATA；正式逐类证据、最终运行指标及 Windows 验收仍待完成 |
 | T5 产品旁路与交接 | 复用现有模型适配；检查 profile/范围/版本及候选质量 | 一份运行交接说明；未实战时写清 `offline_passed/live_not_tested` |
-| T6 动态增强 | 独立实现 R/U 包契约、ROI/跟踪/事件管线；按第 5.3/7 节训练和验收 | 新模型和新运行时分别交付，M7 未达门槛仍禁用 |
+| T6 动态增强 | R/U 离线工具及包契约已实现；仍须补真实复核窗口、权重训练及第 5.3/7 节验收 | 离线工具不代表真实模型或产品接入通过，M7 未达门槛仍禁用 |
 
 依赖为 `T0 → T1/T2 → T3 → T4 → T5`：T1 的大规模补采与 T2 的工具实现可同时推进，有小批复核训练图就能做冒烟；只有 T3 正式实验必须等 T1 完成冻结。T6 的数据准备从 D3 同步进行，产品接入和启用不提前。材料不足不阻塞通用训练工具交付。
 
@@ -189,7 +189,7 @@ python scripts/evaluate_model_package.py C:\models\AutoCOC\scene --kind scene --
 python scripts/evaluate_model_package.py C:\models\AutoCOC\building --kind building --client-version ACTUAL_VERSION --reviewed-jsonl C:\datasets\vision\reviewed-buildings.jsonl
 ```
 
-拟新增命令至少接受显式数据根目录、配置、输出目录、设备、种子和 resume；校验/拆分不得隐式训练，训练不得自动上传数据、调用游戏或覆盖已发布模型。`validate_vision_release.py` 对低精度和不足样本也返回非零，并输出具体未达项。
+上述命令按用途接受显式数据根目录、配置、输出目录、设备、种子和 resume；校验/拆分不得隐式训练，训练不得自动上传数据、调用游戏或覆盖已发布模型。`validate_vision_release.py` 对低精度和不足样本也返回非零，并输出具体未达项。
 
 ## 9. 交给下一位执行者的任务说明
 

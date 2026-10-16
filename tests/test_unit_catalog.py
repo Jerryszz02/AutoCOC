@@ -278,7 +278,7 @@ class UnitCatalogTests(unittest.TestCase):
             ("troop", 194, 762, "baby_dragon"),
             ("troop", 194, 865, "balloon"),
             ("spell", 373, 558, "lightning_spell"),
-            ("spell", 373, 661, "earthquake_spell"),
+            ("spell", 373, 661, "totem_spell"),
         ):
             with self.subTest(unit_id=unit_id):
                 box = (left, top, left + 98, top + 97)
@@ -448,7 +448,7 @@ class UnitCatalogTests(unittest.TestCase):
             ("minion_prince", "hero", (792, 595, 881, 711)),
             ("archer_queen", "hero", (889, 595, 978, 711)),
             ("lightning_spell", "spell", (998, 595, 1086, 711)),
-            ("earthquake_spell", "spell", (1094, 595, 1183, 711)),
+            ("totem_spell", "spell", (1094, 595, 1183, 711)),
         ]
         for suffix in ("", "_2"):
             path = Path(__file__).parent / f"fixtures/battle_bar_heldout_18_647_2_20261015{suffix}.png"

@@ -141,7 +141,7 @@ class BattleCardTests(unittest.TestCase):
                           for slot in slots if slot["kind"] == "spell"]
                 self.assertEqual(spells, [
                     ("lightning_spell", 6, [998, 595, 1086, 711]),
-                    ("earthquake_spell", 5, [1094, 595, 1183, 711]),
+                    ("totem_spell", 5, [1094, 595, 1183, 711]),
                 ])
                 self.assert_independent(slots)
 

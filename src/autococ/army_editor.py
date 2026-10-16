@@ -313,6 +313,50 @@ def _lightning_info_control(image: np.ndarray, controls: list[dict[str, object]]
                          "blue_info_template": str(icon_path)}}
 
 
+def _totem_info_control(image: np.ndarray, controls: list[dict[str, object]],
+                        capacity: dict[str, int] | None,
+                        baseline_resolution: tuple[int, int]) -> dict[str, object] | None:
+    """Only the sampled gray second-row card's blue i opens Totem details."""
+    box = (554, 568, 678, 692)
+    card_box = list(scale_box(box, from_resolution=_BASE,
+                              to_resolution=baseline_resolution))
+    hits = [control for control in controls if control.get("action") == "increment"
+            and control.get("unit_id") == "totem_spell"
+            and control.get("evidence", {}).get("card_bbox") == card_box
+            and control.get("evidence", {}).get("state") == "capacity_gray"
+            and control.get("identity_verified") is True
+            and control.get("enabled") is False]
+    if (len(hits) != 1 or not isinstance(capacity, dict)
+            or capacity.get("used") != capacity.get("total")):
+        return None
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    # The second row's bright outline is inset by two pixels. Require its
+    # independent top and both side borders before exposing an information tap.
+    border = {"top": float(np.mean(gray[569:575, 586:637] > 140)),
+              "left": float(np.mean(gray[596:662, 556:560] > 140)),
+              "right": float(np.mean(gray[602:662, 674:678] > 140))}
+    if border["top"] < .35 or border["left"] < .35 or border["right"] < .35:
+        return None
+    icon_path = CATALOG_ROOT / "current_picker_totem_blue_info_18_647_2.png"
+    icon = (cv2.imdecode(np.fromfile(icon_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if icon_path.is_file() else None)
+    if icon is None or icon.shape[:2] != (28, 28):
+        return None
+    score = float(cv2.matchTemplate(image[571:599, 645:673], icon,
+                                    cv2.TM_CCOEFF_NORMED)[0, 0])
+    if not np.isfinite(score) or score < .94:
+        return None
+    return {"action": "open_info", "unit_id": "totem_spell",
+            "point": _scale_point(659, 587, baseline_resolution),
+            "confidence": round(min(float(hits[0]["confidence"]), score), 5),
+            "enabled": True, "cost_free": True, "identity_verified": True,
+            "evidence": {"identity": hits[0]["evidence"]["identity"],
+                         "card_bbox": card_box, "card_border": border,
+                         "blue_info_score": round(score, 5),
+                         "blue_info_template": str(icon_path),
+                         "identity_provenance": "2级图腾法术 detail in 20261016-earthquake-info-v2"}}
+
+
 def _current_picker(path: Path, image: np.ndarray, provider: OCRProvider | None,
                     texts: Sequence[OCRText], native_resolution: tuple[int, int],
                     client_version: str | None,
@@ -422,10 +466,11 @@ def _current_picker(path: Path, image: np.ndarray, provider: OCRProvider | None,
         result["capacities"].get(kind))
     result["controls"].extend(bottom_controls)
     if kind == "spell" and client_version == "18.647.2":
-        info = _lightning_info_control(image, bottom_controls,
-                                       result["capacities"].get("spell"), baseline_resolution)
-        if info is not None:
-            result["controls"].append(info)
+        for locate_info in (_lightning_info_control, _totem_info_control):
+            info = locate_info(image, bottom_controls,
+                               result["capacities"].get("spell"), baseline_resolution)
+            if info is not None:
+                result["controls"].append(info)
     result["unit_availability"].update(availability)
     for control in bottom_controls:
         unit = get_unit(control["unit_id"])

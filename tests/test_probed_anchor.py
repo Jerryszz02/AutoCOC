@@ -13,7 +13,8 @@ import pytest
 from autococ.errors import DeploymentError, FlowError, StopRequested
 from autococ.frozen_line import FrozenLinePlan, _file_sha256, _plan_digest
 from autococ.prepared_battle import FramePacket, PreparedInput
-from autococ.probed_anchor import (_balloon_count, _current_frame, _remaining_roster_checkpoint,
+from autococ.probed_anchor import (ExactCameraError, _balloon_count, _current_frame, _frame_envelope,
+                                   _remaining_roster_checkpoint,
                                    _spent_balloon_dark_border,
                                    _current_card_edges,
                                    execute_probed_anchor_line,
@@ -46,6 +47,12 @@ def frame_proof(snapshot):
             "sha256": _file_sha256(snapshot.screenshot_path),
             "observed_at": snapshot.observations["observed_at_monotonic"],
             "camera": {"stationary": True}}
+
+
+def bound_camera_error(snapshot, message):
+    error = ExactCameraError(message)
+    error.frame_proof = {key: value for key, value in frame_proof(snapshot).items() if key != "camera"}
+    return error
 
 
 def frozen_base(tmp_path):
@@ -210,6 +217,224 @@ def test_two_probes_once_then_frozen_remainder_and_complete_receipt(monkeypatch,
                event["verified_at"] < event["deadline"] for event in receipt["probe_events"])
     assert [point for _, point in session.inputs if point in plan.anchors][:2] == list(plan.anchors)
     assert len(session.inputs) == receipt["input_count"]
+
+
+def test_second_balloon_exact_camera_recovery_waits_for_two_full_old_point_frames(monkeypatch, tmp_path):
+    plan, source = make_plan(monkeypatch, tmp_path)
+    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1, fast=True)
+    first = image_frame(tmp_path, "first", "battle", 10.2)
+    pending = image_frame(tmp_path, "pending", "battle", 10.3)
+    spent = image_frame(tmp_path, "spent-shifted", "battle", 10.4)
+    moving = image_frame(tmp_path, "moving", "battle", 10.5)
+    restored = image_frame(tmp_path, "restored", "battle", 10.6)
+    stable = image_frame(tmp_path, "stable", "battle", 10.7)
+    session = Session(source, [selected, first, pending, spent, moving, restored, stable])
+    session.deadline = session.task_deadline = 200.
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_a: plan.balloon_bbox)
+
+    def current_frame(_session, _plan, snapshot, **_kw):
+        if snapshot is spent:
+            raise bound_camera_error(snapshot, "Probe camera has insufficient stationary map inliers")
+        return frame_proof(snapshot)
+
+    monkeypatch.setattr("autococ.probed_anchor._current_frame", current_frame)
+    monkeypatch.setattr("autococ.probed_anchor._frame_envelope",
+                        lambda _s, _p, snapshot, **_kw: {
+                            key: value for key, value in frame_proof(snapshot).items() if key != "camera"})
+    monkeypatch.setattr("autococ.probed_anchor._balloon_count",
+                        lambda _s, _p, snapshot, expected, **_kw: {
+                            "count": 1 if snapshot is pending else expected})
+
+    def camera(a, b, _anchors):
+        if b == moving.screenshot_path:
+            raise ExactCameraError("Probe camera moved an exact deployment anchor")
+        return {"matches": 100, "inliers": 95, "residual_p95": .01, "anchor_offsets": [.01, .01]}
+
+    monkeypatch.setattr("autococ.probed_anchor.verify_exact_anchor_camera", camera)
+    monkeypatch.setattr("autococ.probed_anchor._verify_frozen_line_post",
+                        lambda _s, _b, _r, _when, *, sleep: stable)
+    assert execute_probed_anchor_line(session, plan, clock=lambda: 10., sleep=lambda _: None) is stable
+    receipt = session.frozen_line_receipt
+    assert receipt["probe_events"][1]["status"] == "verified_after_recovery"
+    assert receipt["probe_events"][1]["camera_rejection"] == {
+        "observation_index": 1, "frame": str(spent.screenshot_path),
+        "sha256": _file_sha256(spent.screenshot_path),
+        "message": "Probe camera has insufficient stationary map inliers", "same_frame_count": 0}
+    assert [row["status"] for row in receipt["recovery"]["frames"]] == [
+        "camera_rejected", "first_exact_frame", "second_exact_frame"]
+    assert receipt["recovery"]["status"] == "authorized"
+    assert receipt["recovery"]["input_count"] == 0
+    assert receipt["final_checkpoint"]["frame"] == str(stable.screenshot_path)
+    assert ("probed-anchor-final-checkpoint", None) not in session.observe_calls
+    assert len(session.inputs) == receipt["input_count"]
+    assert [point for kind, point in session.inputs if kind == "tap" and point in plan.anchors] == list(plan.anchors)
+
+
+@pytest.mark.parametrize("failure", ["still_moving", "count_conflict", "account_in_use",
+                                      "wrong_version", "wrong_display", "wrong_foreground",
+                                      "source_mutation", "source_mutation_during_camera",
+                                      "stop", "not_battle", "fast_scope",
+                                      "reserve"])
+def test_second_balloon_recovery_fails_closed_without_more_input(monkeypatch, tmp_path, failure):
+    plan, source = make_plan(monkeypatch, tmp_path)
+    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1, fast=True)
+    first = image_frame(tmp_path, "first", "battle", 10.2)
+    pending = image_frame(tmp_path, "pending", "battle", 10.3)
+    spent = image_frame(tmp_path, "spent-shifted", "battle", 10.4)
+    recovery = [image_frame(tmp_path, f"recovery-{i}",
+                            "account_in_use" if failure == "account_in_use" and i == 0 else "battle",
+                            10.5 + i * .1) for i in range(3)]
+    session = Session(source, [selected, first, pending, spent, *recovery])
+    session.deadline = session.task_deadline = 100. if failure == "reserve" else 200.
+    session.capture.adb = object()
+    session.capture.serial = "offline"
+    session.config.game.package_name = "com.supercell.clashofclans"
+    if failure == "not_battle":
+        recovery[0] = replace(recovery[0], scene="home")
+        session.observations = iter([selected, first, pending, spent, *recovery])
+    if failure == "fast_scope":
+        recovery[0].observations["recognition_scope"] = "battle_hud"
+    if failure == "stop":
+        session.check_deadline = lambda: (_ for _ in ()).throw(StopRequested("stop")) if session.last_snapshot is recovery[0] else None
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_a: plan.balloon_bbox)
+    monkeypatch.setattr("autococ.device.foreground_package", lambda *_a, **_kw: (
+        "other.package" if failure == "wrong_foreground" and session.last_snapshot is recovery[0]
+        else session.config.game.package_name))
+
+    def current_frame(_session, _plan, snapshot, **_kw):
+        if snapshot is spent:
+            raise bound_camera_error(snapshot, "Probe camera moved an exact deployment anchor")
+        return frame_proof(snapshot)
+
+    def envelope(_session, _plan, snapshot, **kwargs):
+        if failure == "wrong_version" and snapshot is recovery[0]:
+            session.client_version = "18.600.7"
+        if failure == "wrong_display" and snapshot is recovery[0]:
+            session.capture.input_display_id = 1
+        if failure == "source_mutation" and snapshot is recovery[0]:
+            Path(plan.base.frame.screenshot_path).write_bytes(b"changed camera source")
+        return _frame_envelope(_session, _plan, snapshot, **kwargs)
+
+    def count(_session, _plan, snapshot, expected, **_kw):
+        if failure == "count_conflict" and snapshot is recovery[0]:
+            raise FlowError("Probe strong_count_conflict on the current balloon card")
+        return {"count": 1 if snapshot is pending else expected}
+
+    monkeypatch.setattr("autococ.probed_anchor._current_frame", current_frame)
+    monkeypatch.setattr("autococ.probed_anchor._frame_envelope", envelope)
+    monkeypatch.setattr("autococ.probed_anchor._balloon_count", count)
+    def camera(_source, current, _anchors):
+        if failure == "source_mutation_during_camera" and str(current) == str(recovery[0].screenshot_path):
+            Path(plan.base.frame.screenshot_path).write_bytes(b"changed during camera proof")
+        raise ExactCameraError("Probe camera moved an exact deployment anchor")
+    monkeypatch.setattr("autococ.probed_anchor.verify_exact_anchor_camera", camera)
+    with pytest.raises(StopRequested if failure == "stop" else DeploymentError) as raised:
+        execute_probed_anchor_line(session, plan, clock=lambda: 10., sleep=lambda _: None)
+    receipt = session.frozen_line_receipt if failure == "stop" else raised.value.partial_receipt
+    assert receipt["issued_placements"] == 2
+    assert receipt["probe_events"][1]["status"] == "input_sent"
+    assert receipt["recovery"]["status"] == "failed"
+    assert receipt["input_sent"] is False
+    assert len(session.inputs) == 3  # One card select, two balloon taps, no main army.
+    assert (len(receipt["recovery"]["frames"]) == (0 if failure in ("reserve", "stop") else
+            3 if failure == "still_moving" else 1))
+    if failure == "source_mutation_during_camera":
+        assert "frozen camera source pixels changed" in receipt["recovery"]["reason"]
+
+
+def test_second_balloon_recovery_requires_positive_zero_count_before_any_new_frame(monkeypatch, tmp_path):
+    plan, source = make_plan(monkeypatch, tmp_path)
+    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1, fast=True)
+    first = image_frame(tmp_path, "first", "battle", 10.2)
+    pending = image_frame(tmp_path, "pending", "battle", 10.3)
+    shifted_pending = image_frame(tmp_path, "shifted-pending", "battle", 10.4)
+    session = Session(source, [selected, first, pending, shifted_pending])
+    session.deadline = session.task_deadline = 200.
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_a: plan.balloon_bbox)
+    monkeypatch.setattr("autococ.probed_anchor._current_frame",
+                        lambda _s, _p, snapshot, **_kw: (
+                            (_ for _ in ()).throw(bound_camera_error(
+                                snapshot, "Probe camera moved an exact deployment anchor"))
+                            if snapshot is shifted_pending else frame_proof(snapshot)))
+    monkeypatch.setattr("autococ.probed_anchor._frame_envelope",
+                        lambda _s, _p, snapshot, **_kw: {
+                            key: value for key, value in frame_proof(snapshot).items() if key != "camera"})
+    monkeypatch.setattr("autococ.probed_anchor._balloon_count",
+                        lambda _s, _p, snapshot, expected, **_kw: {
+                            "count": 1 if snapshot in (pending, shifted_pending) else expected})
+    with pytest.raises(DeploymentError, match="camera moved an exact deployment anchor") as raised:
+        execute_probed_anchor_line(session, plan, clock=lambda: 10., sleep=lambda _: None)
+    assert "recovery" not in raised.value.partial_receipt
+    assert raised.value.partial_receipt["issued_placements"] == 2
+    assert len(session.inputs) == 3
+
+
+@pytest.mark.parametrize("failure", ["deadline_after_hash", "deadline_after_foreground",
+                                      "source_after_foreground", "display_after_foreground",
+                                      "version_after_foreground", "frame_after_foreground",
+                                      "stop_after_foreground"])
+def test_recovered_final_proof_rechecks_time_pixels_and_live_gates_before_remainder(monkeypatch, tmp_path, failure):
+    plan, source = make_plan(monkeypatch, tmp_path)
+    selected = image_frame(tmp_path, "selected", "enemy_village", 10.1, fast=True)
+    first = image_frame(tmp_path, "first", "battle", 10.2)
+    pending = image_frame(tmp_path, "pending", "battle", 10.3)
+    spent = image_frame(tmp_path, "shifted", "battle", 10.4)
+    restored = image_frame(tmp_path, "restored", "battle", 10.5)
+    stable = image_frame(tmp_path, "stable", "battle", 10.6)
+    session = Session(source, [selected, first, pending, spent, restored, stable])
+    session.deadline = session.task_deadline = 200.
+    now = {"value": 10.}
+    stopped = {"value": False}
+    session.check_deadline = lambda: (_ for _ in ()).throw(StopRequested("stop")) if stopped["value"] else None
+    monkeypatch.setattr("autococ.battle_vision.selected_card_bbox", lambda *_a: plan.balloon_bbox)
+    monkeypatch.setattr("autococ.probed_anchor._current_frame",
+                        lambda _s, _p, snapshot, **_kw: (
+                            (_ for _ in ()).throw(bound_camera_error(snapshot, "Probe camera moved"))
+                            if snapshot is spent else frame_proof(snapshot)))
+    monkeypatch.setattr("autococ.probed_anchor._frame_envelope",
+                        lambda _s, _p, snapshot, **_kw: {
+                            key: value for key, value in frame_proof(snapshot).items() if key != "camera"})
+    monkeypatch.setattr("autococ.probed_anchor._balloon_count",
+                        lambda _s, _p, snapshot, expected, **_kw: {
+                            "count": 1 if snapshot is pending else expected})
+    monkeypatch.setattr("autococ.probed_anchor.verify_exact_anchor_camera",
+                        lambda *_a: {"matches": 100, "inliers": 95,
+                                     "residual_p95": .01, "anchor_offsets": [.01, .01]})
+    foreground_calls = {"value": 0}
+    def foreground(_session):
+        foreground_calls["value"] += 1
+        if foreground_calls["value"] != 4:
+            return
+        if failure == "deadline_after_foreground":
+            now["value"] = 22.
+        elif failure == "source_after_foreground":
+            Path(plan.base.frame.screenshot_path).write_bytes(b"source changed")
+        elif failure == "display_after_foreground":
+            session.capture.input_display_id = 1
+        elif failure == "version_after_foreground":
+            session.client_version = "18.600.7"
+        elif failure == "frame_after_foreground":
+            stable.screenshot_path.write_bytes(b"frame changed")
+        elif failure == "stop_after_foreground":
+            stopped["value"] = True
+    monkeypatch.setattr("autococ.probed_anchor._foreground_now", foreground)
+    if failure == "deadline_after_hash":
+        original_sha = _file_sha256
+        final_hashes = {"value": 0}
+        def slow_hash(path):
+            if ("final_checkpoint" in getattr(session, "frozen_line_receipt", {}) and
+                    str(path) == str(stable.screenshot_path)):
+                final_hashes["value"] += 1
+                if final_hashes["value"] == 2:
+                    now["value"] = 22.
+            return original_sha(path)
+        monkeypatch.setattr("autococ.probed_anchor._file_sha256", slow_hash)
+    with pytest.raises(StopRequested if failure == "stop_after_foreground" else DeploymentError):
+        execute_probed_anchor_line(session, plan, clock=lambda: now["value"], sleep=lambda _: None)
+    assert session.frozen_line_receipt["probe_events"][1]["status"] == "verified_after_recovery"
+    assert session.frozen_line_receipt["input_sent"] is False
+    assert len(session.inputs) == 3
+    assert all(kind != "frozen" for kind, _point in session.inputs)
 
 
 def test_selection_waits_for_fresh_border_without_repeating_select(monkeypatch, tmp_path):
@@ -1036,6 +1261,58 @@ def test_old_real_spent_balloon_keeps_original_border_path(tmp_path):
     reading = _balloon_count(session, plan, snapshot, 0)
     assert reading["count"] == 0
     assert "method" not in reading["current_card_border"]
+
+
+def test_real_060543_anonymous_return_frames_prove_only_offline_old_camera_and_roster():
+    from autococ.vision import ScreenshotRecognizer
+
+    provenance = json.loads((FIXTURES / "probed-anchor-return-060543.provenance.json").read_text(encoding="utf-8"))
+    assert provenance["client_version"] == "18.647.2"
+    assert provenance["truth_status"] == "agent_visual_prototype_only"
+    assert provenance["formal_success"] is False
+    fixture = {row["frame_number"]: FIXTURES / row["fixture"] for row in provenance["rows"]}
+    for row in provenance["rows"]:
+        assert _file_sha256(fixture[row["frame_number"]]) == row["fixture_sha256"]
+    anchors = ((375, 250), (525, 450))
+    with pytest.raises(ExactCameraError, match="stationary map inliers"):
+        verify_exact_anchor_camera(fixture[26], fixture[32], anchors)
+    for number in (34, 35, 36):
+        proof = verify_exact_anchor_camera(fixture[26], fixture[number], anchors)
+        assert proof["inliers"] >= 80 and proof["residual_p95"] <= .5
+        assert max(proof["anchor_offsets"]) <= .25
+    for before, after in ((34, 35), (35, 36)):
+        assert max(verify_exact_anchor_camera(fixture[before], fixture[after], anchors)["anchor_offsets"]) <= .25
+
+    recognizer = ScreenshotRecognizer()
+    recognizer.client_version = "18.647.2"
+    source = recognizer.recognize(fixture[24])
+    assert source.scene == "enemy_village"
+    slots = source.observations["battle"]["slots"]
+    troops = [item for item in slots if item.get("kind") == "troop"]
+    heroes = [item for item in slots if item.get("kind") == "hero"]
+    assert {item["unit_id"]: item["count"] for item in troops} == dict(TROOPS)
+    assert {item["unit_id"] for item in heroes} == set(HEROES)
+    balloon = next(item for item in troops if item["unit_id"] == "balloon")
+    base = SimpleNamespace(
+        troop_cards=tuple((item["unit_id"], "army", item["count"], tuple(item["point"]),
+                           tuple(item["bbox"])) for item in troops),
+        hero_cards=tuple((item["unit_id"], tuple(item["bbox"])) for item in heroes),
+        client_version="18.647.2", toolbar_before_frame_id=str(fixture[24]),
+        frame=SimpleNamespace(screenshot_path=fixture[26], frame_id=str(fixture[26]),
+                              resolution=(1280, 720)), frame_sha256=_file_sha256(fixture[26]))
+    plan = SimpleNamespace(base=base,
+                           checkpoint_cards=tuple((item["unit_id"], tuple(item["point"]),
+                                                   tuple(item["bbox"])) for item in troops
+                                                  if item["unit_id"] != "balloon"),
+                           balloon_point=tuple(balloon["point"]), balloon_bbox=tuple(balloon["bbox"]))
+    for number in (34, 35, 36):
+        frame = recognizer.recognize(fixture[number])
+        assert frame.scene == "battle"
+        offline = SimpleNamespace(recognizer=recognizer, last_snapshot=frame)
+        assert _balloon_count(offline, plan, frame, 0)["count"] == 0
+        roster = _remaining_roster_checkpoint(offline, plan, frame)
+        assert {item["unit_id"] for item in roster["troops"]} == set(dict(TROOPS)) - {"balloon"}
+        assert {item["unit_id"] for item in roster["heroes"]} == set(HEROES)
 
 
 def test_exact_camera_rejects_shift_and_occlusion(tmp_path):
