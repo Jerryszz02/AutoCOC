@@ -23,6 +23,7 @@ from .routine_config import RoutineConfig, default_routine, routine_from_dict, r
 TASK_LABELS = {"launch": "连接与启动", "collect": "收集资源", "request": "请求增援",
                "donate": "部落捐兵", "train": "检查军队", "battle": "自动对战", "recover": "恢复连接",
                "resources": "刷资源", "event": "刷活动", "event_reward": "领取免费活动奖励",
+               "ore_inventory": "读取矿石库存",
                "clan_games": "部落竞赛"}
 STATUS_LABELS = {"succeeded": "成功", "failed": "失败", "skipped": "跳过", "simulated": "预演",
                  "running": "进行中", "pending": "等待", "not_supported": "未支持",
@@ -55,6 +56,8 @@ def display_reason(reason: str) -> str:
             "event_reward_ui_acknowledged_inventory_unverified": "领取界面已确认，矿石库存尚未核验",
             "event_reward_claim_unknown": "免费奖励领取结果未确认",
             "event_reward_close_unverified": "领奖页面未能安全关闭并确认回村",
+            "ore_inventory_stable_read_returned_home": "矿石库存已稳定读取并确认回村（非领奖到账证明）",
+            "ore_inventory_read_unverified": "矿石库存读取或回村结果未核验",
             "no_accepted_clan_challenge": "尚未接受支持的部落竞赛任务",
             "No calibrated progress adapter selected for this task": "请先配置当前活动或竞赛的进度识别",
             "strategy_actions_settlement_and_return_verified": "打法动作、结算及回村已确认",

@@ -1,0 +1,47 @@
+{
+  "scene": "village",
+  "confidence": 0.9,
+  "village_type": "home",
+  "resource_source": "village_inventory",
+  "account_in_use": null,
+  "buttons": [
+    {
+      "name": "shop"
+    },
+    {
+      "name": "attack"
+    }
+  ],
+  "ocr": [
+    {
+      "text": "铁匠铺（10级）",
+      "confidence": 0.91107,
+      "bbox": [
+        542,
+        460,
+        722,
+        499
+      ]
+    },
+    {
+      "text": "信息",
+      "confidence": 0.99999,
+      "bbox": [
+        552,
+        584,
+        594,
+        612
+      ]
+    },
+    {
+      "text": "装备",
+      "confidence": 0.99838,
+      "bbox": [
+        688,
+        583,
+        728,
+        610
+      ]
+    }
+  ]
+}

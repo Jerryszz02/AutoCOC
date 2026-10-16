@@ -171,6 +171,77 @@ class DailyRunnerTests(unittest.TestCase):
         claimed.assert_not_called()
         self.assertFalse(any(item.task == "reward" for item in stats.task_results))
 
+    def test_disabled_ore_inventory_does_not_navigate(self):
+        routine = RoutineConfig((TaskSpec("ores", "ore_inventory", enabled=False),
+                                 TaskSpec("collect", "collect")))
+        runner = self.runner()
+        collected = TaskResult("collect", "succeeded", "verified",
+                               evidence=[self.frame.screenshot_path])
+        with patch.object(runner, "_handler", return_value=Mock(return_value=collected)), \
+             patch("autococ.ore_navigation.read_current_ore_inventory") as read:
+            stats = runner.run_routine(routine)
+        read.assert_not_called()
+        self.assertFalse(any(item.task == "ores" for item in stats.task_results))
+
+    def test_ore_inventory_read_once_records_balances_without_reward_claim(self):
+        receipt = {"status": "stable_inventory_read", "returned_home": True,
+                   "inventory": {"status": "stable_inventory_read",
+                                 "ores": {"shiny": {"amount": 15662, "capacity": 50000}},
+                                 "frames": [{"frame": str(self.frame.screenshot_path)}]},
+                   "selected": {"frame": str(self.frame.screenshot_path)},
+                   "close": {"status": "home", "frame": str(self.frame.screenshot_path)},
+                   "home_evidence": [{"frame": "home-a.png"}, {"frame": "home-b.png"}],
+                   "account_verified": False, "reward_inventory_verified": False,
+                   "formal_success": False}
+        with patch("autococ.ore_navigation.read_current_ore_inventory", return_value=receipt) as read, \
+             patch("autococ.event_rewards.claim_one_free_reward") as claim:
+            stats = self.runner().run_routine(RoutineConfig((TaskSpec("ores", "ore_inventory"),)))
+        read.assert_called_once()
+        claim.assert_not_called()
+        result = next(item for item in stats.task_results if item.task == "ores")
+        self.assertEqual(result.status, "succeeded")
+        self.assertEqual(result.metrics["inventory"]["ores"]["shiny"]["amount"], 15662)
+        self.assertEqual(len(result.metrics["home_evidence"]), 2)
+        self.assertTrue(result.metrics["inventory_read_verified"])
+        self.assertFalse(result.metrics["account_verified"])
+        self.assertFalse(result.metrics["reward_inventory_verified"])
+        self.assertFalse(result.metrics["formal_success"])
+
+    def test_ore_inventory_failure_stops_queue_without_blind_recovery(self):
+        routine = RoutineConfig((TaskSpec("ores", "ore_inventory"), TaskSpec("collect", "collect")))
+        runner = self.runner()
+        with patch("autococ.flow.return_to_village", return_value=self.frame) as navigate, \
+             patch("autococ.ore_navigation.read_current_ore_inventory",
+                   side_effect=FlowError("unrecognized selected building")) as read, \
+             patch.object(runner, "_handler") as handler:
+            stats = runner.run_routine(routine)
+        read.assert_called_once()
+        handler.assert_not_called()
+        result = next(item for item in stats.task_results if item.task == "ores")
+        self.assertEqual(result.status, "failed")
+        self.assertIn("unrecognized selected building", result.reason)
+        self.assertFalse(result.metrics["returned_home"])
+        self.assertEqual(navigate.call_count, 2)  # Startup and pre-task only.
+
+    def test_ore_inventory_is_not_periodic_maintenance(self):
+        clock = [time.monotonic()]
+        goals = iter((False, True))
+        def read_progress(_session, _task):
+            clock[0] += 601
+            return GoalProgress(next(goals), evidence=(self.frame.screenshot_path,))
+        receipt = {"status": "stable_inventory_read", "returned_home": True,
+                   "inventory": {"status": "stable_inventory_read", "frames": []},
+                   "home_evidence": [{"frame": "home-a.png"}, {"frame": "home-b.png"}]}
+        routine = RoutineConfig((TaskSpec("ores", "ore_inventory"), TaskSpec("farm", "resources")), 600)
+        with patch("autococ.daily.time.monotonic", side_effect=lambda: clock[0]), \
+             patch("autococ.daily.read_progress", side_effect=read_progress), \
+             patch("autococ.ore_navigation.read_current_ore_inventory", return_value=receipt) as read, \
+             patch("autococ.combat.run_battle") as battle:
+            stats = self.runner().run_routine(routine)
+        read.assert_called_once()
+        battle.assert_not_called()
+        self.assertEqual(stats.goals_completed, 1)
+
     def test_event_reward_claims_once_and_keeps_ui_ack_separate_from_inventory(self):
         routine = RoutineConfig((TaskSpec("reward", "event_reward", free_reward_target="shiny"),))
         receipt = {"status": "ui_acknowledged", "ui_claim_acknowledged": True,

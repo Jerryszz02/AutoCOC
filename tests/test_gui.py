@@ -75,6 +75,22 @@ class GUITests(unittest.TestCase):
         self.assertTrue(rebuilt.enabled)
         self.assertEqual(rebuilt.free_reward_target, "glowy")
 
+    def test_ore_inventory_is_disabled_read_only_task_and_saved_roundtrip(self):
+        self.assertFalse(self.app.task_vars["ore_inventory"].get())
+        self.app._open_task_config("ore_inventory")
+        self.assertIn("读取矿石库存", self.app.task_choice.cget("values"))
+        labels = [child.cget("text") for child in self.app.task_config.winfo_children()
+                  if isinstance(child, ttk.Label)]
+        self.assertTrue(any("不会领取奖励" in label for label in labels))
+        self.app.task_vars["ore_inventory"].set(True)
+        self.app._save()
+        self.app._load()
+        task = next(item for item in self.app._options().routine.tasks
+                    if item.kind == "ore_inventory")
+        self.assertTrue(task.enabled)
+        self.assertEqual(task.free_reward_target, "")
+        self.assertEqual(self.app._task_label("ore_inventory"), "读取矿石库存")
+
     def test_enabled_free_event_reward_without_target_never_starts_worker(self):
         self.app.task_vars["event_reward"].set(True)
         self.app.task_fields["event_reward"]["free_reward_target"].set("")

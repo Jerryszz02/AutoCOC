@@ -7,6 +7,17 @@ from autococ.routine_config import ResourceFilter, TaskSpec, routine_from_dict, 
 
 
 class RoutineFilterDefaultsTests(unittest.TestCase):
+    def test_ore_inventory_is_separate_disabled_task_and_round_trips(self):
+        disabled = routine_from_dict({"tasks": [{"id": "ores", "kind": "ore_inventory",
+                                                 "enabled": False}]})
+        self.assertFalse(disabled.tasks[0].enabled)
+        self.assertEqual(routine_from_dict(routine_to_dict(disabled)), disabled)
+        enabled = routine_from_dict({"tasks": [{"id": "ores", "kind": "ore_inventory"}]})
+        self.assertEqual(enabled.tasks[0].kind, "ore_inventory")
+        with self.assertRaises(ConfigError):
+            routine_from_dict({"tasks": [{"id": "ores", "kind": "ore_inventory",
+                                          "free_reward_target": "shiny"}]})
+
     def test_free_event_reward_requires_explicit_known_target_only_when_enabled(self):
         for payload in ({"id": "reward", "kind": "event_reward"},
                         {"id": "reward", "kind": "event_reward", "free_reward_target": "paid"},

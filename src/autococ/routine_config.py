@@ -7,7 +7,8 @@ import re
 from .errors import ConfigError
 
 RESOURCES = ("gold", "elixir", "dark_elixir")
-TASK_KINDS = ("collect", "request", "donate", "train", "event_reward", "resources", "event", "clan_games")
+TASK_KINDS = ("collect", "request", "donate", "train", "event_reward", "ore_inventory",
+              "resources", "event", "clan_games")
 BATTLE_KINDS = frozenset(("resources", "event", "clan_games"))
 FREE_REWARD_TARGETS = ("shiny", "glowy")
 _DEFAULT_RESOURCE_FILTER = object()
@@ -172,7 +173,7 @@ def default_routine(config) -> RoutineConfig:
     profile = config.profiles.get("core-loop", next(iter(config.profiles.values())))
     tasks = []
     for kind in TASK_KINDS:
-        enabled = ("battle" if kind == "resources" else kind) in profile.enabled_tasks
+        enabled = kind != "ore_inventory" and ("battle" if kind == "resources" else kind) in profile.enabled_tasks
         tasks.append(TaskSpec(kind, kind, enabled=enabled, strategy=config.battle.strategy,
             strategy_file=config.battle.strategy_file if kind == "resources" else "",
             max_battles=config.stop.max_runs, max_duration_sec=config.stop.max_duration_sec,

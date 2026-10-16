@@ -60,6 +60,12 @@ enabled = false # Enable only after confirming the current 18.647.2 free reward 
 free_reward_target = "shiny" # shiny: 1250; glowy: 115. One explicitly selected target per task.
 
 [[routine.tasks]]
+id = "ore_inventory"
+kind = "ore_inventory"
+enabled = false # Read current ore balances and verify return HOME; does not claim or prove a reward delta.
+max_duration_sec = 180
+
+[[routine.tasks]]
 id = "clan_games"
 kind = "clan_games"
 enabled = false

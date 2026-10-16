@@ -17,6 +17,55 @@ class _RecordedTaskFailure(FlowError):
     """Abort the queue without recording the same task failure twice."""
 
 
+def _ore_inventory_task(session, spec) -> TaskResult:
+    """Read current ore balances once; this does not verify a reward delta."""
+    from .ore_navigation import read_current_ore_inventory
+
+    receipt = None
+    failure = None
+    try:
+        receipt = read_current_ore_inventory(session, timeout_sec=min(180, spec.max_duration_sec))
+    except StopRequested:
+        raise
+    except Exception as exc:
+        failure = f"{type(exc).__name__}: {exc}"
+    frames = []
+    if isinstance(receipt, dict):
+        selected = receipt.get("selected")
+        inventory = receipt.get("inventory")
+        closed = receipt.get("close")
+        if isinstance(selected, dict) and selected.get("frame"):
+            frames.append(selected["frame"])
+        if isinstance(inventory, dict):
+            frames.extend(item["frame"] for item in (inventory.get("frames") or [])
+                          if isinstance(item, dict) and item.get("frame"))
+        if isinstance(closed, dict) and closed.get("frame"):
+            frames.append(closed["frame"])
+        frames.extend(item["frame"] for item in (receipt.get("home_evidence") or [])
+                      if isinstance(item, dict) and item.get("frame"))
+    current = getattr(session, "last_snapshot", None)
+    if not frames and current is not None:
+        frames.append(str(current.screenshot_path))
+    evidence = [Path(path) for path in dict.fromkeys(frames)]
+    inventory = receipt.get("inventory") if isinstance(receipt, dict) else None
+    homes = receipt.get("home_evidence") if isinstance(receipt, dict) else None
+    verified = (isinstance(receipt, dict) and receipt.get("status") == "stable_inventory_read"
+                and receipt.get("returned_home") is True
+                and isinstance(inventory, dict) and inventory.get("status") == "stable_inventory_read"
+                and isinstance(homes, list) and len(homes) == 2)
+    metrics = {"receipt_kind": "ore_inventory", "receipt": receipt,
+               "inventory": inventory, "home_evidence": homes,
+               "inventory_read_verified": bool(verified),
+               "returned_home": bool(verified), "account_verified": False,
+               "reward_inventory_verified": False, "formal_success": False,
+               "failure": failure}
+    if not verified:
+        return TaskResult(spec.id, "failed", failure or "ore_inventory_read_unverified",
+                          evidence=evidence, metrics=metrics)
+    return TaskResult(spec.id, "succeeded", "ore_inventory_stable_read_returned_home",
+                      evidence=evidence, metrics=metrics)
+
+
 def _event_reward_task(session, spec) -> TaskResult:
     """Run one selected free claim and keep UI evidence separate from inventory."""
     from .event_rewards import close_reward_track, claim_one_free_reward, open_reward_track
@@ -145,6 +194,7 @@ def run_routine(runner, routine: RoutineConfig) -> RunStats:
         if not periodic:
             runner._notify("task_started", task=spec.id, cycle=1)
         result = (_event_reward_task(session, spec) if spec.kind == "event_reward"
+                  else _ore_inventory_task(session, spec) if spec.kind == "ore_inventory"
                   else runner._handler(spec.kind)(session))
         # Unsupported donation remains an explicit capability result, not an empty chat.
         if result.status == "failed" and result.reason == "donation_interaction_not_supported":
@@ -154,7 +204,7 @@ def run_routine(runner, routine: RoutineConfig) -> RunStats:
         record(result, notify=not periodic)
         if result.status == "failed":
             raise _RecordedTaskFailure(f"{spec.id}: {result.reason}")
-        if spec.kind != "event_reward":
+        if spec.kind not in {"event_reward", "ore_inventory"}:
             return_to_village(session)
 
     try:
@@ -234,7 +284,7 @@ def run_routine(runner, routine: RoutineConfig) -> RunStats:
                     break
                 if routine.maintenance_interval_sec and time.monotonic() - last_maintenance >= routine.maintenance_interval_sec:
                     for daily_task in enabled:
-                        if daily_task.kind not in BATTLE_KINDS and daily_task.kind != "event_reward":
+                        if daily_task.kind not in BATTLE_KINDS and daily_task.kind not in {"event_reward", "ore_inventory"}:
                             maintenance(daily_task, periodic=True)
                     last_maintenance = time.monotonic()
                     session.begin_task()

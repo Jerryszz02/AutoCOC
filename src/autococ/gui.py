@@ -364,6 +364,13 @@ class AutoCOCApp:
                 for widget in (self.strategy_text, self.load_strategy_button, self.save_strategy_button, self.strategy_presets):
                     widget.grid_remove()
             return
+        if kind == "ore_inventory":
+            ttk.Label(self.task_config, text="只读取当前矿石库存并确认回村；不会领取奖励或证明到账。",
+                      style="Muted.TLabel").grid(row=0, column=0, columnspan=3, sticky="w")
+            if hasattr(self, "strategy_text"):
+                for widget in (self.strategy_text, self.load_strategy_button, self.save_strategy_button, self.strategy_presets):
+                    widget.grid_remove()
+            return
         if kind not in BATTLE_KINDS:
             ttk.Label(self.task_config, text="此任务按本次清单执行一次。", style="Muted.TLabel").grid(row=0, column=0, sticky="w")
             if hasattr(self, "strategy_text"):
