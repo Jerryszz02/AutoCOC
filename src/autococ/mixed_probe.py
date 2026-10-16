@@ -199,8 +199,12 @@ def _probe_count(session: Any, plan: MixedProbePlan, snapshot: Any, unit_id: str
         reading["selected_card_border"] = list(border)
     else:
         image = cv2.resize(read_frame(snapshot.screenshot_path), (1280, 720), interpolation=cv2.INTER_AREA)
-        border = _closed_card_border(image, bbox)
-        if border is None and base.client_version == "18.647.2":
+        sampled_89_balloon = unit_id == "balloon" and bbox[2] - bbox[0] == 89
+        if sampled_89_balloon and base.client_version != "18.647.2":
+            raise FlowError("Mixed 89px balloon has no matching versioned border")
+        border = (_spent_balloon_dark_border(image, bbox) if sampled_89_balloon else
+                  _closed_card_border(image, bbox))
+        if border is None and base.client_version == "18.647.2" and not sampled_89_balloon:
             border = (_spent_balloon_dark_border(image, bbox) if unit_id == "balloon" else
                       _closed_dragon_card_border_18_647_2(image, bbox))
         if border is None:
