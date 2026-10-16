@@ -1,0 +1,1057 @@
+{
+  "schema_version": 1,
+  "client_version": "18.647.2",
+  "coordinate_resolution": [
+    1280,
+    720
+  ],
+  "derivation": "Decode source PNG, cv2.resize to 1280x720 with INTER_AREA; copy exact pixels in retained ROI and black-mask all other pixels. No synthesized UI content.",
+  "purpose": "Hero selector overlay recognition; no hero availability or unlock truth.",
+  "frames": [
+    {
+      "label": "hero_picker_first",
+      "fixture": "hero_picker_180800_18_647_2.png",
+      "fixture_sha256": "29a2f33c4a64d001b7e76e51b7fb47ba649ecc1a9eb2f9d0951c4ba9c538ddc2",
+      "source_frame": "reports/completion-20261015/probes/20261015-180800-tap/frames/00002-after.png",
+      "source_sha256": "9ee5fec6182af02148b5e2718f032561b7e78354558d6f30cae37138ef4a68c5",
+      "retained_rois_1280": [
+        [
+          0,
+          32,
+          1280,
+          420
+        ]
+      ],
+      "ocr": [
+        {
+          "text": "X",
+          "confidence": 0.97659,
+          "bbox": [
+            1216,
+            44,
+            1257,
+            86
+          ]
+        },
+        {
+          "text": "我的军队",
+          "confidence": 0.99996,
+          "bbox": [
+            223,
+            64,
+            292,
+            88
+          ]
+        },
+        {
+          "text": "已保存的配置",
+          "confidence": 0.99965,
+          "bbox": [
+            594,
+            64,
+            685,
+            85
+          ]
+        },
+        {
+          "text": "精选库",
+          "confidence": 0.9999,
+          "bbox": [
+            974,
+            64,
+            1024,
+            85
+          ]
+        },
+        {
+          "text": "选择英雄",
+          "confidence": 0.99995,
+          "bbox": [
+            348,
+            128,
+            420,
+            153
+          ]
+        },
+        {
+          "text": "强化军队",
+          "confidence": 0.99902,
+          "bbox": [
+            892,
+            131,
+            950,
+            152
+          ]
+        },
+        {
+          "text": "强化英雄",
+          "confidence": 0.99832,
+          "bbox": [
+            1070,
+            132,
+            1128,
+            152
+          ]
+        },
+        {
+          "text": "4/4",
+          "confidence": 0.99966,
+          "bbox": [
+            50,
+            150,
+            98,
+            176
+          ]
+        },
+        {
+          "text": "0/340",
+          "confidence": 0.99814,
+          "bbox": [
+            600,
+            158,
+            665,
+            180
+          ]
+        },
+        {
+          "text": "85",
+          "confidence": 0.99997,
+          "bbox": [
+            30,
+            196,
+            56,
+            215
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.95183,
+          "bbox": [
+            764,
+            196,
+            792,
+            220
+          ]
+        },
+        {
+          "text": "85",
+          "confidence": 0.99998,
+          "bbox": [
+            184,
+            226,
+            212,
+            249
+          ]
+        },
+        {
+          "text": "15",
+          "confidence": 0.99996,
+          "bbox": [
+            292,
+            224,
+            316,
+            246
+          ]
+        },
+        {
+          "text": "18",
+          "confidence": 0.99999,
+          "bbox": [
+            396,
+            226,
+            416,
+            246
+          ]
+        },
+        {
+          "text": "12",
+          "confidence": 0.99998,
+          "bbox": [
+            668,
+            266,
+            686,
+            284
+          ]
+        },
+        {
+          "text": "i",
+          "confidence": 0.84113,
+          "bbox": [
+            244,
+            282,
+            258,
+            300
+          ]
+        },
+        {
+          "text": "1/11",
+          "confidence": 0.90722,
+          "bbox": [
+            596,
+            334,
+            636,
+            360
+          ]
+        },
+        {
+          "text": "3/3",
+          "confidence": 0.99927,
+          "bbox": [
+            1035,
+            333,
+            1078,
+            360
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.87704,
+          "bbox": [
+            663,
+            376,
+            692,
+            398
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.94483,
+          "bbox": [
+            1018,
+            377,
+            1041,
+            397
+          ]
+        },
+        {
+          "text": "IX",
+          "confidence": 0.87362,
+          "bbox": [
+            1082,
+            374,
+            1110,
+            399
+          ]
+        }
+      ]
+    },
+    {
+      "label": "hero_picker_first_holdout",
+      "fixture": "hero_picker_180859_18_647_2.png",
+      "fixture_sha256": "29c11fea301145e224f7ecc29e6036ba9fa7dbf213360b215dd9edfdf4bc87a1",
+      "source_frame": "reports/completion-20261015/probes/20261015-180859-tap/frames/00001-before.png",
+      "source_sha256": "3969e1c11374de59f314843b51832b34614d8fe532f7afcd19eac61183eeae6f",
+      "retained_rois_1280": [
+        [
+          0,
+          32,
+          1280,
+          420
+        ]
+      ],
+      "ocr": [
+        {
+          "text": "X",
+          "confidence": 0.97659,
+          "bbox": [
+            1216,
+            44,
+            1257,
+            86
+          ]
+        },
+        {
+          "text": "我的军队",
+          "confidence": 0.99996,
+          "bbox": [
+            223,
+            64,
+            292,
+            88
+          ]
+        },
+        {
+          "text": "已保存的配置",
+          "confidence": 0.99965,
+          "bbox": [
+            594,
+            64,
+            685,
+            85
+          ]
+        },
+        {
+          "text": "精选库",
+          "confidence": 0.9999,
+          "bbox": [
+            974,
+            64,
+            1024,
+            85
+          ]
+        },
+        {
+          "text": "选择英雄",
+          "confidence": 0.99996,
+          "bbox": [
+            348,
+            128,
+            420,
+            153
+          ]
+        },
+        {
+          "text": "强化军队",
+          "confidence": 0.99902,
+          "bbox": [
+            892,
+            131,
+            950,
+            152
+          ]
+        },
+        {
+          "text": "强化英雄",
+          "confidence": 0.99746,
+          "bbox": [
+            1070,
+            132,
+            1128,
+            152
+          ]
+        },
+        {
+          "text": "4/4",
+          "confidence": 0.99966,
+          "bbox": [
+            50,
+            150,
+            98,
+            176
+          ]
+        },
+        {
+          "text": "0/340",
+          "confidence": 0.99814,
+          "bbox": [
+            600,
+            158,
+            665,
+            180
+          ]
+        },
+        {
+          "text": "85",
+          "confidence": 0.99997,
+          "bbox": [
+            30,
+            196,
+            56,
+            215
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.95183,
+          "bbox": [
+            764,
+            196,
+            792,
+            220
+          ]
+        },
+        {
+          "text": "85",
+          "confidence": 0.99998,
+          "bbox": [
+            184,
+            226,
+            212,
+            249
+          ]
+        },
+        {
+          "text": "15",
+          "confidence": 0.99993,
+          "bbox": [
+            292,
+            224,
+            316,
+            246
+          ]
+        },
+        {
+          "text": "18",
+          "confidence": 0.99999,
+          "bbox": [
+            502,
+            228,
+            520,
+            246
+          ]
+        },
+        {
+          "text": "12",
+          "confidence": 0.99998,
+          "bbox": [
+            668,
+            266,
+            686,
+            284
+          ]
+        },
+        {
+          "text": "i",
+          "confidence": 0.77447,
+          "bbox": [
+            244,
+            282,
+            258,
+            299
+          ]
+        },
+        {
+          "text": "1/11",
+          "confidence": 0.90722,
+          "bbox": [
+            596,
+            334,
+            636,
+            360
+          ]
+        },
+        {
+          "text": "3/3",
+          "confidence": 0.99927,
+          "bbox": [
+            1035,
+            333,
+            1078,
+            360
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.87704,
+          "bbox": [
+            663,
+            376,
+            692,
+            398
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.94483,
+          "bbox": [
+            1018,
+            377,
+            1041,
+            397
+          ]
+        },
+        {
+          "text": "IX",
+          "confidence": 0.87362,
+          "bbox": [
+            1082,
+            374,
+            1110,
+            399
+          ]
+        }
+      ]
+    },
+    {
+      "label": "hero_picker_third",
+      "fixture": "hero_picker_181009_18_647_2.png",
+      "fixture_sha256": "f816494861144f2350c848dfbca68587ddfcc1aa6c15cd6fe0b281ab7e3f1167",
+      "source_frame": "reports/completion-20261015/probes/20261015-181009-tap/frames/00002-after.png",
+      "source_sha256": "f301a735c4d819b4deaa1b7f0b37c55a87803874e298e8242fc7d70285200c86",
+      "retained_rois_1280": [
+        [
+          0,
+          32,
+          1280,
+          420
+        ]
+      ],
+      "ocr": [
+        {
+          "text": "X",
+          "confidence": 0.97659,
+          "bbox": [
+            1216,
+            44,
+            1257,
+            86
+          ]
+        },
+        {
+          "text": "我的军队",
+          "confidence": 0.99996,
+          "bbox": [
+            223,
+            64,
+            292,
+            88
+          ]
+        },
+        {
+          "text": "已保存的配置",
+          "confidence": 0.99965,
+          "bbox": [
+            594,
+            64,
+            685,
+            85
+          ]
+        },
+        {
+          "text": "精选库",
+          "confidence": 0.99964,
+          "bbox": [
+            974,
+            64,
+            1024,
+            86
+          ]
+        },
+        {
+          "text": "选择英雄",
+          "confidence": 0.99997,
+          "bbox": [
+            608,
+            129,
+            679,
+            152
+          ]
+        },
+        {
+          "text": "强化军队",
+          "confidence": 0.99902,
+          "bbox": [
+            892,
+            131,
+            950,
+            152
+          ]
+        },
+        {
+          "text": "强化英雄",
+          "confidence": 0.99832,
+          "bbox": [
+            1070,
+            132,
+            1128,
+            152
+          ]
+        },
+        {
+          "text": "4/4",
+          "confidence": 0.99964,
+          "bbox": [
+            50,
+            150,
+            98,
+            176
+          ]
+        },
+        {
+          "text": "85",
+          "confidence": 0.99998,
+          "bbox": [
+            30,
+            196,
+            55,
+            214
+          ]
+        },
+        {
+          "text": "25",
+          "confidence": 0.99998,
+          "bbox": [
+            161,
+            196,
+            186,
+            214
+          ]
+        },
+        {
+          "text": "95",
+          "confidence": 0.99998,
+          "bbox": [
+            290,
+            196,
+            315,
+            215
+          ]
+        },
+        {
+          "text": "95",
+          "confidence": 0.99996,
+          "bbox": [
+            443,
+            225,
+            472,
+            249
+          ]
+        },
+        {
+          "text": "15",
+          "confidence": 0.99996,
+          "bbox": [
+            552,
+            224,
+            576,
+            246
+          ]
+        },
+        {
+          "text": "27",
+          "confidence": 0.9997,
+          "bbox": [
+            656,
+            226,
+            678,
+            247
+          ]
+        },
+        {
+          "text": "18",
+          "confidence": 0.99998,
+          "bbox": [
+            760,
+            226,
+            782,
+            246
+          ]
+        },
+        {
+          "text": "i",
+          "confidence": 0.87145,
+          "bbox": [
+            506,
+            284,
+            516,
+            298
+          ]
+        },
+        {
+          "text": "3/3",
+          "confidence": 0.99931,
+          "bbox": [
+            1035,
+            333,
+            1079,
+            360
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.94483,
+          "bbox": [
+            1018,
+            377,
+            1041,
+            397
+          ]
+        },
+        {
+          "text": "IX",
+          "confidence": 0.87362,
+          "bbox": [
+            1082,
+            374,
+            1110,
+            399
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.89611,
+          "bbox": [
+            1152,
+            378,
+            1173,
+            396
+          ]
+        }
+      ]
+    },
+    {
+      "label": "hero_picker_fourth",
+      "fixture": "hero_picker_181240_18_647_2.png",
+      "fixture_sha256": "686ca663c63e61242d8bc7ee7a8884e3094bfa6b9f0990037d2311a01e21129d",
+      "source_frame": "reports/completion-20261015/probes/20261015-181240-tap/frames/00002-after.png",
+      "source_sha256": "768d8b466927db8d22d8f94e67173b877f02eb61cfbd1f3d82a5a3b8525122b0",
+      "retained_rois_1280": [
+        [
+          0,
+          32,
+          1280,
+          420
+        ]
+      ],
+      "ocr": [
+        {
+          "text": "X",
+          "confidence": 0.97659,
+          "bbox": [
+            1216,
+            44,
+            1257,
+            86
+          ]
+        },
+        {
+          "text": "我的军队",
+          "confidence": 0.99995,
+          "bbox": [
+            223,
+            64,
+            292,
+            88
+          ]
+        },
+        {
+          "text": "已保存的配置",
+          "confidence": 0.99965,
+          "bbox": [
+            594,
+            64,
+            685,
+            85
+          ]
+        },
+        {
+          "text": "精选库",
+          "confidence": 0.9999,
+          "bbox": [
+            974,
+            64,
+            1024,
+            85
+          ]
+        },
+        {
+          "text": "选择英雄",
+          "confidence": 0.9999,
+          "bbox": [
+            738,
+            128,
+            810,
+            153
+          ]
+        },
+        {
+          "text": "强化英雄",
+          "confidence": 0.99746,
+          "bbox": [
+            1070,
+            132,
+            1128,
+            152
+          ]
+        },
+        {
+          "text": "4/4",
+          "confidence": 0.99966,
+          "bbox": [
+            50,
+            150,
+            98,
+            176
+          ]
+        },
+        {
+          "text": "85",
+          "confidence": 0.99998,
+          "bbox": [
+            30,
+            196,
+            56,
+            214
+          ]
+        },
+        {
+          "text": "25",
+          "confidence": 0.99998,
+          "bbox": [
+            161,
+            195,
+            186,
+            214
+          ]
+        },
+        {
+          "text": "95",
+          "confidence": 0.99998,
+          "bbox": [
+            290,
+            195,
+            315,
+            214
+          ]
+        },
+        {
+          "text": "110",
+          "confidence": 0.99998,
+          "bbox": [
+            576,
+            228,
+            601,
+            246
+          ]
+        },
+        {
+          "text": "15",
+          "confidence": 0.99996,
+          "bbox": [
+            683,
+            226,
+            705,
+            244
+          ]
+        },
+        {
+          "text": "3/3",
+          "confidence": 0.99927,
+          "bbox": [
+            1035,
+            333,
+            1078,
+            360
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.98447,
+          "bbox": [
+            1019,
+            377,
+            1040,
+            397
+          ]
+        },
+        {
+          "text": "IX",
+          "confidence": 0.87362,
+          "bbox": [
+            1082,
+            374,
+            1110,
+            399
+          ]
+        }
+      ]
+    },
+    {
+      "label": "current_without_overlay",
+      "fixture": "hero_picker_normal_183001_18_647_2.png",
+      "fixture_sha256": "eaf5ceba8b3cab7810f4601538e7d189bf7d9d9093d5b1aa6e06049a9b990cc8",
+      "source_frame": "reports/completion-20261015/probes/20261015-183001-tap/frames/00002-after.png",
+      "source_sha256": "ef46706f72d3e1768305db38a3b2a0dd0c349798abfb2354a3936a122d2d4705",
+      "retained_rois_1280": [
+        [
+          0,
+          32,
+          1280,
+          420
+        ]
+      ],
+      "ocr": [
+        {
+          "text": "X",
+          "confidence": 0.93896,
+          "bbox": [
+            1216,
+            44,
+            1256,
+            86
+          ]
+        },
+        {
+          "text": "我的军队",
+          "confidence": 0.99996,
+          "bbox": [
+            222,
+            64,
+            293,
+            88
+          ]
+        },
+        {
+          "text": "已保存的配置",
+          "confidence": 0.99983,
+          "bbox": [
+            594,
+            64,
+            685,
+            85
+          ]
+        },
+        {
+          "text": "精选库",
+          "confidence": 0.99985,
+          "bbox": [
+            974,
+            64,
+            1024,
+            86
+          ]
+        },
+        {
+          "text": "强化军队",
+          "confidence": 0.99888,
+          "bbox": [
+            892,
+            131,
+            950,
+            152
+          ]
+        },
+        {
+          "text": "强化英雄",
+          "confidence": 0.99648,
+          "bbox": [
+            1070,
+            132,
+            1128,
+            152
+          ]
+        },
+        {
+          "text": "4/4",
+          "confidence": 0.9996,
+          "bbox": [
+            50,
+            150,
+            98,
+            176
+          ]
+        },
+        {
+          "text": "340/340",
+          "confidence": 0.99995,
+          "bbox": [
+            578,
+            158,
+            665,
+            180
+          ]
+        },
+        {
+          "text": "85",
+          "confidence": 0.99998,
+          "bbox": [
+            30,
+            196,
+            56,
+            214
+          ]
+        },
+        {
+          "text": "25",
+          "confidence": 0.99998,
+          "bbox": [
+            160,
+            195,
+            186,
+            214
+          ]
+        },
+        {
+          "text": "95",
+          "confidence": 0.99998,
+          "bbox": [
+            290,
+            196,
+            315,
+            215
+          ]
+        },
+        {
+          "text": "110",
+          "confidence": 0.99997,
+          "bbox": [
+            422,
+            197,
+            444,
+            213
+          ]
+        },
+        {
+          "text": "x10",
+          "confidence": 0.97687,
+          "bbox": [
+            558,
+            194,
+            599,
+            220
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.96916,
+          "bbox": [
+            763,
+            196,
+            792,
+            220
+          ]
+        },
+        {
+          "text": "3/3",
+          "confidence": 0.9992,
+          "bbox": [
+            1034,
+            333,
+            1079,
+            360
+          ]
+        },
+        {
+          "text": "x6",
+          "confidence": 0.98918,
+          "bbox": [
+            559,
+            374,
+            592,
+            400
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.97891,
+          "bbox": [
+            662,
+            375,
+            693,
+            398
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.97965,
+          "bbox": [
+            1019,
+            377,
+            1041,
+            396
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.9834,
+          "bbox": [
+            1084,
+            375,
+            1110,
+            398
+          ]
+        }
+      ]
+    }
+  ]
+}

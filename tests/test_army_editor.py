@@ -34,6 +34,88 @@ class ArmyEditorRecognitionTests(unittest.TestCase):
                          [("open_saved", [640, 75])])
         self.assertEqual(editor["cards"], [])
 
+    def test_current_hero_picker_overlay_blocks_background_controls(self):
+        root = Path(__file__).parent / "fixtures"
+        manifest = json.loads((root / "hero_picker_18_647_2.json").read_text(encoding="utf-8"))
+        for frame in manifest["frames"]:
+            path = root / frame["fixture"]
+            with self.subTest(frame=frame["label"]):
+                self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),
+                                 frame["fixture_sha256"])
+                source = Path(r"E:\projects\AutoCOC") / frame["source_frame"]
+                if source.is_file():
+                    self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(),
+                                     frame["source_sha256"])
+                    original = cv2.imdecode(np.fromfile(source, dtype=np.uint8),
+                                            cv2.IMREAD_COLOR)
+                    original = cv2.resize(original, (1280, 720),
+                                          interpolation=cv2.INTER_AREA)
+                    derived = cv2.imdecode(np.fromfile(path, dtype=np.uint8),
+                                           cv2.IMREAD_COLOR)
+                    expected = np.zeros_like(original)
+                    for left, top, right, bottom in frame["retained_rois_1280"]:
+                        expected[top:bottom, left:right] = original[top:bottom, left:right]
+                    self.assertTrue(np.array_equal(derived, expected))
+                texts = [OCRText(**item) for item in frame["ocr"]]
+                editor = recognize_army_editor(path, None, texts,
+                                               client_version="18.647.2")
+                if frame["label"].startswith("hero_picker"):
+                    self.assertEqual(editor["surface"], "hero_picker")
+                    self.assertTrue(editor["ready"])
+                    self.assertEqual([(item["action"], item["point"])
+                                      for item in editor["controls"]],
+                                     [("close_hero_picker", [1100, 270])])
+                    self.assertEqual(editor["cards"], [])
+                    self.assertFalse(editor["complete"])
+                else:
+                    self.assertEqual(editor["surface"], "current")
+                    self.assertTrue(editor["ready"])
+                    self.assertIn("open_picker", [item["action"]
+                                                   for item in editor["controls"]])
+
+    def test_current_hero_picker_partial_or_wrong_version_fails_closed(self):
+        root = Path(__file__).parent / "fixtures"
+        frames = json.loads((root / "hero_picker_18_647_2.json").read_text(
+            encoding="utf-8"))["frames"]
+        frame = frames[0]
+        path = root / frame["fixture"]
+        texts = [OCRText(**item) for item in frame["ocr"]]
+        title = next(item for item in texts if item.text == "选择英雄")
+
+        for label, candidate_path, candidate_texts, version in (
+            ("wrong_version", path, texts, "18.600.7"),
+            ("title_occluded", path, [item for item in texts if item != title], "18.647.2"),
+            ("title_wrong_roi", path,
+             [OCRText(item.text, item.confidence, (10, 10, 80, 35)) if item == title
+              else item for item in texts], "18.647.2"),
+            ("title_spoofed_on_current", root / frames[-1]["fixture"],
+             [OCRText(**item) for item in frames[-1]["ocr"]] + [title], "18.647.2"),
+        ):
+            with self.subTest(case=label):
+                editor = recognize_army_editor(candidate_path, None, candidate_texts,
+                                               client_version=version)
+                self.assertEqual(editor["surface"], "unknown")
+                self.assertFalse(editor["ready"])
+                self.assertEqual(editor["controls"], [])
+
+        image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        image[125:155, 430:565] = 0
+        cv2.imwrite(str(self.path), image)
+        editor = recognize_army_editor(self.path, None, texts,
+                                       client_version="18.647.2")
+        self.assertEqual(editor["surface"], "unknown")
+        self.assertFalse(editor["ready"])
+        self.assertEqual(editor["controls"], [])
+
+        image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        image[240:300, 1070:1130] = 200
+        cv2.imwrite(str(self.path), image)
+        editor = recognize_army_editor(self.path, None, texts,
+                                       client_version="18.647.2")
+        self.assertEqual(editor["surface"], "hero_picker")
+        self.assertTrue(editor["ready"])
+        self.assertEqual(editor["controls"], [])
+
     def test_current_save_icon_needs_visual_glyph(self):
         self.image[54:100, 388:443] = (20, 20, 20)
         self.image[61:83, 404:428] = (235, 235, 235)

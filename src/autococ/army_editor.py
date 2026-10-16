@@ -388,6 +388,29 @@ def _save_current_icon_visible(image: np.ndarray) -> bool:
     return white >= .07 and outline >= .1
 
 
+def _hero_picker_visual_anchors(image: np.ndarray) -> list[int]:
+    """Find the light selector header against its dimmed army background."""
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    anchors = []
+    # The sampled 18.647.2 selector follows the selected hero column. Search
+    # for its panel, not a single fixed column or a portrait's identity.
+    for left in range(300, 801, 5):
+        header = gray[125:155, left + 82:left + 217]
+        outside = gray[125:155, left + 262:left + 397]
+        border = gray[112:121, left - 173:left + 217]
+        if (112 <= float(header.mean()) <= 145 and float(header.std()) <= 8
+                and float(header.mean() - outside.mean()) >= 45
+                and float(border.mean()) <= 75):
+            anchors.append(left)
+    return anchors
+
+
+def _hero_picker_close_backdrop_visible(image: np.ndarray) -> bool:
+    """Only offer the observed outside-panel dismissal on an empty dim backdrop."""
+    gray = cv2.cvtColor(image[240:300, 1070:1130], cv2.COLOR_BGR2GRAY)
+    return 25 <= float(gray.mean()) <= 50 and float(gray.std()) <= 10
+
+
 def _save_current_dialog(image: np.ndarray, texts: Sequence[OCRText]) -> dict[str, object] | None:
     title = _one(texts, "将军队保存为新配置", (480, 35, 800, 105))
     if title is None:
@@ -472,6 +495,33 @@ def recognize_army_editor(
         return save_dialog
     saved_title = _one(canonical, "已保存的配置", (545, 40, 735, 105))
     army_title = _one(canonical, "我的军队", (185, 40, 340, 105))
+    hero_titles = [item for item in canonical if item.text.strip() == "选择英雄"
+                   and item.confidence >= .9]
+    hero_panel = _hero_picker_visual_anchors(image)
+    if hero_titles or hero_panel:
+        # The selector leaves the My Army tabs and capacities visible. Never
+        # expose their underlying open/edit controls while the modal is present
+        # or one of its two independent anchors is obscured.
+        titles = [item for item in hero_titles
+                  if _inside(item, (300, 110, 850, 170))]
+        if (client_version != "18.647.2" or army_title is None or saved_title is None
+                or len(titles) != 1 or
+                not any(abs(left - titles[0].bbox[0]) <= 15 for left in hero_panel)):
+            result["unknowns"].append("hero_picker_unverified")
+            return result
+        result["surface"] = "hero_picker"
+        result["ready"] = True
+        if _hero_picker_close_backdrop_visible(image):
+            result["controls"].append({
+                "action": "close_hero_picker",
+                "point": _scale_point(1100, 270, baseline_resolution),
+                "confidence": .95, "enabled": True, "cost_free": True,
+                "evidence": {"title": asdict(titles[0]),
+                             "visual": "light_selector_header_dark_border_and_dim_backdrop",
+                             "dismissal": "observed_empty_background"}})
+        else:
+            result["unknowns"].append("hero_picker_close_backdrop_unverified")
+        return result
     edit_titles = [item for item in canonical if item.bbox is not None and
                    _TITLE.search(item.text.replace(" ", "")) and item.confidence >= .88 and
                    _inside(item, (460, 25, 780, 110))]
