@@ -135,11 +135,55 @@ def selected_card_bbox(path, bbox, baseline_resolution=(1280, 720)):
     return None
 
 
+def _selected_count_header(path, image, bbox, *, client_version, baseline_resolution):
+    """Locate a complete current-client quantity inside a closed selected card.
+
+    The right-hand crop is safe only when all white quantity ink in the blue
+    header lies inside it; x10/x100 prefixes cannot be cropped into x1.
+    """
+    left, top, right, bottom = bbox
+    if (client_version != "18.647.2" or
+            not (80 <= right - left <= 105 and 590 <= top <= 605 and
+                 705 <= bottom <= 715)):
+        return None
+    # BattleObserver.cards stores 1280x720 boxes even when public slot
+    # coordinates use a different configured baseline resolution.
+    selected = selected_card_bbox(path, bbox, (1280, 720))
+    if selected is None:
+        return None
+    x0, y0, x1, _y1 = selected
+    roi = (x1 - 38, y0 - 2, x1 - 3, y0 + 31)
+    scan = (x0 + 6, y0 + 3, x1 - 3, y0 + 31)
+    if (not (left <= roi[0] < roi[2] <= right + 3 and
+             top - 10 <= roi[1] < roi[3] <= top + 38) or
+            not (0 <= scan[0] < scan[2] <= 1280 and 0 <= scan[1] < scan[3] <= 720)):
+        return None
+    hsv = cv2.cvtColor(image[scan[1]:scan[3], scan[0]:scan[2]], cv2.COLOR_BGR2HSV)
+    ink = cv2.inRange(hsv, np.array([0, 0, 190]), np.array([180, 95, 255])) > 0
+    ys, xs = np.where(ink)
+    ink_box = ([scan[0] + int(xs.min()), scan[1] + int(ys.min()),
+                scan[0] + int(xs.max()) + 1, scan[1] + int(ys.max()) + 1]
+               if len(xs) else None)
+    covered = (ink_box is not None and len(xs) >= 20 and
+               ink_box[3] - ink_box[1] >= 8 and
+               roi[0] <= ink_box[0] < ink_box[2] <= roi[2] and
+               roi[1] <= ink_box[1] < ink_box[3] <= roi[3])
+    return {"selected_card_bbox": list(scale_box(selected, from_resolution=(1280, 720),
+                                                 to_resolution=baseline_resolution)),
+            "selected_header_roi": list(scale_box(roi, from_resolution=(1280, 720),
+                                                  to_resolution=baseline_resolution)),
+            "selected_header_roi_at_1280x720": list(roi),
+            "header_ink_coverage": {"scan_bbox_at_1280x720": list(scan),
+                                    "ink_bbox_at_1280x720": ink_box,
+                                    "ink_pixels": int(len(xs)), "complete": bool(covered)}}
+
+
 class BattleObserver:
     def __init__(self, recognizer):
         self.recognizer = recognizer
         self.anchors = {}
         self.cards = {}
+        self.last_count_diagnostic = None
 
     def remember(self, snapshot):
         if snapshot.scene not in {"enemy_village", "battle"} or snapshot.confidence < .8:
@@ -188,6 +232,7 @@ class BattleObserver:
         return None
 
     def count(self, path, image, slot):
+        self.last_count_diagnostic = None
         saved = self.cards.get(round(slot["point"][0]))
         if saved is None:
             return None
@@ -218,6 +263,7 @@ class BattleObserver:
             return None
         crop = source[b:d, a:c]
         reads = reader(crop)
+        raw_reads = reads
         def strong_counts(items):
             values = set()
             for item in items:
@@ -229,13 +275,78 @@ class BattleObserver:
             return values
 
         numeric_evidence = strong_counts(reads)
-        if len(numeric_evidence) > 1:
-            return {"reason": "strong_count_conflict", "counts": sorted(numeric_evidence),
-                    "frame": str(path), "slot_bbox": list(slot["bbox"])}
         def valid(items):
             return (len(items) == 1 and math.isfinite(items[0].confidence)
                     and max(.9, self.recognizer.ocr_config.confidence_threshold) <= items[0].confidence <= 1
                     and re.fullmatch(r"[xX×]\s*(\d+)", items[0].text.strip()))
+
+        selected = _selected_count_header(
+            path, image, (left, top, right, bottom),
+            client_version=self.recognizer.client_version,
+            baseline_resolution=self.recognizer.baseline_resolution)
+        if selected is not None:
+            diagnostic = {**selected, "count_reads": []}
+            self.last_count_diagnostic = diagnostic
+        if len(numeric_evidence) > 1:
+            diagnostic = self.last_count_diagnostic or {"count_reads": []}
+            diagnostic["count_reads"].append({
+                "method": "fast_header_line",
+                "roi": list(scale_box(roi, from_resolution=(1280, 720),
+                                      to_resolution=self.recognizer.baseline_resolution)),
+                "roi_at_1280x720": list(roi),
+                "readings": [{"text": item.text, "confidence": item.confidence}
+                             for item in reads]})
+            diagnostic["strong_counts"] = sorted(numeric_evidence)
+            return {"reason": "strong_count_conflict", "counts": sorted(numeric_evidence),
+                    "frame": str(path), "slot_bbox": list(slot["bbox"]),
+                    "count_diagnostic": diagnostic}
+        if selected is not None:
+            if selected["header_ink_coverage"]["complete"]:
+                selected_roi = tuple(selected["selected_header_roi_at_1280x720"])
+                a, b, c, d = scale_box(selected_roi, from_resolution=(1280, 720),
+                                       to_resolution=(width, height))
+                selected_crop = source[b:d, a:c]
+                views = (("fast_header_line", roi, reads),
+                         ("fast_header_threshold_line", roi,
+                          reader(cv2.threshold(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY),
+                                               120, 255, cv2.THRESH_BINARY)[1])),
+                         ("fast_selected_header_line", selected_roi, reader(selected_crop)),
+                         ("fast_selected_header_threshold_line", selected_roi,
+                          reader(cv2.threshold(cv2.cvtColor(selected_crop, cv2.COLOR_BGR2GRAY),
+                                               120, 255, cv2.THRESH_BINARY)[1])))
+                proofs = []
+                all_strong = set()
+                for method, proof_roi, results in views:
+                    all_strong.update(strong_counts(results))
+                    diagnostic["count_reads"].append({
+                        "method": method,
+                        "roi": list(scale_box(proof_roi, from_resolution=(1280, 720),
+                                              to_resolution=self.recognizer.baseline_resolution)),
+                        "roi_at_1280x720": list(proof_roi),
+                        "readings": [{"text": item.text, "confidence": item.confidence}
+                                     for item in results]})
+                    match = valid(results)
+                    if match:
+                        proofs.append((results[0].confidence, method, proof_roi,
+                                       results[0], int(match[1])))
+                diagnostic["strong_counts"] = sorted(all_strong)
+                if len(all_strong) > 1:
+                    return {"reason": "strong_count_conflict", "counts": sorted(all_strong),
+                            "frame": str(path), "slot_bbox": list(slot["bbox"]),
+                            "selected_header_evidence": diagnostic}
+                if proofs:
+                    confidence, method, proof_roi, item, count = max(proofs)
+                    baseline_roi = scale_box(proof_roi, from_resolution=(1280, 720),
+                                             to_resolution=self.recognizer.baseline_resolution)
+                    return {"count": count, "confidence": confidence,
+                            "frame": str(path), "slot_bbox": list(slot["bbox"]),
+                            "roi": list(baseline_roi),
+                            "readings": [{**asdict(item), "bbox": list(baseline_roi),
+                                          "source": method}],
+                            "portrait_score": score, "portrait_scale": scale,
+                            "portrait_source": "current_frame_saved_battle_portrait",
+                            "selected_header_evidence": diagnostic}
+                return None
 
         match = valid(reads)
         method = "fast_header_line"
@@ -244,8 +355,22 @@ class BattleObserver:
             reads = reader(binary)
             numeric_evidence.update(strong_counts(reads))
             if len(numeric_evidence) > 1:
+                baseline_roi = scale_box(roi, from_resolution=(1280, 720),
+                                         to_resolution=self.recognizer.baseline_resolution)
+                diagnostic = dict(self.last_count_diagnostic or {})
+                diagnostic.update({"strong_counts": sorted(numeric_evidence),
+                                   "count_reads": [
+                                       {"method": name, "roi": list(baseline_roi),
+                                        "roi_at_1280x720": list(roi),
+                                        "readings": [{"text": item.text,
+                                                      "confidence": item.confidence}
+                                                     for item in items]}
+                                       for name, items in (
+                                           ("fast_header_line", raw_reads),
+                                           ("fast_header_threshold_line", reads))]})
                 return {"reason": "strong_count_conflict", "counts": sorted(numeric_evidence),
-                        "frame": str(path), "slot_bbox": list(slot["bbox"])}
+                        "frame": str(path), "slot_bbox": list(slot["bbox"]),
+                        "count_diagnostic": diagnostic}
             match = valid(reads)
             method = "fast_header_threshold_line"
         if not match:
@@ -255,7 +380,9 @@ class BattleObserver:
                 "frame": str(path), "slot_bbox": list(slot["bbox"]), "roi": list(baseline_roi),
                 "readings": [{**asdict(reads[0]), "bbox": list(baseline_roi), "source": method}],
                 "portrait_score": score, "portrait_scale": scale,
-                "portrait_source": "current_frame_saved_battle_portrait"}
+                "portrait_source": "current_frame_saved_battle_portrait",
+                **({"selected_header_evidence": self.last_count_diagnostic}
+                   if selected is not None else {})}
 
     @staticmethod
     def modal_visible(image):
@@ -281,6 +408,7 @@ class BattleObserver:
         guarded = None if cloud["obscured"] or modal else self.guard(image)
         guarded_at = time.monotonic()
         reading = None
+        self.last_count_diagnostic = None
         if guarded is not None and purpose == "troop_count" and slot is not None:
             reading = self.count(path, image, slot)
         count_at = time.monotonic()
@@ -301,6 +429,8 @@ class BattleObserver:
             })
         if guarded is None or (purpose == "troop_count" and reading is None):
             snapshot = self.recognizer.recognize(path)
+            if self.last_count_diagnostic is not None:
+                snapshot.observations["deployment_count_diagnostic"] = self.last_count_diagnostic
             if modal and snapshot.scene in {"battle", "enemy_village"}:
                 snapshot = SceneSnapshot("unknown", 0.0, path,
                                          {**snapshot.observations, "buttons": [], "modal_visible": True})
