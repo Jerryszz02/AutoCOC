@@ -107,7 +107,7 @@ def freeze(session, selected, before, *, heroes=()):
 @pytest.fixture(autouse=True)
 def offline_post_reader(monkeypatch):
     monkeypatch.setattr("autococ.frozen_line._post_troop_reading",
-                        lambda _session, post, _before, _point, bbox: {
+                        lambda _session, post, _before, _point, bbox, **_kwargs: {
                             "count": 0, "confidence": .99, "frame": str(post),
                             "slot_bbox": list(bbox), "portrait_score": .99,
                             "portrait_source": "current_frame_saved_battle_portrait",
@@ -320,7 +320,7 @@ def test_missing_post_count_evidence_uses_only_two_fresh_observations_without_re
     before, selected = frame("before", 99, root=tmp_path), frame("selected", 100, root=tmp_path)
     posts = [frame(f"post-{number}", 103 + number, root=tmp_path, post=True) for number in range(3)]
     monkeypatch.setattr("autococ.frozen_line._post_troop_reading",
-                        lambda _session, post_path, _before, _point, bbox: {
+                        lambda _session, post_path, _before, _point, bbox, **_kwargs: {
                             "count": None, "confidence": .4, "frame": str(post_path),
                             "slot_bbox": list(bbox)})
     session = Session(selected, posts[0])
@@ -354,7 +354,7 @@ def test_unknown_post_troop_recovers_only_from_fresh_same_frame_evidence(monkeyp
         session.last_snapshot = next(pending)
         return session.last_snapshot
     session.observe = observe
-    def read(_session, post, _before, _point, bbox):
+    def read(_session, post, _before, _point, bbox, **_kwargs):
         if str(post) == str(first.screenshot_path) and bbox[0] == 100:
             return {}  # no guessed x0 from the prebattle army
         return {"count": 0, "confidence": .99, "frame": str(post), "slot_bbox": list(bbox),
@@ -390,7 +390,7 @@ def test_strong_ocr_count_conflict_stops_without_recheck_or_redeployment(monkeyp
                               frame("conflict-post", 103, root=tmp_path, post=True))
     session = Session(selected, post)
     plan = freeze(session, selected, before)
-    def read(_session, path, _before, _point, bbox):
+    def read(_session, path, _before, _point, bbox, **_kwargs):
         if bbox == plan.troop_cards[0][4]:
             return {"conflict": True, "reason": "strong_count_conflict", "counts": [0, 1],
                     "frame": str(path), "slot_bbox": list(bbox)}
@@ -424,7 +424,7 @@ def test_rechecks_never_combine_troops_and_hero_from_different_frames(monkeypatc
         session.last_snapshot = next(pending)
         return session.last_snapshot
     session.observe = observe
-    def read(_session, path, _before, _point, bbox):
+    def read(_session, path, _before, _point, bbox, **_kwargs):
         if str(path) != str(posts[0].screenshot_path):
             return {}
         return {"count": 0, "confidence": .99, "frame": str(path), "slot_bbox": list(bbox),
@@ -460,7 +460,7 @@ def test_recheck_unknown_scene_stops_without_any_new_game_input(monkeypatch, tmp
         session.last_snapshot = next(pending)
         return session.last_snapshot
     session.observe = observe
-    monkeypatch.setattr("autococ.frozen_line._post_troop_reading", lambda *_args: {})
+    monkeypatch.setattr("autococ.frozen_line._post_troop_reading", lambda *_args, **_kwargs: {})
     plan = freeze(session, selected, before)
     with pytest.raises(DeploymentError, match="Fresh post-burst battle frame unavailable"):
         execute_frozen_line(session, plan, clock=lambda: 102., sleep=lambda _seconds: None)

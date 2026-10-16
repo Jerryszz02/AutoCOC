@@ -425,7 +425,8 @@ def run_battle(session: GameSession) -> TaskResult:
         read_deadline = read_started + (35 if line_mode else 10)
         prior_line_values = None
         stable_line_result = False
-        for attempt in range(6 if line_mode else 4):  # Every reread must be a new saved frame.
+        max_settlement_reads = 12 if line_mode else 4
+        for attempt in range(max_settlement_reads):  # Every reread must be a new saved frame.
             if settlement_frame.screenshot_path not in evidence:
                 evidence.append(settlement_frame.screenshot_path)
             observed = settlement_frame.observations.get("settlement")
@@ -460,7 +461,7 @@ def run_battle(session: GameSession) -> TaskResult:
                     break
                 prior_line_values = (values, str(settlement_frame.screenshot_path))
                 settlement_error = "Settlement values have not stabilized"
-            if attempt == (5 if line_mode else 3) or time.monotonic() >= read_deadline:
+            if attempt == max_settlement_reads - 1 or time.monotonic() >= read_deadline:
                 break
             session.check_deadline()
             time.sleep(min(session.config.runtime.poll_interval_sec, 1, max(0, read_deadline - time.monotonic())))

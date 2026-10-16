@@ -1,0 +1,50 @@
+{
+  "frozen-line-010553-00011-toolbar.png": {
+    "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-010553-manual-skill\\frames\\00011-line-zoom-verified.png",
+    "source_sha256": "a24349639c701ee141395284f4388a2dc4a0cf4c3de5963b8d686587e3aa6253",
+    "fixture_sha256": "35f82894fa29a24f97a04d9c7a38dcc3dcc1239a5c2025b73084c6744a0b6b39",
+    "retained_roi_native": [
+      0,
+      1090,
+      2560,
+      1440
+    ],
+    "derivation": "preserve original 2560x1440 toolbar pixels y>=1090; zero all pixels above"
+  },
+  "frozen-line-010553-00014-toolbar.png": {
+    "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-010553-manual-skill\\frames\\00014-frozen-line-post.png",
+    "source_sha256": "44aa73a4c60b671bf1844decd9ead10679c954652a4d60d32fee4c9d6ed96f89",
+    "fixture_sha256": "60bdb3a0d27d083be324339e9cc19bda6f276ad747704b91bca356f7c2d67e31",
+    "retained_roi_native": [
+      0,
+      1090,
+      2560,
+      1440
+    ],
+    "derivation": "preserve original 2560x1440 toolbar pixels y>=1090; zero all pixels above"
+  },
+  "frozen-line-010553-00015-toolbar.png": {
+    "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-010553-manual-skill\\frames\\00015-frozen-line-post-recheck.png",
+    "source_sha256": "8935f39749adf68c2023f06172cf843a159ad78c4b4864b9d0f6a6df623df87a",
+    "fixture_sha256": "416b7fca81635839115bb8e22136cfaf23c787fe7e1bbd82a3ff944aed04f6f1",
+    "retained_roi_native": [
+      0,
+      1090,
+      2560,
+      1440
+    ],
+    "derivation": "preserve original 2560x1440 toolbar pixels y>=1090; zero all pixels above"
+  },
+  "frozen-line-010553-00016-toolbar.png": {
+    "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-010553-manual-skill\\frames\\00016-frozen-line-post-recheck.png",
+    "source_sha256": "d5f646a859cd91cd58d8900decc121aa99ed1b1d5db3588c3ad9c6d280ab750c",
+    "fixture_sha256": "397fdeaf9827b73c89b04197e4a713c747445ebfc3e1ddcd91d268d6da382a05",
+    "retained_roi_native": [
+      0,
+      1090,
+      2560,
+      1440
+    ],
+    "derivation": "preserve original 2560x1440 toolbar pixels y>=1090; zero all pixels above"
+  }
+}

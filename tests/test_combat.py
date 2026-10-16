@@ -610,10 +610,99 @@ class CombatTests(unittest.TestCase):
         self.assertTrue(all(path in result.evidence for path in
                             (frames[5].screenshot_path, final.screenshot_path, repeated.screenshot_path)))
 
+    def test_line_result_can_use_remaining_window_after_six_intermittent_star_reads(self):
+        frames = complete_frames()
+        readings = []
+        for index, valid in enumerate((False, True, False, False, False, True, True)):
+            observed = deepcopy(SETTLEMENT)
+            if not valid:
+                observed["stars"] = None
+            readings.append(frame(50 + index, "settlement", settlement=observed))
+        session = FakeSession(frames[:5] + readings + frames[6:])
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        result = battle(session)
+        self.assertEqual(result.status, "succeeded", result.reason)
+        self.assertEqual([read["valid"] for read in result.metrics["settlement_reads"]],
+                         [False, True, False, False, False, True, True])
+        self.assertTrue(result.metrics["inventory_reconciled"])
+        self.assertEqual([path for path, reason in session.taps if "return_home" in reason],
+                         [readings[-1].screenshot_path])
+
+    def test_line_result_conflicting_valid_value_resets_adjacent_confirmation(self):
+        frames = complete_frames()
+        readings = []
+        for index, gold in enumerate((100, 101, 100, 100)):
+            observed = deepcopy(SETTLEMENT)
+            observed["loot"]["gold"] = gold
+            readings.append(frame(50 + index, "settlement", settlement=observed))
+        session = FakeSession(frames[:5] + readings + frames[6:])
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        result = battle(session)
+        self.assertEqual(result.status, "succeeded", result.reason)
+        self.assertEqual(len(result.metrics["settlement_reads"]), 4)
+        self.assertEqual(result.metrics["settlement_observed"]["loot"]["gold"], 100)
+        self.assertEqual([path for path, reason in session.taps if "return_home" in reason],
+                         [readings[-1].screenshot_path])
+
+    def test_line_result_still_obeys_thirty_five_second_reread_deadline(self):
+        frames = complete_frames()
+        invalid = deepcopy(SETTLEMENT)
+        invalid["stars"] = None
+        readings = [frame(50 + index, "settlement", settlement=deepcopy(invalid)) for index in range(12)]
+        session = FakeSession(frames[:5] + readings + frames[6:])
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        clock = [100.0]
+        observe = session.observe
+
+        def slow_observe(label="observe", **options):
+            if label == "battle-settlement-reread":
+                clock[0] += 10
+            return observe(label, **options)
+
+        session.observe = slow_observe
+        with patch("autococ.combat.time.monotonic", side_effect=lambda: clock[0]):
+            result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.metrics["settlement_reads"][-1]["error"], "Settlement reread window exceeded")
+        self.assertLess(len(result.metrics["settlement_reads"]), 12)
+        self.assertTrue(result.metrics["returned_home"])
+
+    def test_line_extra_reread_still_stops_on_user_interrupt(self):
+        frames = complete_frames()
+        invalid = deepcopy(SETTLEMENT)
+        invalid["stars"] = None
+        readings = [frame(50 + index, "settlement", settlement=deepcopy(invalid)) for index in range(12)]
+        session = FakeSession(frames[:5] + readings + frames[6:])
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        observe = session.observe
+
+        def stop_at_seventh(label="observe", **options):
+            if label == "battle-settlement-reread" and session.observe_labels.count(label) == 6:
+                raise StopRequested("stop during extra reread")
+            return observe(label, **options)
+
+        session.observe = stop_at_seventh
+        with self.assertRaises(StopRequested):
+            battle(session)
+        self.assertFalse(any("return_home" in reason for _, reason in session.taps))
+
+    def test_line_extra_reread_account_conflict_never_uses_old_return_control(self):
+        frames = complete_frames()
+        invalid = deepcopy(SETTLEMENT)
+        invalid["stars"] = None
+        readings = [frame(50 + index, "settlement", settlement=deepcopy(invalid)) for index in range(6)]
+        conflict = frame(56, "account_in_use")
+        session = FakeSession(frames[:5] + readings + [conflict])
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        result = battle(session)
+        self.assertEqual(result.status, "failed")
+        self.assertIs(session.last_snapshot, conflict)
+        self.assertFalse(any("return_home" in reason for _, reason in session.taps))
+
     def test_line_result_does_not_click_while_valid_values_keep_changing(self):
         frames = complete_frames()
         changing = []
-        for index in range(6):
+        for index in range(12):
             result = deepcopy(SETTLEMENT)
             result["loot"]["gold"] += index
             changing.append(frame(50 + index, "settlement", settlement=result))
@@ -622,7 +711,7 @@ class CombatTests(unittest.TestCase):
         result = battle(session)
         self.assertEqual(result.status, "failed")
         self.assertIn("not stabilized", result.reason)
-        self.assertEqual(len(result.metrics["settlement_reads"]), 6)
+        self.assertEqual(len(result.metrics["settlement_reads"]), 12)
         self.assertTrue(result.metrics["returned_home"])
         self.assertNotIn("loot_gold", result.metrics)
         self.assertEqual([path for path, reason in session.taps if "return_home" in reason],
@@ -630,7 +719,7 @@ class CombatTests(unittest.TestCase):
 
     def test_line_result_same_frame_replay_cannot_prove_stability(self):
         frames = complete_frames()
-        repeated = [frame(50, "settlement", settlement=deepcopy(SETTLEMENT)) for _ in range(6)]
+        repeated = [frame(50, "settlement", settlement=deepcopy(SETTLEMENT)) for _ in range(12)]
         session = FakeSession(frames[:5] + repeated + frames[6:])
         session.config.battle = replace(session.config.battle, strategy="edrag_line")
         result = battle(session)
@@ -643,13 +732,13 @@ class CombatTests(unittest.TestCase):
         frames = complete_frames()
         partial = deepcopy(SETTLEMENT)
         partial["loot"]["dark_elixir"] = None
-        readings = [frame(50 + index, "settlement", settlement=deepcopy(partial)) for index in range(6)]
+        readings = [frame(50 + index, "settlement", settlement=deepcopy(partial)) for index in range(12)]
         session = FakeSession(frames[:5] + readings + frames[6:])
         session.config.battle = replace(session.config.battle, strategy="edrag_line")
         result = battle(session)
         self.assertEqual(result.status, "failed")
         self.assertTrue(result.metrics["returned_home"])
-        self.assertEqual(len(result.metrics["settlement_reads"]), 6)
+        self.assertEqual(len(result.metrics["settlement_reads"]), 12)
         self.assertIsNone(result.metrics.get("victory"))
         self.assertNotIn("loot_gold", result.metrics)
         self.assertFalse(result.metrics["inventory_reconciled"])

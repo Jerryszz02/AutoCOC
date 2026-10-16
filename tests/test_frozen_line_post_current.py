@@ -40,13 +40,159 @@ def test_real_toolbar_provenance_and_current_deployed_templates_are_hash_bound()
         assert sha256((FIXTURES / name).read_bytes()).hexdigest() == row["fixture_sha256"]
         assert row["retained_roi_native"] == [0, 1090, 2560, 1440]
     new_queen = current["_queen_template"]
+    later = json.loads((FIXTURES / "current_post_hero_005304.provenance.json").read_text(encoding="utf-8"))
+    later_sources = {row["path"]: row["source_sha256"] for row in later["assets"]}
     for row in entries:
-        expected_source = (new_queen["source_sha256"] if row["path"].endswith("001038_18_647_2.png")
+        expected_source = (later_sources[row["path"]] if row["path"] in later_sources
+                           else new_queen["source_sha256"] if row["path"].endswith("001038_18_647_2.png")
                            else evidence[toolbar(16).name]["source_sha256"])
         assert row["source_sha256"] == expected_source
         assert sha256((CATALOG_ROOT / row["path"]).read_bytes()).hexdigest() == row["template_sha256"]
     assert new_queen["template_sha256"] == next(row["template_sha256"] for row in entries
         if row["path"].endswith("001038_18_647_2.png"))
+
+
+def current_010553_toolbar(number: int) -> Path:
+    return FIXTURES / f"frozen-line-010553-{number:05d}-toolbar.png"
+
+
+def _geometry_session(path: Path, *, ocr=None, client_version="18.647.2"):
+    recognizer = ScreenshotRecognizer()
+    recognizer.client_version = client_version
+    return SimpleNamespace(recognizer=recognizer, client_version=client_version,
+        last_snapshot=SimpleNamespace(scene="battle", screenshot_path=path,
+                                      observations={"ocr": [] if ocr is None else ocr}),
+        _frozen_count_roi_hints={})
+
+
+def _geometry_dragon(session, post: Path, *, source=None, unit_id="dragon"):
+    return _post_troop_reading(session, post, str(source or current_010553_toolbar(11)),
+                               (185, 653), (141, 595, 230, 711), unit_id=unit_id)
+
+
+def test_010553_toolbar_provenance_and_current_frame_geometry_reading():
+    evidence = json.loads((FIXTURES / "frozen-line-010553.provenance.json").read_text(encoding="utf-8"))
+    assert set(evidence) == {current_010553_toolbar(n).name for n in (11, 14, 15, 16)}
+    for name, row in evidence.items():
+        assert sha256((FIXTURES / name).read_bytes()).hexdigest() == row["fixture_sha256"]
+        assert row["retained_roi_native"] == [0, 1090, 2560, 1440]
+    for number in (14, 15, 16):
+        post = current_010553_toolbar(number)
+        result = _geometry_dragon(_geometry_session(post), post)
+        assert result["count"] == 0 and result["confidence"] >= .9
+        assert result["portrait_score"] >= .92
+        assert result["source_portrait_identity"]["unit_id"] == "dragon"
+        assert result["source_portrait_identity"]["version_verified"] is True
+        assert result["locator"]["source"] == "current_frame_closed_card_header_geometry"
+        assert result["locator"]["bbox"] == [185, 592, 228, 623]
+        assert result["current_card_border"]["left_edge"] >= 250
+        assert result["current_card_border"]["right_edge"] <= -150
+        assert result["current_card_border"]["bottom_contrast"] >= 40
+        assert result["frame"] == str(post) and result["slot_bbox"] == [141, 595, 230, 711]
+
+
+def test_010553_five_spent_troops_and_four_deployed_heroes_share_one_frame():
+    post = current_010553_toolbar(15)
+    source = str(current_010553_toolbar(11))
+    session = _geometry_session(post)
+    cards = (
+        ("electro_dragon", (44, 591, 135, 708), (89, 649)),
+        ("dragon", (141, 595, 230, 711), (185, 653)),
+        ("baby_dragon", (238, 595, 327, 711), (282, 653)),
+        ("balloon", (335, 595, 423, 711), (379, 653)),
+        ("archer", (432, 594, 520, 711), (476, 652)),
+    )
+    for unit_id, bbox, point in cards:
+        reading = _post_troop_reading(session, post, source, point, bbox, unit_id=unit_id)
+        assert reading["count"] == 0 and reading["confidence"] >= .9, unit_id
+        assert reading["portrait_score"] >= .92 and reading["frame"] == str(post)
+        assert reading["slot_bbox"] == list(bbox)
+    for hero_id in ("grand_warden", "dragon_duke", "minion_prince", "archer_queen"):
+        locator = locate_current_deployed_hero_card(post, hero_id, client_version="18.647.2")
+        assert locator is not None and locator["frame"] == str(post), hero_id
+        state = recognize_hero_state(post, locator["bbox"], unit_id=hero_id,
+                                     client_version="18.647.2")
+        assert state["deployed"] is True, hero_id
+        assert state["evidence"]["portrait_identity"]["unit_id"] == hero_id
+        assert state["evidence"]["health_bar"] is not None
+
+
+def test_010553_unspent_card_stays_positive_not_inferred_zero(monkeypatch):
+    from autococ.battle_vision import BattleObserver
+
+    post = current_010553_toolbar(11)
+    monkeypatch.setattr(BattleObserver, "count", lambda *_args: None)
+    result = _geometry_dragon(_geometry_session(post), post)
+    assert result["count"] == 1 and result["confidence"] >= .9
+    assert result["locator"]["source"] == "current_frame_closed_card_header_geometry"
+
+
+def test_010553_geometry_rejects_raw_binary_or_full_ocr_strong_conflicts(monkeypatch):
+    post = current_010553_toolbar(15)
+    session = _geometry_session(post)
+    from autococ.battle_vision import BattleObserver
+
+    monkeypatch.setattr(BattleObserver, "count", lambda *_args: None)
+    def contradiction(image):
+        if image.shape[1] > 100:  # broad header, never the fixed right-aligned ROI
+            return []
+        return [OCRText("x0" if image.ndim == 2 else "x1", .98)]
+    monkeypatch.setattr(session.recognizer.provider, "recognize_line_image", contradiction)
+    result = _geometry_dragon(session, post)
+    assert result["conflict"] is True and result["counts"] == [0, 1]
+    session.last_snapshot.observations["ocr"] = [
+        {"text": "x1", "confidence": .99, "bbox": [185, 592, 228, 623]}]
+    monkeypatch.setattr(session.recognizer.provider, "recognize_line_image",
+                        lambda _image: [OCRText("x0", .98)])
+    result = _geometry_dragon(session, post)
+    assert result["conflict"] is True and result["counts"] == [0, 1]
+
+
+def test_010553_geometry_equal_confidence_raw_binary_does_not_compare_ocr_objects(monkeypatch):
+    post = current_010553_toolbar(15)
+    session = _geometry_session(post)
+    from autococ.battle_vision import BattleObserver
+
+    monkeypatch.setattr(BattleObserver, "count", lambda *_args: None)
+    monkeypatch.setattr(session.recognizer.provider, "recognize_line_image",
+                        lambda _image: [OCRText("x0", .98)])
+    result = _geometry_dragon(session, post)
+    assert result["count"] == 0 and result["confidence"] == .98
+
+
+def test_010553_geometry_requires_same_frame_snapshot_and_current_client():
+    post = current_010553_toolbar(15)
+    session = _geometry_session(post)
+    session.last_snapshot = None
+    assert _geometry_dragon(session, post) == {}
+    session = _geometry_session(post, client_version="unknown")
+    assert _geometry_dragon(session, post) == {}
+    session = _geometry_session(post)
+    del session.client_version
+    assert _geometry_dragon(session, post) == {}
+    session = _geometry_session(post)
+    session.last_snapshot.screenshot_path = current_010553_toolbar(14)
+    assert _geometry_dragon(session, post) == {}
+    assert _geometry_dragon(_geometry_session(post), post, unit_id="balloon") == {}
+    assert _geometry_dragon(_geometry_session(post), post, unit_id=None) == {}
+
+
+def test_010553_geometry_requires_current_portrait_and_closed_card(tmp_path):
+    post = current_010553_toolbar(15)
+    image = cv2.imread(str(post))
+    variants = {}
+    variants["portrait"] = image.copy()
+    variants["portrait"][1266:1350, 320:432] = 20
+    variants["left_edge"] = image.copy()
+    variants["left_edge"][1250:1390, 274:290] = 20
+    variants["right_edge"] = image.copy()
+    variants["right_edge"][1250:1390, 452:468] = 20
+    variants["bottom_edge"] = image.copy()
+    variants["bottom_edge"][1412:1428, 298:444] = 20
+    for name, pixels in variants.items():
+        path = tmp_path / f"{name}.png"
+        cv2.imwrite(str(path), pixels)
+        assert _geometry_dragon(_geometry_session(path), path) == {}, name
 
 
 def current_toolbar(number: int) -> Path:

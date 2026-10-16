@@ -176,9 +176,11 @@ def _count_proves(reading: dict, expected: int, frame: Any,
 
 
 def _post_troop_reading(session: Any, post_path: Any, source_path: str,
-                        point: tuple[int, int], bbox: tuple[int, int, int, int]) -> dict:
+                        point: tuple[int, int], bbox: tuple[int, int, int, int], *,
+                        unit_id: str | None = None) -> dict:
     """Use a frozen card portrait to bind current-frame count OCR to its identity."""
     import cv2
+    import numpy as np
     from .battle_vision import BattleObserver
     from .images import read_frame
 
@@ -234,10 +236,30 @@ def _post_troop_reading(session: Any, post_path: Any, source_path: str,
         # A preceding post-burst frame may supply only *geometry*. Read the
         # quantity afresh below; the previous frame's number is never reused.
         hint = getattr(session, "_frozen_count_roi_hints", {}).get(tuple(bbox))
-        if not isinstance(hint, (list, tuple)) or len(hint) != 4:
-            return {}
-        candidate = {"bbox": list(hint), "text": None, "confidence": None}
-        locator_source = "prior_post_frame_roi_geometry"
+        if isinstance(hint, (list, tuple)) and len(hint) == 4:
+            candidate = {"bbox": list(hint), "text": None, "confidence": None}
+            locator_source = "prior_post_frame_roi_geometry"
+        else:
+            # The sampled current-client cards have a right-aligned quantity
+            # header. An independently bound card may locate that header even
+            # when full-frame OCR returns no numeric box at all. This geometry
+            # proposes only an ROI; fresh native OCR below proves the value.
+            if (getattr(session.recognizer, "client_version", None) != _CLIENT_VERSION or
+                    getattr(session, "client_version", None) != _CLIENT_VERSION or
+                    getattr(snapshot, "scene", None) not in {"enemy_village", "battle"} or
+                    not (80 <= right - left <= 105 and 590 <= top <= 605 and 705 <= bottom <= 715)):
+                return {}
+            from .unit_catalog import recognize_card_identity
+
+            identity = recognize_card_identity(source, bbox, "troop", surface="battle",
+                                               client_version=_CLIENT_VERSION)
+            if (not isinstance(unit_id, str) or identity.get("unit_id") != unit_id or
+                    identity.get("version_verified") is not True or
+                    identity.get("template_client_version") != _CLIENT_VERSION):
+                return {}
+            candidate = {"bbox": [right - 45, top - 3, right - 2, top + 28],
+                         "text": None, "confidence": None}
+            locator_source = "current_frame_closed_card_header_geometry"
     region = cv2.cvtColor(current[max(0, top + 15):min(720, bottom - 20),
                                       max(0, left - 12):min(1280, right + 12)], cv2.COLOR_BGR2GRAY)
     portrait = cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY)
@@ -255,12 +277,70 @@ def _post_troop_reading(session: Any, post_path: Any, source_path: str,
     estimated_top = round(max(0, top + 15) + y - 38 * scale)
     if score < .92 or abs(estimated_left - left) > 3 or abs(estimated_top - top) > 3:
         return {}
+    border = None
+    if locator_source == "current_frame_closed_card_header_geometry":
+        gray = cv2.cvtColor(current, cv2.COLOR_BGR2GRAY)
+        edges = np.median(cv2.Sobel(gray[625:695], cv2.CV_32F, 1, 0, ksize=3), axis=0)
+        # Match vision._battle_observation's opposite-facing card edges
+        # (250/-150) and hero_state's closed-bottom contrast (40). A spent
+        # grayscale card has no cyan sides to validate instead.
+        left_edge, right_edge = float(edges[left]), float(edges[right - 1])
+        bottom_contrast = float(gray[bottom - 4:bottom, left + 8:right - 8].mean() -
+                                gray[bottom + 1:bottom + 3, left + 8:right - 8].mean())
+        if left_edge < 250 or right_edge > -150 or bottom_contrast < 40:
+            return {}
+        border = {"left_edge": left_edge, "right_edge": right_edge,
+                  "bottom_contrast": bottom_contrast}
     from .locator import scale_box
 
     original = read_frame(post_path)
     reader = getattr(session.recognizer.provider, "recognize_line_image", None)
     if not callable(reader):
         return {}
+    if locator_source == "current_frame_closed_card_header_geometry":
+        # All four renderings are of this card on this frame. Never let a
+        # thresholded x0 override a contradictory strong raw or padded read.
+        tight = tuple(candidate["bbox"])
+        padded = (tight[0] - 2, tight[1] - 2, min(right + 3, tight[2] + 2),
+                  min(top + 38, tight[3] + 2))
+        strong_counts = set(strong_full_counts)
+        proofs = []
+        for proof_box in (tight, padded):
+            a, b, c, d = scale_box(proof_box, from_resolution=(1280, 720),
+                                  to_resolution=(original.shape[1], original.shape[0]))
+            crop = original[b:d, a:c]
+            if crop.size == 0:
+                continue
+            binary = cv2.threshold(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), 120, 255,
+                                   cv2.THRESH_BINARY)[1]
+            for method, view in (("raw", crop), ("threshold", binary)):
+                reads = reader(view)
+                for item in reads:
+                    count = _COUNT.fullmatch(str(item.text).strip())
+                    confidence = item.confidence
+                    if (count is not None and type(confidence) in (int, float) and
+                            math.isfinite(confidence) and confidence >= .9):
+                        strong_counts.add(int(count[1]))
+                if len(strong_counts) > 1:
+                    return conflict(strong_counts)
+                if len(reads) == 1:
+                    item = reads[0]
+                    count = _COUNT.fullmatch(str(item.text).strip())
+                    if (count is not None and type(item.confidence) in (int, float) and
+                            math.isfinite(item.confidence) and item.confidence >= .9):
+                        proofs.append((item.confidence, proof_box, item, method, int(count[1])))
+        if not proofs:
+            return {}
+        confidence, proof_box, item, method, count = max(proofs, key=lambda row: row[0])
+        return {"count": count, "confidence": confidence, "frame": str(post_path),
+                "slot_bbox": list(bbox), "roi": list(proof_box),
+                "readings": [{"text": item.text, "confidence": confidence,
+                              "bbox": list(proof_box),
+                              "source": f"current_closed_card_header_{method}_line"}],
+                "portrait_score": score, "portrait_scale": scale,
+                "portrait_source": "current_frame_saved_battle_portrait",
+                "source_portrait_identity": identity, "current_card_border": border,
+                "locator": {"source": locator_source, "bbox": candidate["bbox"]}}
     locator_count = _COUNT.fullmatch(str(candidate["text"]).strip()) if candidate["text"] is not None else None
     # The tight OCR box can trim the dark outline of a small gray x0. One
     # fixed two-pixel extension stays inside the independently bound header;
@@ -618,7 +698,7 @@ def execute_frozen_line(session: Any, plan: FrozenLinePlan, *,
             # saved portrait and read the quantity in this particular frame.
             try:
                 reading = _post_troop_reading(session, post.screenshot_path, plan.toolbar_before_frame_id,
-                                              point, bbox)
+                                              point, bbox, unit_id=unit_id)
             except Exception as exc:
                 reading = {"error": str(exc)}
             conflicting = [row for row in slots if isinstance(row, dict) and
