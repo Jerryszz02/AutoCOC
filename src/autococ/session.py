@@ -46,6 +46,7 @@ class GameSession:
         self.frame_number = 0
         self.action_count = 0
         self._input_attempt_generation = 0
+        self._active_resource_capacity: dict[str, object] | None = None
         self.logger = logger or logging.getLogger(__name__)
         self.client_version = "unknown"
         self.client_version_code: int | None = None
@@ -424,6 +425,59 @@ class GameSession:
         self.event("tap", frame=str(snapshot.screenshot_path), scene=snapshot.scene, point=[x, y], reason=reason)
         self._input_attempt_generation += 1
         self.context.tap_xy(x, y, reason=reason)
+        self.action_count += 1
+
+    def open_resource_capacity_tooltip(self, snapshot: SceneSnapshot, resource: str,
+                                       point: tuple[int, int]) -> None:
+        """Record the one HOME input that may authorize a narrow unknown-scene close."""
+        from .resource_capacity import _LAYOUT
+
+        if (self.client_version != "18.647.2" or self.client_version_code != 180647003
+                or resource not in _LAYOUT or point != _LAYOUT[resource][0]
+                or snapshot.scene != "village"):
+            raise FlowError("Resource tooltip open is not verified")
+        self._active_resource_capacity = None
+        self.tap(snapshot, point, reason=f"Open {resource} balance detail")
+        self._active_resource_capacity = {"resource": resource,
+                                          "input_generation": self._input_attempt_generation}
+
+    def close_verified_resource_tooltip(self, snapshot: SceneSnapshot, resource: str,
+                                        point: tuple[int, int], proof: dict) -> None:
+        """Only dismiss this session's one source-bound, verified HOME HUD detail."""
+        from .resource_capacity import _LAYOUT, verified_unknown_tooltip
+
+        self.check_deadline()
+        active = self._active_resource_capacity
+        age = time.monotonic() - float(snapshot.observations.get("observed_at_monotonic", 0))
+        if (self.client_version != "18.647.2" or self.client_version_code != 180647003
+                or resource not in _LAYOUT or point != _LAYOUT[resource][0]
+                or snapshot is not self.last_snapshot or snapshot.scene != "unknown"
+                or not math.isfinite(age) or not 0 <= age <= 30
+                or not isinstance(active, dict) or active.get("resource") != resource
+                or active.get("input_generation") != self._input_attempt_generation
+                or tuple(self.config.game.baseline_resolution) != (1280, 720)
+                or self.capture.input_display_id is None or self.context.capture is not self.capture
+                or tuple(self.context.screen_resolution) != tuple(snapshot.observations.get("source_resolution", ()))
+                or not verified_unknown_tooltip(snapshot, resource, proof, self.recognizer.provider)):
+            raise FlowError("Resource tooltip close proof is incomplete or stale")
+        self.check_deadline()
+        if foreground_package(self.capture.adb, self.capture.serial,
+                              timeout_sec=self.config.runtime.step_timeout_sec) != self.config.game.package_name:
+            raise FlowError("Game is not foreground before resource tooltip close")
+        self.check_deadline()
+        final_age = time.monotonic() - float(snapshot.observations.get("observed_at_monotonic", 0))
+        if (snapshot is not self.last_snapshot or not math.isfinite(final_age)
+                or not 0 <= final_age <= 30 or self._active_resource_capacity is not active
+                or active.get("input_generation") != self._input_attempt_generation):
+            raise FlowError("Resource tooltip close expired before input")
+        self.event("verified_resource_tooltip_close_attempt", frame=str(snapshot.screenshot_path),
+                   frame_sha256=proof["frame_sha256"], resource=resource, point=list(point),
+                   input_attempt_generation=self._input_attempt_generation)
+        self._active_resource_capacity = None
+        self._input_attempt_generation += 1
+        # Transport uncertainty must never leave the old unknown frame actionable.
+        self.last_snapshot = None
+        self.context.tap_xy(*point, reason=f"Close verified {resource} balance detail")
         self.action_count += 1
 
     def frozen_battle_tap(self, point: tuple[int, int], *, timeout_sec: float, reason: str,
