@@ -217,7 +217,8 @@ def run_battle(session: GameSession) -> TaskResult:
                          session.config.battle.line_execution_mode == "continuous" and
                          session.config.battle.line_tactics == "two_edge_furnace_mixed_probes")
         if mixed_furnace:
-            from .army_control import ensure_mixed_archer_army, mixed_archer_attack_guard
+            from .army_control import (ensure_mixed_archer_army, mixed_archer_attack_guard,
+                                       reobserve_mixed_archer_missing_loadout)
             progress("核对并补齐弓箭手")
             prepared = ensure_mixed_archer_army(session)
             evidence.extend(prepared.evidence)
@@ -230,6 +231,11 @@ def run_battle(session: GameSession) -> TaskResult:
             evidence.append(army_frame.screenshot_path)
             army_frame, army = _read_continuous_line_army(session, army_frame, evidence)
             issue = mixed_archer_attack_guard(army_frame, prepared, session.client_version)
+            if issue == "mixed_army_hero_loadout_unverified" and prepared.metrics.get("recipe_mutations") == 0:
+                army_frame, issue = reobserve_mixed_archer_missing_loadout(
+                    session, army_frame, prepared, evidence)
+                if issue is None:
+                    army = _read_army(army_frame)
             if issue is not None or not army["troops_full"]:
                 raise FlowError(f"Mixed army changed after fill; no paid search started: {issue}")
         metrics["army"] = army

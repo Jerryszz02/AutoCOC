@@ -8,6 +8,7 @@ all four kinds and editor coverage for every unit it would need to touch.
 
 from __future__ import annotations
 
+import hashlib
 import math
 from pathlib import Path
 import re
@@ -778,6 +779,116 @@ def mixed_archer_attack_guard(snapshot, prepared: TaskResult, client_version: st
             or not _same_loadout(reference.get("verified_loadout"), loadout)):
         return "mixed_army_changed_before_attack"
     return None
+
+
+def reobserve_mixed_archer_missing_loadout(session, snapshot, prepared: TaskResult,
+                                            evidence: list[Path]):
+    """Retry only a missing after-fill loadout with new, independently verified frames."""
+    from .combat import _read_army, _verified_army_identities
+    from .device import foreground_package, resolve_game_display
+
+    issue = mixed_archer_attack_guard(snapshot, prepared, session.client_version)
+    if issue != "mixed_army_hero_loadout_unverified" or prepared.metrics.get("recipe_mutations") != 0:
+        return snapshot, issue
+    observed, roster_issue = _read_current(snapshot, full=True)
+    if roster_issue is not None or observed != prepared.metrics.get("observed"):
+        return snapshot, "mixed_army_changed_before_attack"
+    capacities = _army_capacity_counts(snapshot.observations["army"])
+    if capacities is None:
+        return snapshot, "mixed_army_loadout_retry_capacity_unverified"
+    actions = getattr(session, "action_count", None)
+    inputs = getattr(session, "_input_attempt_generation", None)
+    captured = snapshot.observations.get("observed_at_monotonic")
+    frame_id = snapshot.observations.get("frame_id")
+    if (type(actions) is not int or type(inputs) is not int or
+            type(captured) not in (int, float) or not math.isfinite(captured) or
+            not 0 <= time.monotonic() - captured <= 8 or
+            not isinstance(frame_id, str) or not frame_id or
+            snapshot is not session.last_snapshot):
+        return snapshot, "mixed_army_loadout_retry_initial_frame_unverified"
+    try:
+        with Path(snapshot.screenshot_path).open("rb") as source:
+            original_sha = hashlib.file_digest(source, "sha256").hexdigest()
+    except OSError:
+        return snapshot, "mixed_army_loadout_retry_initial_frame_unverified"
+    paths, ids, hashes = {str(snapshot.screenshot_path)}, {frame_id}, {original_sha}
+    capture = session.capture
+    timeout = min(5, session.config.runtime.step_timeout_sec)
+    source_path = Path(session.config.source_path).resolve()
+    try:
+        with source_path.open("rb") as source:
+            source_sha = hashlib.file_digest(source, "sha256").hexdigest()
+    except OSError:
+        return snapshot, "mixed_army_loadout_retry_source_unverified"
+
+    def environment_ok():
+        try:
+            if Path(session.config.source_path).resolve() != source_path:
+                return False
+            with source_path.open("rb") as source:
+                if hashlib.file_digest(source, "sha256").hexdigest() != source_sha:
+                    return False
+        except OSError:
+            return False
+        if (session.client_version != "18.647.2" or session.action_count != actions or
+                session._input_attempt_generation != inputs or
+                foreground_package(capture.adb, capture.serial, timeout_sec=timeout) !=
+                session.config.game.package_name):
+            return False
+        display = resolve_game_display(capture.adb, capture.serial,
+                                       session.config.game.package_name,
+                                       display_id=session.config.game.display_id,
+                                       timeout_sec=timeout)
+        return (display.logical_id == capture.input_display_id and
+                display.physical_id == capture.screenshot_display_id)
+
+    for attempt in range(2):
+        session.check_deadline()
+        if not environment_ok():
+            return snapshot, "mixed_army_loadout_retry_environment_changed"
+        fresh = session.observe(f"battle-army-loadout-reread-{attempt + 1}")
+        evidence.append(fresh.screenshot_path)
+        session.check_deadline()
+        next_captured = fresh.observations.get("observed_at_monotonic")
+        next_id = fresh.observations.get("frame_id")
+        if (fresh.scene == "account_in_use" or fresh is not session.last_snapshot or
+                str(fresh.screenshot_path) in paths or
+                not isinstance(next_id, str) or not next_id or next_id in ids or
+                type(next_captured) not in (int, float) or not math.isfinite(next_captured) or
+                next_captured <= captured or not 0 <= time.monotonic() - next_captured <= 8):
+            return fresh, "mixed_army_loadout_retry_frame_not_fresh_or_interrupted"
+        try:
+            with Path(fresh.screenshot_path).open("rb") as source:
+                frame_sha = hashlib.file_digest(source, "sha256").hexdigest()
+        except OSError:
+            return fresh, "mixed_army_loadout_retry_frame_not_fresh_or_interrupted"
+        if frame_sha in hashes or not environment_ok():
+            return fresh, "mixed_army_loadout_retry_frame_or_environment_changed"
+        paths.add(str(fresh.screenshot_path))
+        ids.add(next_id)
+        hashes.add(frame_sha)
+        captured = next_captured
+        snapshot = fresh
+        try:
+            full_army = _read_army(fresh)
+        except FlowError:
+            return fresh, "mixed_army_loadout_retry_roster_unverified"
+        manifest = full_army["recipe"]["manifest"]
+        heroes = full_army["recipe"].get("hero_evidence")
+        if (not full_army["troops_full"] or not isinstance(heroes, dict) or
+                heroes.get("complete") is not True or heroes.get("unknowns") != [] or
+                heroes.get("frame") != str(fresh.screenshot_path) or
+                not _verified_army_identities(manifest.get("troops"), "troop", session.client_version) or
+                not _verified_army_identities(heroes.get("cards"), "hero", session.client_version)):
+            return fresh, "mixed_army_loadout_retry_roster_unverified"
+        observed, roster_issue = _read_current(fresh, full=True)
+        if (roster_issue is not None or observed != prepared.metrics.get("observed") or
+                _army_capacity_counts(full_army["recipe"]) != capacities):
+            return fresh, "mixed_army_changed_before_attack"
+        issue = mixed_archer_attack_guard(fresh, prepared, session.client_version)
+        if issue != "mixed_army_hero_loadout_unverified":
+            return fresh, issue
+    return snapshot, issue
 
 
 def ensure_mixed_archer_army(session) -> TaskResult:

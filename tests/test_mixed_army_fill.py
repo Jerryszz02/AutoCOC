@@ -308,6 +308,45 @@ class MixedArmyFillTests(unittest.TestCase):
                 self.assertFalse(any(path == after.screenshot_path and "attack" in reason
                                      for path, reason in session.taps))
 
+    def test_after_fill_missing_loadout_uses_only_recovered_frame_for_attack(self):
+        from test_combat import FakeSession, frame
+
+        initial = current("combat-prepared.png", capacity=343)
+        after = current("combat-after.png", capacity=343)
+        after.observations["army"]["hero_loadout_complete"] = False
+        after.observations["army"]["hero_loadout"] = {}
+        recovered = current("combat-recovered.png", capacity=343)
+        observed, _ = _read_current(initial, full=True)
+        receipt = TaskResult("prepare_army", "succeeded", "already full",
+                             evidence=[initial.screenshot_path], metrics={
+                                 "recipe_mutations": 0, "archer_target": 0,
+                                 "observed": observed,
+                                 "verified_loadout": initial.observations["army"]["hero_loadout"],
+                                 "final_frame": str(initial.screenshot_path)})
+        session = FakeSession([frame(0, "village", resources={"gold": 1000,
+                               "elixir": 2000, "dark_elixir": 300}),
+                               frame(1, "search"), initial, after])
+        session.client_version = "18.647.2"
+        session.config.battle = BattleConfig(strategy="edrag_line",
+            line_execution_mode="continuous", line_tactics="two_edge_furnace_mixed_probes")
+        def recover(active, shot, prepared, evidence):
+            active.last_snapshot = recovered
+            evidence.append(recovered.screenshot_path)
+            return recovered, None
+
+        with patch("autococ.combat._read_continuous_line_army",
+                   side_effect=lambda active, shot, evidence: (shot, _read_army(shot))), \
+             patch("autococ.army_control.ensure_mixed_archer_army", return_value=receipt), \
+             patch("autococ.army_control.reobserve_mixed_archer_missing_loadout",
+                   side_effect=recover) as retry, \
+             patch("autococ.combat._next_candidate", side_effect=FlowError("bounded stop")):
+            result = run_battle(session)
+        self.assertEqual(result.metrics["search_count"], 0)
+        retry.assert_called_once()
+        self.assertIn((recovered.screenshot_path, "Recognized attack: attack"), session.taps)
+        self.assertFalse(any(path == after.screenshot_path and "attack" in reason
+                             for path, reason in session.taps))
+
 
 if __name__ == "__main__":
     unittest.main()
