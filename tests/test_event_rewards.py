@@ -15,7 +15,8 @@ from unittest.mock import Mock, patch
 import cv2
 
 from autococ.errors import FlowError, StopRequested
-from autococ.event_rewards import (claim_one_free_reward, close_reward_track,
+from autococ.event_rewards import (EventPanelEntryUnconfirmed, claim_one_free_reward,
+                                   close_reward_track, close_unentered_event_panel,
                                    locate_reward_track_position, observe_reward_track,
                                    open_reward_track)
 from autococ.ocr import OCRText
@@ -49,6 +50,13 @@ def recognized_with_ocr(path: Path, rows: list[dict]) -> SceneSnapshot:
     recognizer = ScreenshotRecognizer(provider=provider)
     recognizer.client_version = "18.647.2"
     return recognizer.recognize(path)
+
+
+def previous_event_panel() -> SceneSnapshot:
+    previous = recognized("entry_panel")
+    previous.observations["requested_at_monotonic"] = time.monotonic() - 1
+    previous.observations["frame_id"] = "previous-event-list"
+    return previous
 
 
 def upper_row(*items: tuple[str, tuple[int, int, int, int]]) -> list[dict]:
@@ -135,6 +143,116 @@ class FakeSession:
 
 
 class EventRewardTests(unittest.TestCase):
+    def test_upper_event_card_from_anonymized_105007_frame_opens_track(self):
+        proof = json.loads((FIXTURES / "panel_upper_105007.provenance.json").read_text(encoding="utf-8"))
+        fixture = FIXTURES / "panel_upper_105007.png"
+        self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(), proof["fixture_sha256"])
+        self.assertEqual(hashlib.sha256((FIXTURES / "panel_upper_105007.ocr.json").read_bytes()).hexdigest(),
+                         proof["ocr_fixture_sha256"])
+        home = SceneSnapshot("village", .95, FIXTURES / "entry_panel.png",
+                             {"village_type": "home", "resource_source": "village_inventory",
+                              "buttons": [{"name": "attack"}, {"name": "shop"}]})
+        session = FakeSession([home, recognized("panel_upper_105007"), recognized("shiny_before")])
+        with patch("autococ.event_rewards.foreground_package", return_value=session.config.game.package_name):
+            opened = open_reward_track(session)
+        self.assertEqual(opened["status"], "opened")
+        self.assertEqual(opened["entry_label"], "领取")
+        self.assertEqual(session.taps, [((950, 366), "Open confirmed current event reward track")])
+        self.assertFalse(opened["formal_success"])
+
+    def test_upper_event_card_rejects_ambiguous_or_unrelated_ocr(self):
+        from autococ import event_rewards as module
+        original = fixture_ocr("panel_upper_105007")
+        self.assertEqual(module._event_card_entry(original)[2], "upper")
+        for change in (lambda rows: rows.append(dict(next(x for x in rows if x["text"] == "领取"))),
+                       lambda rows: rows.append(dict(next(x for x in rows if x["text"] == "裂隙之乱"))),
+                       lambda rows: rows.append(dict(next(x for x in rows if x["text"] == "裂隙之乱"),
+                                                     bbox=[220, 352, 292, 374])),
+                       lambda rows: rows.append(dict(next(x for x in rows if x["text"] == "16073/16000"))),
+                       lambda rows: next(x for x in rows if x["text"] == "16073/16000").update(text="15999/16000"),
+                       lambda rows: next(x for x in rows if x["text"] == "16073/16000").update(text="16073/0"),
+                       lambda rows: next(x for x in rows if x["text"] == "领取").update(bbox=[700, 351, 748, 382]),
+                       lambda rows: next(x for x in rows if x["text"] == "裂隙之乱").update(confidence=.8)):
+            with self.subTest(change=change):
+                rows = json.loads(json.dumps(original))
+                change(rows)
+                self.assertIsNone(module._event_card_entry(rows))
+
+    def test_confirmed_list_without_entry_proof_can_only_close_its_x(self):
+        home = SceneSnapshot("village", .95, FIXTURES / "entry_panel.png",
+                             {"village_type": "home", "resource_source": "village_inventory",
+                              "buttons": [{"name": "attack"}, {"name": "shop"}], "ocr": []})
+        panel = recognized("panel_upper_105007")
+        panel.observations["ocr"] = [row for row in panel.observations["ocr"]
+                                     if row["text"] != "16073/16000"]
+        home_after1 = SceneSnapshot("village", .95, FIXTURES / "roundtrip_panel_open.png",
+                                    dict(home.observations))
+        home_after2 = SceneSnapshot("village", .95, FIXTURES / "roundtrip_track_shifted.png",
+                                    dict(home.observations))
+        with TemporaryDirectory() as tmp:
+            fresh_path = Path(tmp) / "new-event-panel.png"
+            copyfile(FIXTURES / "panel_upper_105007.png", fresh_path)
+            fresh_panel = recognized_with_ocr(fresh_path, fixture_ocr("panel_upper_105007"))
+            session = FakeSession([home, panel, fresh_panel, home_after1, home_after2])
+            with patch("autococ.event_rewards.foreground_package", return_value=session.config.game.package_name):
+                with self.assertRaises(EventPanelEntryUnconfirmed):
+                    open_reward_track(session)
+                self.assertEqual(session.taps, [])
+                closed = close_unentered_event_panel(session)
+        self.assertEqual(closed["status"], "home")
+        self.assertEqual(session.taps, [((1055, 53), "Close verified unentered event list")])
+
+    def test_unentered_event_list_closes_once_only_with_two_new_home_frames(self):
+        panel = recognized("panel_upper_105007")
+        home1 = SceneSnapshot("village", .95, FIXTURES / "entry_panel.png",
+                              {"village_type": "home", "resource_source": "village_inventory",
+                               "buttons": [{"name": "attack"}, {"name": "shop"}], "ocr": []})
+        home2 = SceneSnapshot("village", .95, FIXTURES / "roundtrip_panel_open.png",
+                              {"village_type": "home", "resource_source": "village_inventory",
+                               "buttons": [{"name": "attack"}, {"name": "shop"}], "ocr": []})
+        session = FakeSession([panel, home1, home2])
+        session.last_snapshot = previous_event_panel()
+        with patch("autococ.event_rewards.foreground_package", return_value=session.config.game.package_name):
+            closed = close_unentered_event_panel(session)
+        self.assertEqual(closed["status"], "home")
+        self.assertEqual(len(closed["home_evidence"]), 2)
+        self.assertEqual(session.taps, [((1055, 53), "Close verified unentered event list")])
+        self.assertFalse(closed["formal_success"])
+
+        repeated = FakeSession([recognized("panel_upper_105007"), home1, home1])
+        repeated.last_snapshot = previous_event_panel()
+        with patch("autococ.event_rewards.foreground_package",
+                   return_value=repeated.config.game.package_name):
+            with self.assertRaisesRegex(FlowError, "HOME frame is not new"):
+                close_unentered_event_panel(repeated)
+        self.assertEqual(len(repeated.taps), 1)
+
+        wrong = FakeSession([recognized("panel_upper_105007")], version="18.647.3")
+        with self.assertRaises(FlowError):
+            close_unentered_event_panel(wrong)
+        self.assertEqual(wrong.taps, [])
+
+        for change in (lambda snap: snap.observations["ocr"].append(
+                            dict(next(x for x in snap.observations["ocr"] if x["text"] == "X"))),
+                       lambda snap: snap.observations.update(account_in_use={"message": "blocked"}),
+                       lambda snap: snap.observations["ocr"].clear()):
+            with self.subTest(change=change):
+                panel = recognized("panel_upper_105007")
+                change(panel)
+                refused = FakeSession([panel])
+                refused.last_snapshot = previous_event_panel()
+                with patch("autococ.event_rewards.foreground_package",
+                           return_value=refused.config.game.package_name):
+                    with self.assertRaises(FlowError):
+                        close_unentered_event_panel(refused)
+                self.assertEqual(refused.taps, [])
+
+        stopped = FakeSession([recognized("panel_upper_105007")])
+        stopped.check_deadline = Mock(side_effect=StopRequested("stop"))
+        with self.assertRaises(StopRequested):
+            close_unentered_event_panel(stopped)
+        self.assertEqual(stopped.taps, [])
+
     def test_position_pair_rejects_missing_or_nonfinite_source_identity(self):
         from autococ import event_rewards as module
 

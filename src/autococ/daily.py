@@ -69,7 +69,8 @@ def _ore_inventory_task(session, spec) -> TaskResult:
 
 def _event_reward_task(session, spec) -> TaskResult:
     """Reconcile one free claim against ore balances in the same task session."""
-    from .event_rewards import (close_reward_track, claim_one_free_reward,
+    from .event_rewards import (EventPanelEntryUnconfirmed, close_reward_track,
+                                close_unentered_event_panel, claim_one_free_reward,
                                 locate_reward_track_position, open_reward_track)
     from .ore_navigation import read_current_ore_inventory
 
@@ -87,6 +88,7 @@ def _event_reward_task(session, spec) -> TaskResult:
     closed = None
     failure = None
     close_failure = None
+    panel_open_failure = False
     delta = None
     verified = False
     known_home = False
@@ -262,7 +264,8 @@ def _event_reward_task(session, spec) -> TaskResult:
     except StopRequested:
         raise
     except Exception as exc:
-        failure = f"{type(exc).__name__}: {exc}"
+        panel_open_failure = isinstance(exc, EventPanelEntryUnconfirmed)
+        failure = f"{'FlowError' if panel_open_failure else type(exc).__name__}: {exc}"
 
     # Only a recognized current track is safe to close. An occupied account is
     # terminal and must not turn an uncertain claim into another input.
@@ -284,8 +287,20 @@ def _event_reward_task(session, spec) -> TaskResult:
         except Exception as exc:
             close_failure = f"{type(exc).__name__}: {exc}"
 
+    if panel_open_failure and opened is None and not current_track:
+        try:
+            available = remaining()
+            if available <= 0:
+                raise FlowError("Event reward has no time to close its event list")
+            closed = close_unentered_event_panel(session, timeout_sec=min(20, available))
+            known_home = closed.get("status") == "home"
+        except StopRequested:
+            raise
+        except Exception as exc:
+            close_failure = f"{type(exc).__name__}: {exc}"
+
     if close_failure or (opened is not None and not (closed and closed.get("status") == "home")):
-        return finish("failed", "event_reward_close_unverified")
+        return finish("failed", failure if panel_open_failure else "event_reward_close_unverified")
     if failure:
         return finish("failed", failure)
     if not isinstance(claim, dict):

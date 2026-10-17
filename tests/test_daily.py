@@ -10,6 +10,7 @@ from autococ.battle import BattleTarget, score_target
 from autococ.config import BattleConfig, load_config
 from autococ.daily import _event_reward_task
 from autococ.errors import CapabilityUnavailable, ConfigError, FlowError, StopRequested
+from autococ.event_rewards import EventPanelEntryUnconfirmed
 from autococ.flow import FlowRunner
 from autococ.objectives import GoalProgress, ProgressAdapter, parse_progress, resource_progress
 from autococ.reporting import RunStats, TaskResult, summarize_run
@@ -385,6 +386,45 @@ class DailyRunnerTests(unittest.TestCase):
         self.assertFalse(reward.metrics["returned_home"])
         read.assert_called_once()
         self.assertEqual(navigate.call_count, 2)  # Startup and pre-task; no recovery after the failed close.
+
+    def test_event_list_pre_entry_failure_closes_safely_but_preserves_original_failure(self):
+        spec = TaskSpec("reward", "event_reward", free_reward_target="shiny")
+        before = self.event_ore_read("before")
+        panel = SceneSnapshot("popup", .95, self.frame.screenshot_path, {"event_panel": {}})
+        home = self.event_ore_read("closed")[0]
+        def failed_open(*_args, **_kwargs):
+            self.session.last_snapshot = panel
+            raise EventPanelEntryUnconfirmed("Current event card was not confirmed; no entry tap issued")
+        def close_panel(*_args, **_kwargs):
+            self.session.last_snapshot = home
+            return {"status": "home", "frame": str(home.screenshot_path),
+                    "home_evidence": [{"frame": "home-1"}, {"frame": str(home.screenshot_path)}],
+                    "formal_success": False}
+        with patch("autococ.ore_navigation.read_current_ore_inventory",
+                   side_effect=self.event_ore_reader(before)) as read, \
+             patch("autococ.event_rewards.open_reward_track", side_effect=failed_open), \
+             patch("autococ.event_rewards.close_unentered_event_panel", side_effect=close_panel) as close, \
+             patch("autococ.event_rewards.claim_one_free_reward") as claim:
+            result = _event_reward_task(self.session, spec)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "FlowError: Current event card was not confirmed; no entry tap issued")
+        self.assertEqual(result.metrics["failure"], result.reason)
+        self.assertTrue(result.metrics["returned_home"])
+        self.assertFalse(result.metrics["formal_success"])
+        read.assert_called_once()
+        close.assert_called_once()
+        claim.assert_not_called()
+
+        with patch("autococ.ore_navigation.read_current_ore_inventory",
+                   side_effect=self.event_ore_reader(before)), \
+             patch("autococ.event_rewards.open_reward_track", side_effect=failed_open), \
+             patch("autococ.event_rewards.close_unentered_event_panel",
+                   side_effect=FlowError("no unique X")) as close:
+            failed = _event_reward_task(self.session, spec)
+        self.assertEqual(failed.reason, result.reason)
+        self.assertIn("no unique X", failed.metrics["close_failure"])
+        self.assertFalse(failed.metrics["returned_home"])
+        close.assert_called_once()
 
     def test_event_reward_insufficient_total_budget_never_enters_inventory_or_track(self):
         self.session.deadline = time.monotonic() + 260

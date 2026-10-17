@@ -54,6 +54,10 @@ _VISUAL_ROIS = {
 }
 
 
+class EventPanelEntryUnconfirmed(FlowError):
+    """The event list was seen, but no reward-track entry input was attempted."""
+
+
 def _sha256(path: Path) -> str:
     with path.open("rb") as source:
         return hashlib.file_digest(source, "sha256").hexdigest()
@@ -327,6 +331,66 @@ def _village(snapshot) -> bool:
             and {"attack", "shop"} <= controls)
 
 
+def _panel_close_matches(ocr: list[dict]) -> list[dict]:
+    # The existing 18.647.2 panel recognizer accepts a .90 X; keep that gate.
+    return [item for item in ocr if isinstance(item, dict)
+            and re.sub(r"\s+", "", str(item.get("text", ""))) == "X"
+            and type(item.get("confidence")) in (int, float)
+            and math.isfinite(item["confidence"]) and .9 <= item["confidence"] <= 1
+            and _box_in(item.get("bbox"), (1015, 20, 1090, 95))]
+
+
+def _event_panel_anchors(snapshot) -> list[dict] | None:
+    """Bind the recognized event list to its current, unique OCR anchors."""
+    if snapshot.scene != "popup" or snapshot.confidence < .95:
+        return None
+    panel = snapshot.observations.get("event_panel")
+    ocr = snapshot.observations.get("ocr")
+    if not isinstance(panel, dict) or not isinstance(ocr, list):
+        return None
+    for key, label, roi in (("title", "活动", (590, 20, 690, 90)),
+                            ("section", "今日活动", (195, 85, 310, 145))):
+        matches = _exact(ocr, label, roi)
+        if len(matches) != 1 or panel.get(key) != matches[0]:
+            return None
+    closes = _panel_close_matches(ocr)
+    if len(closes) != 1 or panel.get("close") != closes[0]:
+        return None
+    return ocr
+
+
+def _event_card_entry(ocr: list[dict]) -> tuple[str, dict, str] | None:
+    """Recognize one of two observed 18.647.2 card layouts, never infer a point."""
+    if len(_exact(ocr, "裂隙之乱", (205, 120, 350, 410))) != 1:
+        return None
+    entries = []
+    old_title = _exact(ocr, "裂隙之乱", (205, 335, 315, 395))
+    old_buttons = [(label, item) for label in ("领取", "打开")
+                   for item in _exact(ocr, label, (850, 530, 1055, 625))]
+    if len(old_title) == len(old_buttons) == 1:
+        entries.append((*old_buttons[0], "lower"))
+
+    title = _exact(ocr, "裂隙之乱", (205, 125, 325, 185))
+    progress = [item for item in ocr if isinstance(item, dict)
+                and type(item.get("confidence")) in (int, float)
+                and math.isfinite(item["confidence"]) and .95 <= item["confidence"] <= 1
+                and _box_in(item.get("bbox"), (850, 250, 1060, 315))
+                and re.fullmatch(r"\d{1,7}/\d{1,7}", re.sub(r"\s+", "", str(item.get("text", ""))))]
+    upper_buttons = [(label, item) for label in ("领取", "打开")
+                     for item in _exact(ocr, label, (875, 330, 1045, 405))]
+    if len(title) == len(progress) == len(upper_buttons) == 1:
+        label, button = upper_buttons[0]
+        title_box, progress_box, button_box = (title[0]["bbox"], progress[0]["bbox"], button["bbox"])
+        current, total = map(int, re.sub(r"\s+", "", progress[0]["text"]).split("/"))
+        if (total > 0 and (label != "领取" or current >= total)
+                and title_box[2] < progress_box[0]
+                and 0 < progress_box[1] - title_box[3] <= 140
+                and 0 < button_box[1] - progress_box[3] <= 80
+                and abs(_center_x(button_box) - _center_x(progress_box)) <= 60):
+            entries.append((label, button, "upper"))
+    return entries[0] if len(entries) == 1 else None
+
+
 def open_reward_track(session, *, timeout_sec: float = 20) -> dict:
     """Navigate home -> event card -> track, never claim a reward."""
     if not 0 < timeout_sec <= 30:
@@ -349,26 +413,34 @@ def open_reward_track(session, *, timeout_sec: float = 20) -> dict:
         raise FlowError("Event reward home source or deadline changed")
     session.click_template(home, adapter.entry_template, roi=adapter.entry_roi)
     panel = None
+    confirmed_list = False
     for index in range(3):
         current = _bounded_observe(session, f"event-reward-panel-{index + 1}", end)
-        if (current.scene == "popup" and isinstance(current.observations.get("event_panel"), dict)
-                and len(_exact(current.observations.get("ocr", []), "活动", (590, 20, 690, 90))) == 1
-                and len(_exact(current.observations.get("ocr", []), "今日活动", (195, 85, 310, 145))) == 1
-                and len(_exact(current.observations.get("ocr", []), "裂隙之乱", (205, 335, 315, 395))) == 1):
+        ocr = _event_panel_anchors(current)
+        if ocr is not None:
+            confirmed_list = True
+        if (ocr is not None and
+                (_exact(ocr, "裂隙之乱", (205, 335, 315, 395))
+                 or _exact(ocr, "裂隙之乱", (205, 125, 325, 185)))):
             panel = current
             break
     if panel is None:
-        raise FlowError("Current event card was not confirmed; no entry tap issued")
-    entries = [(label, item) for label in ("领取", "打开")
-               for item in _exact(panel.observations.get("ocr", []), label, (850, 530, 1055, 625))]
-    if len(entries) != 1:
-        raise FlowError("Current reward-track entry is missing or ambiguous")
-    entry_label, entry = entries[0]
+        error = "Current event card was not confirmed; no entry tap issued"
+        if confirmed_list:
+            raise EventPanelEntryUnconfirmed(error)
+        raise FlowError(error)
+    matched = _event_card_entry(panel.observations["ocr"])
+    if matched is None:
+        raise EventPanelEntryUnconfirmed("Current reward-track entry is missing or ambiguous")
+    entry_label, entry, layout = matched
     bbox = entry["bbox"]
     panel_hash = _sha256(panel.screenshot_path)
     _require_foreground(session)
     session.check_deadline()
-    if time.monotonic() >= end or _sha256(panel.screenshot_path) != panel_hash:
+    if (time.monotonic() >= end or panel is not session.last_snapshot
+            or _event_panel_anchors(panel) is None
+            or _event_card_entry(panel.observations["ocr"]) != (entry_label, entry, layout)
+            or _sha256(panel.screenshot_path) != panel_hash):
         raise FlowError("Event reward entry source or deadline changed")
     session.tap(panel, ((bbox[0] + bbox[2]) // 2, (bbox[1] + bbox[3]) // 2),
                 reason="Open confirmed current event reward track")
@@ -381,6 +453,62 @@ def open_reward_track(session, *, timeout_sec: float = 20) -> dict:
                     "entry_label": entry_label, "position_verified": current.observations["event_reward_track"]["position_verified"],
                     "claim_attempted": False, "reward_inventory_verified": False, "formal_success": False}
     raise FlowError("Reward track did not become a confirmed current page")
+
+
+def close_unentered_event_panel(session, *, timeout_sec: float = 20) -> dict:
+    """After a pre-entry refusal, close one fresh verified list X and confirm HOME twice."""
+    if not 0 < timeout_sec <= 30:
+        raise ValueError("Invalid event panel close timeout")
+    end = min(time.monotonic() + timeout_sec, session.deadline, session.task_deadline)
+    if (session.client_version != CLIENT_VERSION
+            or tuple(session.config.game.baseline_resolution) != _BASELINE):
+        raise FlowError("Event panel close requires the sampled client version")
+    prior = getattr(session, "last_snapshot", None)
+    panel = _bounded_observe(session, "event-panel-safe-close-before", end)
+    ocr = _event_panel_anchors(panel)
+    if ocr is None or panel is not session.last_snapshot or prior is None or not _fresh_pair(prior, panel):
+        raise FlowError("Event panel close has no current verified list")
+    close = _panel_close_matches(ocr)[0]
+    panel_hash = _sha256(panel.screenshot_path)
+    captured = panel.observations.get("observed_at_monotonic")
+    requested = panel.observations.get("requested_at_monotonic")
+    frame_id = panel.observations.get("frame_id")
+    if (type(captured) not in (int, float) or not math.isfinite(captured)
+            or type(requested) not in (int, float) or not math.isfinite(requested)
+            or not isinstance(frame_id, str) or not frame_id.strip()
+            or not 0 <= time.monotonic() - captured <= 8):
+        raise FlowError("Event panel close frame is stale")
+    _require_foreground(session)
+    session.check_deadline()
+    if (time.monotonic() >= end or panel is not session.last_snapshot
+            or _event_panel_anchors(panel) is None
+            or not 0 <= time.monotonic() - captured <= 8
+            or _sha256(panel.screenshot_path) != panel_hash):
+        raise FlowError("Event panel close source or deadline changed")
+    box = close["bbox"]
+    session.tap(panel, ((box[0] + box[2]) // 2, (box[1] + box[3]) // 2),
+                reason="Close verified unentered event list")
+    homes = []
+    previous = panel
+    for index in range(3):
+        current = _bounded_observe(session, f"event-panel-safe-close-home-{index + 1}", end)
+        home_captured = current.observations.get("observed_at_monotonic")
+        if (current is not session.last_snapshot or not _fresh_pair(previous, current)
+                or type(home_captured) not in (int, float) or not math.isfinite(home_captured)
+                or not 0 <= time.monotonic() - home_captured <= 8):
+            raise FlowError("Event panel close HOME frame is not new")
+        if not _village(current):
+            if homes:
+                raise FlowError("Event panel close lost HOME after first confirmation")
+            previous = current
+            continue
+        homes.append({"frame": str(current.screenshot_path), "frame_id": current.observations["frame_id"],
+                      "frame_sha256": _sha256(current.screenshot_path)})
+        if len(homes) == 2:
+            return {"status": "home", "home_evidence": homes,
+                    "frame": str(current.screenshot_path), "formal_success": False}
+        previous = current
+    raise FlowError("Event panel close did not confirm two new HOME frames")
 
 
 def close_reward_track(session, *, timeout_sec: float = 20) -> dict:
