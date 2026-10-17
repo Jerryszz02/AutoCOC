@@ -1,7 +1,7 @@
-"""One observed, free 18.647.2 battle chest chain after a claim settlement.
+"""Observed free 18.647.2 battle chest controls after a claim settlement.
 
-The chest receipt is separate from settlement loot.  This adapter supports only
-the captured ordinary-4 -> rare-3/2/1 -> hero-potion temporary-storage path.
+The chest receipt is separate from settlement loot.  The captured free skip
+confirmation and the original fixed hammer path have independent proof gates.
 Unknown pages, prices, transitions, or uncertain input results stop the chain.
 """
 
@@ -28,6 +28,8 @@ _BACKGROUND_ROI = (30, 220, 180, 360)
 _HAMMER_ROIS = ((526, 584, 570, 619), (584, 584, 628, 619),
                 (640, 584, 684, 619), (695, 584, 741, 619))
 _CHAIN = (("ordinary", 4), ("rare", 3), ("rare", 2), ("rare", 1))
+_SKIP_CONFIRM_ROI = (350, 185, 930, 530)
+_CURRENCY_NAMES = {"金币": "gold", "圣水": "elixir", "黑油": "dark_elixir"}
 
 
 def _sha256(path: Path) -> str:
@@ -96,9 +98,13 @@ def observe_battle_reward_claim(frame_path: str | Path, ocr: list[dict], *,
     image = _image(frame_path, client_version, baseline_resolution, ocr)
     if image is None:
         return None
-    anchors = {}
+    results = {name: _exact(ocr, text, (545, 175, 745, 260))
+               for name, text in (("victory", "胜利"), ("defeat", "失败"))}
+    if sum(len(matches) for matches in results.values()) != 1:
+        return None
+    result = "victory" if results["victory"] else "defeat"
+    anchors = {result: results[result][0]}
     for name, text, roi in (
-        ("victory", "胜利", (545, 175, 745, 260)),
         ("received", "您得到了", (555, 275, 730, 330)),
         ("losses", "损耗的部队", (550, 450, 735, 495)),
         ("claim", "领取奖励", (525, 580, 760, 660)),
@@ -115,14 +121,15 @@ def observe_battle_reward_claim(frame_path: str | Path, ocr: list[dict], *,
     if len(percentages) != 1 or not 0 <= int(re.sub(r"\D", "", percentages[0]["text"])) <= 100:
         return None
     if (_exact(ocr, "回营", (520, 570, 760, 675)) or
-            _exact(ocr, "失败", (545, 175, 745, 260))):
+            (result == "defeat" and int(re.sub(r"\D", "", percentages[0]["text"])) >= 50)):
         return None
     score = _score(image, "battle_reward_claim_button", (530, 585, 755, 655))
     if score < .97:
         return None
     claim = anchors["claim"]
     bbox = tuple(claim["bbox"])
-    return {"surface": "battle_reward_claim_settlement", "client_version": client_version,
+    return {"surface": "battle_reward_claim_settlement", "result": result,
+            "client_version": client_version,
             "frame": str(frame_path), "frame_sha256": _sha256(Path(frame_path)),
             "anchors": anchors, "percentage": percentages[0], "button_template_score": score,
             "button": _button("claim_battle_reward", "领取奖励", bbox,
@@ -149,6 +156,25 @@ def observe_battle_chest(frame_path: str | Path, ocr: list[dict], *,
         return None
     frame = Path(frame_path)
     frame_hash = _sha256(frame)
+    title = _exact(ocr, "跳过开箱动画", (545, 200, 735, 255))
+    message = _exact(ocr, "您将获得奖励，但会跳过开箱动画。仍要跳过", (370, 280, 910, 335))
+    question = _exact(ocr, "吗？", (600, 320, 680, 370))
+    yes = _exact(ocr, "是", (750, 440, 810, 495))
+    if title or message or question or yes:
+        expected = {"跳过开箱动画", "您将获得奖励，但会跳过开箱动画。仍要跳过", "吗？", "是", "跳过"}
+        if (not all(len(matches) == 1 for matches in (title, message, question, yes))
+                or _confident_texts(ocr) != expected):
+            return None
+        score = _score(image, "battle_chest_skip_confirm", _SKIP_CONFIRM_ROI)
+        if score < .97:
+            return None
+        return {"surface": "battle_chest", "stage": "skip_confirmation",
+                "client_version": client_version, "frame": str(frame), "frame_sha256": frame_hash,
+                "anchors": {"title": title[0], "message": message[0], "question": question[0],
+                            "yes": yes[0]},
+                "visual": {"dialog_template_score": score, "roi_at_1280x720": list(_SKIP_CONFIRM_ROI)},
+                "button": _button("confirm_free_battle_chest_skip", "是", tuple(yes[0]["bbox"]),
+                                  min(yes[0]["confidence"], score))}
     potion = _exact(ocr, "英雄药水", (560, 180, 725, 245))
     storage = _exact(ocr, "仓库已满！存放不下的部分已运送到临时仓库。", (420, 495, 855, 565))
     continue_buttons = _exact(ocr, "继续", (555, 610, 735, 690))
@@ -175,7 +201,14 @@ def observe_battle_chest(frame_path: str | Path, ocr: list[dict], *,
     if len(ordinary) + len(rare) != 1:
         return None
     rarity = "ordinary" if ordinary else "rare"
-    if _confident_texts(ocr) != ({"普通"} if ordinary else {"点击！", "稀有"}):
+    texts = _confident_texts(ocr)
+    skip = _exact(ocr, "跳过", (1150, 620, 1230, 685))
+    expected = {"点击！", "普通", "跳过"} if skip else {"普通"}
+    if ordinary and texts != expected:
+        return None
+    if rare and texts != {"点击！", "稀有"}:
+        return None
+    if skip and (len(skip) != 1 or not ordinary):
         return None
     label = ordinary[0] if ordinary else rare[0]
     chest_score = _score(image, "battle_chest_ordinary" if ordinary else "battle_chest_rare", _CHEST_ROI)
@@ -187,8 +220,47 @@ def observe_battle_chest(frame_path: str | Path, ocr: list[dict], *,
             "frame": str(frame), "frame_sha256": frame_hash,
             "label": label, "visual": {"background_score": background,
                                       "chest_score": chest_score, "hammer_bright_fractions": hammers[1]},
-            "button": _button("strike_battle_chest", "已验证免费宝箱", (600, 345, 680, 435),
-                              min(label["confidence"], background, chest_score))}
+            "button": (_button("skip_battle_chest_animation", "跳过", tuple(skip[0]["bbox"]),
+                               min(skip[0]["confidence"], background, chest_score)) if skip
+                       else _button("strike_battle_chest", "已验证免费宝箱", (600, 345, 680, 435),
+                                    min(label["confidence"], background, chest_score)))}
+
+
+def observe_battle_chest_currency_banner(frame_path: str | Path, ocr: list[dict], *,
+                                         client_version: str,
+                                         baseline_resolution: tuple[int, int] = BASELINE) -> dict | None:
+    """Read one current HOME banner; its currency is separate from battle loot."""
+    image = _image(frame_path, client_version, baseline_resolution, ocr)
+    if image is None:
+        return None
+    candidates = []
+    signals = []
+    for item in ocr:
+        if not _box_in(item.get("bbox"), (495, 170, 900, 235)):
+            continue
+        normalized = re.sub(r"\s+", "", str(item.get("text", "")))
+        if "宝箱" in normalized or "获得了" in normalized:
+            signals.append(item)
+        if (type(item.get("confidence")) not in (int, float) or
+                not math.isfinite(item["confidence"]) or not .95 <= item["confidence"] <= 1):
+            continue
+        match = re.fullmatch(r"一个宝箱并获得了([1-9][0-9]{0,8})[Xx×](金币|圣水|黑油)", normalized)
+        if match:
+            candidates.append((item, match))
+    if len(candidates) != 1 or len(signals) != 1 or candidates[0][0] is not signals[0]:
+        return None
+    item, match = candidates[0]
+    # Require current bright text pixels inside the recognized line as well as
+    # the OCR box, so text borrowed from a different frame cannot authorize a
+    # reward. The line is against the map rather than a fixed backdrop.
+    x1, y1, x2, y2 = map(int, item["bbox"])
+    hsv = cv2.cvtColor(image[y1:y2, x1:x2], cv2.COLOR_BGR2HSV)
+    bright_fraction = float(np.mean((hsv[:, :, 1] <= 90) & (hsv[:, :, 2] >= 185)))
+    if bright_fraction < .08:
+        return None
+    return {"resource": _CURRENCY_NAMES[match.group(2)], "amount": int(match.group(1)),
+            "ocr": item, "bright_text_fraction": bright_fraction,
+            "frame": str(frame_path), "frame_sha256": _sha256(Path(frame_path))}
 
 
 def _require_foreground(session) -> None:
@@ -235,9 +307,11 @@ def _current(session, snapshot, end: float, stage: str) -> dict:
     return fresh
 
 
-def _read_next(session, expected: tuple[str, int] | str, end: float, evidence: list[Path], label: str):
+def _read_next(session, expected: tuple[str, int] | str, end: float, evidence: list[Path],
+               label: str, pair_out: list | None = None):
     """A single issued input can be followed only by fresh reads, never reissued."""
     previous = None
+    previous_snapshot = None
     for index in range(8):
         _deadline(session, end)
         _require_foreground(session)
@@ -274,6 +348,7 @@ def _read_next(session, expected: tuple[str, int] | str, end: float, evidence: l
                      and math.isfinite(current.confidence) and current.confidence >= .95
                      and isinstance(reward, dict) and
                      (reward.get("stage") == "hero_potion_temporary_storage" if expected == "potion"
+                      else reward.get("stage") == "skip_confirmation" if expected == "skip_confirmation"
                       else reward.get("stage") == "closed_chest"
                       and (reward.get("rarity"), reward.get("hammers_remaining")) == expected))
         if state:
@@ -284,10 +359,14 @@ def _read_next(session, expected: tuple[str, int] | str, end: float, evidence: l
             if (previous is not None and previous[0] != frame_id
                     and previous[2] < captured and previous[3] < requested
                     and (expected != "home" or previous[4] == current_values[4])):
+                if pair_out is not None:
+                    pair_out[:] = [previous_snapshot, current]
                 return current
             previous = current_values
+            previous_snapshot = current
         else:
             previous = None
+            previous_snapshot = None
         if index < 7:
             time.sleep(min(.35, max(0, end - time.monotonic())))
     raise FlowError(f"Battle reward did not reach two fresh {expected!r} frames")
@@ -331,6 +410,8 @@ def finish_claimed_battle_reward(session, settlement, evidence: list[Path], *, t
         receipt["input_attempts"].append(item)
         session.event("battle_reward_input_reserved", action=action, frame=item["frame"],
                       frame_sha256=item["frame_sha256"])
+        _deadline(session, end)
+        _require_foreground(session)
         session.tap(snapshot, tuple(current["button"]["point"]),
                     reason=f"Verified free battle reward action: {action}")
         item["input_returned"] = True
@@ -338,8 +419,46 @@ def finish_claimed_battle_reward(session, settlement, evidence: list[Path], *, t
     claims.add(str(settlement.screenshot_path))
     session._battle_reward_chain_incomplete = True
     click_once(settlement, "claim_battle_reward", "claim")
+    current = _read_next(session, _CHAIN[0], end, evidence, "chest-1")
+    first = _current(session, current, end, "chest")
+    if first["button"]["name"] == "skip_battle_chest_animation":
+        receipt["stages"].append({"rarity": first["rarity"], "hammers_remaining": first["hammers_remaining"],
+                                  "frame": first["frame"], "frame_sha256": first["frame_sha256"],
+                                  "route": "observed_free_skip"})
+        click_once(current, "skip_battle_chest_animation", "chest")
+        confirmation = _read_next(session, "skip_confirmation", end, evidence, "skip-confirmation")
+        confirm = _current(session, confirmation, end, "chest")
+        receipt["stages"].append({"stage": "skip_confirmation", "frame": confirm["frame"],
+                                  "frame_sha256": confirm["frame_sha256"]})
+        click_once(confirmation, "confirm_free_battle_chest_skip", "chest")
+        homes = []
+        home = _read_next(session, "home", end, evidence, "home", pair_out=homes)
+        if homes[0].screenshot_path == homes[1].screenshot_path:
+            raise FlowError("Battle chest HOME captures reused one frame path")
+        receipt["home_frames"] = [
+            {"frame": str(snapshot.screenshot_path), "frame_sha256": _sha256(snapshot.screenshot_path),
+             "frame_id": snapshot.observations["frame_id"],
+             "resources": snapshot.observations["resources"]} for snapshot in homes]
+        receipt.update(returned_home=True, home_frame=str(home.screenshot_path),
+                       home_frame_sha256=_sha256(home.screenshot_path))
+        banners = [observe_battle_chest_currency_banner(
+            snapshot.screenshot_path, snapshot.observations.get("ocr", []),
+            client_version=session.client_version,
+            baseline_resolution=session.config.game.baseline_resolution) for snapshot in homes]
+        observed = [banner for banner in banners if banner is not None]
+        if (not observed or any((banner["resource"], banner["amount"]) !=
+                                (observed[0]["resource"], observed[0]["amount"])
+                                for banner in observed)):
+            raise FlowError("Battle chest currency reward is missing or conflicting")
+        reward = observed[0]
+        receipt.update(status="ui_complete_home_currency_observed",
+                       reward_item=reward["resource"], reward_amount=reward["amount"],
+                       currency_reward_observed=True, currency_reward_evidence=reward)
+        session._battle_reward_chain_incomplete = False
+        return home, receipt
     for index, state in enumerate(_CHAIN):
-        current = _read_next(session, state, end, evidence, f"chest-{index + 1}")
+        if index:
+            current = _read_next(session, state, end, evidence, f"chest-{index + 1}")
         stage = _current(session, current, end, "chest")
         receipt["stages"].append({"rarity": stage["rarity"], "hammers_remaining": stage["hammers_remaining"],
                                   "frame": stage["frame"], "frame_sha256": stage["frame_sha256"]})

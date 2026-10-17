@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, replace
 from datetime import datetime
+import hashlib
 import math
 from pathlib import Path
 import time
@@ -731,7 +732,8 @@ def run_battle(session: GameSession) -> TaskResult:
                 else:
                     ledger, home_after = _reconcile_return_inventory(
                         session, home_after, verified_before, verified_after, settlement,
-                        total_search_cost, evidence, allow_capacity=not provisional_outcome)
+                        total_search_cost, evidence, allow_capacity=not provisional_outcome,
+                        chest_reward=metrics.get("battle_reward"))
                     metrics.update(ledger)
             if not metrics["inventory_reconciled"]:
                 raise FlowError("Provisional settlement rewards need exact inventory reconciliation" if provisional_outcome
@@ -770,7 +772,8 @@ def run_battle(session: GameSession) -> TaskResult:
         metrics.update({"stars": settlement["stars"], "percentage": settlement["percentage"],
                         "victory": settlement["stars"] > 0})
         ledger, home_after = _reconcile_return_inventory(
-            session, home_after, before, after, settlement, total_search_cost, evidence, allow_capacity=True)
+            session, home_after, before, after, settlement, total_search_cost, evidence,
+            allow_capacity=True, chest_reward=metrics.get("battle_reward"))
         metrics.update(ledger)
         if after["gems"] != before["gems"]:
             raise FlowError("Gem balance changed during battle")
@@ -908,15 +911,62 @@ def _inventory(snapshot: SceneSnapshot) -> dict[str, int]:
 def _reconcile_return_inventory(
     session: GameSession, home: SceneSnapshot, before: dict[str, int], after: dict[str, int],
     settlement: dict, search_cost: int, evidence: list[Path], *, allow_capacity: bool,
+    chest_reward: dict | None = None,
 ) -> tuple[dict[str, object], SceneSnapshot]:
     """Use a capacity only for a positive shortfall confirmed by its own HUD detail."""
     gross = {name: settlement["loot"][name] + settlement["bonus"][name] for name in RESOURCES}
     base = {name: before[name] - (search_cost if name == "gold" else 0) for name in RESOURCES}
-    expected = {name: base[name] + gross[name] for name in RESOURCES}
+    chest = {name: 0 for name in RESOURCES}
+    if (isinstance(chest_reward, dict) and
+            type(chest_reward.get("reward_amount")) is int and
+            chest_reward.get("currency_reward_observed") is not True):
+        return {"inventory_reconciled": False, "chest_reward_rejected": True}, home
+    if isinstance(chest_reward, dict) and chest_reward.get("currency_reward_observed") is True:
+        item, amount = chest_reward.get("reward_item"), chest_reward.get("reward_amount")
+        proof = chest_reward.get("currency_reward_evidence")
+        home_frames = chest_reward.get("home_frames")
+        if (chest_reward.get("kind") != "battle_chest_ui" or
+                chest_reward.get("status") != "ui_complete_home_currency_observed" or
+                chest_reward.get("returned_home") is not True or
+                item not in RESOURCES or type(amount) is not int or amount <= 0 or
+                not isinstance(proof, dict) or proof.get("resource") != item or
+                proof.get("amount") != amount or not isinstance(proof.get("frame"), str) or
+                not proof["frame"] or not isinstance(proof.get("frame_sha256"), str) or
+                not proof["frame_sha256"] or not isinstance(home_frames, list) or
+                len(home_frames) != 2 or any(not isinstance(row, dict) for row in home_frames) or
+                home_frames[1].get("frame") != chest_reward.get("home_frame") or
+                home_frames[1].get("frame_sha256") != chest_reward.get("home_frame_sha256")):
+            return {"inventory_reconciled": False, "chest_reward_rejected": True}, home
+        ids: set[str] = set()
+        paths: set[Path] = set()
+        bound_frames: set[tuple[str, str]] = set()
+        for row in home_frames:
+            frame_id, frame_path, claimed_hash = (row.get("frame_id"), row.get("frame"),
+                                                  row.get("frame_sha256"))
+            if (not isinstance(frame_id, str) or not frame_id or frame_id in ids or
+                    not isinstance(frame_path, str) or not frame_path or
+                    not isinstance(claimed_hash, str) or not claimed_hash or
+                    row.get("resources") != after):
+                return {"inventory_reconciled": False, "chest_reward_rejected": True}, home
+            try:
+                path = Path(frame_path).resolve(strict=True)
+                actual_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+            except OSError:
+                return {"inventory_reconciled": False, "chest_reward_rejected": True}, home
+            if path in paths or actual_hash != claimed_hash:
+                return {"inventory_reconciled": False, "chest_reward_rejected": True}, home
+            ids.add(frame_id)
+            paths.add(path)
+            bound_frames.add((frame_path, claimed_hash))
+        if (proof["frame"], proof["frame_sha256"]) not in bound_frames:
+            return {"inventory_reconciled": False, "chest_reward_rejected": True}, home
+        chest[item] = amount
+    expected = {name: base[name] + gross[name] + chest[name] for name in RESOURCES}
     delta = {name: after[name] - before[name] for name in (*RESOURCES, "gems")}
     result: dict[str, object] = {
         "inventory_delta": delta,
         "expected_inventory_delta": {name: expected[name] - before[name] for name in RESOURCES},
+        "expected_chest_reward": chest,
         "inventory_reconciled": False,
     }
     if delta["gems"] != 0:
@@ -924,7 +974,7 @@ def _reconcile_return_inventory(
     mismatched = [name for name in RESOURCES if after[name] != expected[name]]
     capacities: dict[str, int] = {}
     capacity_proofs: dict[str, object] = {}
-    if mismatched and allow_capacity and getattr(session, "client_version", None) == "18.647.2" and all(
+    if mismatched and allow_capacity and not any(chest.values()) and getattr(session, "client_version", None) == "18.647.2" and all(
         gross[name] > 0 and base[name] <= after[name] < expected[name] for name in mismatched
     ):
         for name in mismatched:
@@ -940,9 +990,12 @@ def _reconcile_return_inventory(
         return result, home
     result["inventory_reconciled"] = True
     result["inventory_reconciliation_method"] = "capacity_capped" if capacities else "exact"
+    if any(chest.values()):
+        chest_reward["reward_inventory_verified"] = True
     for name in RESOURCES:
-        credited = after[name] - base[name]
+        credited = after[name] - base[name] - chest[name]
         result[f"battle_credited_{name}"] = credited
+        result[f"chest_credited_{name}"] = chest[name]
         result[f"overflow_{name}"] = gross[name] - credited
     return result, home
 
@@ -1126,6 +1179,13 @@ def _settlement(snapshot: SceneSnapshot) -> dict:
             raise FlowError(f"Settlement {name} is invalid")
     if _verified_stars(result) is None:
         raise FlowError("Settlement stars have no independent recognition evidence")
+    if result["evidence"].get("layout") == "defeat_with_claim_three_rows_v1":
+        event = result.get("event_reward")
+        if (not isinstance(event, dict) or event.get("kind") != "acid_elixir" or
+                type(event.get("amount")) is not int or event["amount"] <= 0 or
+                event.get("frame") != str(snapshot.screenshot_path) or
+                event.get("frame_sha256") != hashlib.sha256(snapshot.screenshot_path.read_bytes()).hexdigest()):
+            raise FlowError("Claim settlement event reward lacks current-frame evidence")
     return result
 
 

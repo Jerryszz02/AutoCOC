@@ -117,3 +117,15 @@ python scripts/export_u_position.py --training-dir C:\runs\u-position --snapshot
 ```
 
 配置须声明 `kind=u_position`、冻结快照给出的有序 `classes/client_versions/prototype_only`、`architecture=yolo26n`、`code_version`、`batch`、`max_frame_age_seconds`、`event_rules` 与 `applicability`（`roi_kind=u_position`、分辨率范围、`requires_stable_camera=true`、明确 `requires_verified_zoom`）。`preprocess` 固定为 `{"width":640,"height":640,"color":"RGB","resize":"stretch","scale":0.00392156862745098,"mean":[0,0,0],"std":[1,1,1]}`；`output` 固定 `format=xyxy_score_class`、`max_detections=300`，另由验证集定稿 `min_confidence`。目前没有任何真实已复核 U 窗口或 U 权重；`tests/test_u_train_export.py` 的合成一轮 CPU 训练、导出与 loader 测试只证明工具链可运行，动态功能仍默认禁用。
+
+## 免费导航场景候选采集
+
+`scripts/collect_scene_samples.py` 用当前 18.647.2 客户端采集固定路线：两帧 HOME → 战斗菜单 → 军队页 → 两帧军队读数 → 返回菜单和 HOME → 部落聊天 → 返回并再拍两帧 HOME。仅六次导航输入，程序核对当前版本、前台、画面来源和唯一按钮；军队只在军队页比较，资源和宝石在前后 HOME 比较。任一状态、库存、停止请求或时间门不满足就保留失败原图并停止，不追加恢复操作。
+
+从已推送且干净的工作区根目录运行，使用实机配置，模板目录须指向该工作区 `assets/templates`，游戏须已正常载入 HOME。`--output` 必须是仓库外的新目录，默认总预算 180 秒（允许 90–240 秒）；账号冲突或闲置重载应先另行处理。
+
+```powershell
+python -B scripts/collect_scene_samples.py --config C:\captures\live.toml --output C:\captures\scene-candidates\session-001 --split TRAIN --session-id session-001 --group-id candidate-group-001 --limit-sec 180
+```
+
+拍图前写入 `prospective.json` 并在输出父目录预留 session/group，拒绝同一父目录中的重复身份；结束写入原图和事件哈希及源码/配置指纹。`TRAIN`/`VAL` 仅是预声明候选归属，`labels=null`、`leakage_independence_verified=false`、`admitted_to_training=false`。先做真实图复核、版本核对和近重复/关联组审计，再由既有数据工具导入；不同采集会话不能自动算独立组，发现跨拆分关联时隔离，不能移动候选以改善分数。Agent 复核不会变成人工真值。当前工具已实现，真实路线和新数据训练仍待验证。

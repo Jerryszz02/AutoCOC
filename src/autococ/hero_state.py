@@ -404,6 +404,7 @@ def locate_current_deployed_hero_card(
         bottom_contrast = float(gray[709:711, left + 8:right - 8].mean() -
                                 gray[712, left + 8:right - 8].mean())
         gray_used_border = None
+        gray_used_topology = None
         if (unit_id == "grand_warden" and "battle_used_035742" in template_path.name):
             # The used card loses its purple side colour. Its opposite dark
             # outline gradients and closed bottom remain visible in 27-29.
@@ -411,20 +412,83 @@ def locate_current_deployed_hero_card(
             gray_used_border = [float(max(direction[left - 2:left + 3])),
                                 float(min(direction[right - 4:right]))]
             closed = gray_used_border[0] >= 250 and gray_used_border[1] <= -250
+            if not closed:
+                # A stable gray used-card outline may animate below the
+                # median-gradient gate. Require a separate, paired full-height
+                # topology proof from this same portrait-derived card instead.
+                gray_used_topology = _current_warden_gray_card_topology(gray, left, right)
+                closed = gray_used_topology is not None
         else:
             closed = min(sides) >= .5
         if not closed or bottom_contrast < 40:
             continue
         candidates.append((score, (left, top, right, bottom), sides, bottom_contrast,
-                           str(template_path), gray_used_border))
+                           str(template_path), gray_used_border, gray_used_topology))
     if not candidates:
         return None
-    score, box, sides, bottom_contrast, template_path, gray_used_border = max(candidates, key=lambda row: row[0])
+    score, box, sides, bottom_contrast, template_path, gray_used_border, gray_used_topology = max(
+        candidates, key=lambda row: row[0])
     return {"bbox": list(box), "portrait_score": round(score, 5), "template": template_path,
             "template_client_version": client_version, "frame": str(screenshot_path),
             "card_sides": sides, "gray_used_border": gray_used_border,
+            "gray_used_topology": gray_used_topology,
             "bottom_contrast": bottom_contrast,
             "method": "current_versioned_deployed_portrait_and_closed_card"}
+
+
+def _current_warden_gray_card_topology(gray, left: int, right: int) -> dict | None:
+    """Independent paired side-line proof for an animated gray used card.
+
+    This checks a long, aligned left/right outline and actual inside/outside
+    luminance separation; isolated battlefield edges or a one-sided border
+    cannot replace a closed card. The caller still checks its bottom edge.
+    """
+    import cv2
+    import numpy as np
+
+    if left < 6 or right + 4 > gray.shape[1] or right - left != 89:
+        return None
+    rows = gray[625:695]
+    direction = cv2.Sobel(rows, cv2.CV_32F, 1, 0, ksize=3)
+    left_band = direction[:, left - 2:left + 3]
+    right_band = direction[:, right - 4:right]
+    if left_band.shape != (70, 5) or right_band.shape != (70, 4):
+        return None
+    left_strength = left_band.max(axis=1)
+    right_strength = right_band.min(axis=1)
+    left_contrast = (rows[:, left + 3:left + 6].mean(axis=1)
+                     - rows[:, left - 5:left - 2].mean(axis=1))
+    right_contrast = (rows[:, right - 6:right - 3].mean(axis=1)
+                      - rows[:, right + 1:right + 4].mean(axis=1))
+    # Card artwork/ability animation changes the interior brightness by row.
+    # Its outline remains a continuous, oppositely oriented pair of edges;
+    # check the inside/outside separation over the whole side rather than
+    # demanding both contrasts on every individual artwork row.
+    paired = (left_strength >= 160) & (right_strength <= -160)
+    count = int(paired.sum())
+    longest = 0
+    run = 0
+    for value in paired:
+        run = run + 1 if value else 0
+        longest = max(longest, run)
+    if (count < 63 or longest < 50 or int(paired[:8].sum()) < 6
+            or int(paired[-8:].sum()) < 6
+            or float(np.median(left_contrast)) < 20
+            or float(np.median(right_contrast)) < 20):
+        return None
+    left_positions = np.argmax(left_band, axis=1)[paired]
+    right_positions = np.argmin(right_band, axis=1)[paired]
+    if (float(np.median(np.abs(left_positions - np.median(left_positions)))) > 1
+            or float(np.median(np.abs(right_positions - np.median(right_positions)))) > 1):
+        return None
+    return {"method": "paired_full_height_gray_used_card_sides",
+            "paired_rows": count, "longest_paired_run": longest,
+            "top_paired_rows": int(paired[:8].sum()),
+            "bottom_paired_rows": int(paired[-8:].sum()),
+            "left_gradient_median": float(np.median(left_strength[paired])),
+            "right_gradient_median": float(np.median(right_strength[paired])),
+            "left_contrast_median": float(np.median(left_contrast[paired])),
+            "right_contrast_median": float(np.median(right_contrast[paired]))}
 
 
 def _hero_phase_portrait(image, box: tuple[int, int, int, int], unit_id: str) -> dict | None:

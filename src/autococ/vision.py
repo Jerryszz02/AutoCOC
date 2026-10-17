@@ -368,7 +368,8 @@ class ScreenshotRecognizer:
                     baseline_resolution=self.baseline_resolution)
                 if battle_reward_claim is not None:
                     scene, confidence, reasons = SCENE_SETTLEMENT, .95, ["current_battle_chest_claim_settlement"]
-            elif any(normalize_label(item.text) in {"普通", "稀有", "英雄药水"} for item in texts):
+            elif any(normalize_label(item.text) in {"普通", "稀有", "英雄药水", "跳过开箱动画"}
+                     for item in texts):
                 battle_reward = observe_battle_chest(
                     path, current_ocr, client_version=self.client_version,
                     baseline_resolution=self.baseline_resolution)
@@ -1354,10 +1355,31 @@ class ScreenshotRecognizer:
                         line = [self._baseline_result(item, resolution) for item in read_line(path, native_roi)]
                         candidates = [item for item in line if amount(item) is not None]
                         source = "glyph_line_roi"
+                    if (not candidates and name == "gold"
+                            and self.client_version == "18.647.2"
+                            and any(normalize_label(item.text) == "失败" for item in texts)
+                            and any(normalize_label(item.text) == "领取奖励" for item in texts)):
+                        # The first bright gold digit on this claim layout lies
+                        # just outside the tight white-component box. Keep the
+                        # pixel-localized row, but reread its full icon-anchored
+                        # current line rather than repairing the OCR string.
+                        wide_roi = (left - 127, top, left - 4, bottom - 4)
+                        wide_glyph_roi = locate_number_line(image, wide_roi)
+                        if (wide_glyph_roi is not None
+                                and wide_roi[0] <= wide_glyph_roi[0] < wide_glyph_roi[2] <= wide_roi[2]
+                                and wide_roi[1] <= wide_glyph_roi[1] < wide_glyph_roi[3] <= wide_roi[3]):
+                            native_roi = scale_box(wide_roi, from_resolution=(1280, 720), to_resolution=resolution)
+                            wide_line = [self._baseline_result(item, resolution)
+                                         for item in read_line(path, native_roi)]
+                            candidates = [item for item in wide_line if amount(item) is not None]
+                            source = "current_claim_icon_anchored_full_glyph_line_roi"
             if len(candidates) == 1:
                 item = candidates[0]
                 loot[name] = amount(item)
                 evidence["loot"][name] = {**asdict(item), "source": source, "resource_icon": icon}
+                if source == "current_claim_icon_anchored_full_glyph_line_roi":
+                    evidence["loot"][name]["line_roi_at_1280x720"] = wide_roi
+                    evidence["loot"][name]["localized_glyph_roi_at_1280x720"] = wide_glyph_roi
         percentages = [item for item in texts if self._in_observed_roi(item, (570, 95, 715, 145))
                        and re.fullmatch(r"\s*\d{1,3}\s*[%％]\s*", item.text)]
         percentage = None
@@ -1456,6 +1478,13 @@ class ScreenshotRecognizer:
         complete_result = len(anchors) == 4 and stars == 0 and rows_complete and not bonus_marker
         if complete_result and ordered_icons == list(resources) and all(value is not None for value in loot.values()):
             layout = "regular_defeat_three_rows_v1"
+        elif ({"defeat", "received", "losses", "claim"} == anchors.keys()
+              and stars == 0 and rows_complete and ordered_icons == list(resources)
+              and all(value is not None for value in loot.values())
+              and not any(("bonus" in item.text.lower() or "额外" in item.text or
+                           ("奖励" in item.text and normalize_label(item.text) != "领取奖励"))
+                          for item in texts)):
+            layout = "defeat_with_claim_three_rows_v1"
         elif (complete_result and ordered_icons == ["gold", "elixir"]
               and all(loot[name] is not None for name in ("gold", "elixir"))
               and icon_scores.get("dark_elixir", 1) < .75
@@ -1474,6 +1503,24 @@ class ScreenshotRecognizer:
             evidence["bonus"] = {"source": "verified_no_bonus_layout", "layout": layout,
                                  "requires_inventory_reconciliation": True,
                                  "anchors": anchors, "separator_rows": separators}
+        event_reward = None
+        if layout == "defeat_with_claim_three_rows_v1":
+            labels = [item for item in texts if normalize_label(item.text) == "酸腐圣水"
+                      and math.isfinite(item.confidence) and item.confidence >= .95
+                      and self._in_observed_roi(item, (265, 355, 370, 395))]
+            amounts = [item for item in texts if re.fullmatch(r"\d+", item.text.strip())
+                       and math.isfinite(item.confidence) and item.confidence >= .95
+                       and self._in_observed_roi(item, (290, 382, 360, 425))]
+            hsv = cv2.cvtColor(image[388:422, 260:300], cv2.COLOR_BGR2HSV)
+            teal_fraction = float(((hsv[:, :, 0] >= 75) & (hsv[:, :, 0] <= 105)
+                                   & (hsv[:, :, 1] >= 100) & (hsv[:, :, 2] >= 100)).mean())
+            if len(labels) == len(amounts) == 1 and teal_fraction >= .2:
+                event_reward = {"kind": "acid_elixir", "amount": int(amounts[0].text),
+                                "inventory_verified": False, "formal_acceptance": False,
+                                "label": asdict(labels[0]), "number": asdict(amounts[0]),
+                                "teal_icon_fraction": teal_fraction,
+                                "frame": str(path), "frame_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+        evidence["event_reward"] = event_reward
         if {"victory", "received", "losses"} <= anchors.keys() and ({"return", "claim"} & anchors.keys()) and "defeat" not in anchors:
             bonus, bonus_evidence = self._settlement_bonus(path, image, texts, resolution)
             evidence["bonus"] = bonus_evidence
@@ -1485,7 +1532,8 @@ class ScreenshotRecognizer:
         evidence["anchors"] = anchors
         evidence["separator_rows"] = separators
         evidence["layout"] = layout
-        return {"loot": loot, "bonus": bonus, "percentage": percentage, "stars": stars, "evidence": evidence}
+        return {"loot": loot, "bonus": bonus, "percentage": percentage, "stars": stars,
+                "event_reward": event_reward, "evidence": evidence}
 
     def _settlement_bonus(self, path: Path, image, texts: list[OCRText], resolution: tuple[int, int]) -> tuple[dict, dict]:
         from .settlement import recognize_bonus_icons

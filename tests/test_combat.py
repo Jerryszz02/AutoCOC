@@ -1,5 +1,6 @@
 from copy import deepcopy
 from dataclasses import replace
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,7 +12,8 @@ from unittest.mock import Mock, patch
 import numpy as np
 
 from autococ.combat import (_candidate_changed, _fresh_boundary_retry_preview, _next_candidate,
-                            _read_army, _retryable_boundary_preflight, _wait_for_clear_scout,
+                            _read_army, _reconcile_return_inventory, _retryable_boundary_preflight,
+                            _wait_for_clear_scout,
                             inspect_army, run_battle)
 from autococ.config import BattleConfig, VisionAgentConfig
 from autococ.errors import CaptureError, DeploymentError, FlowError, StopRequested
@@ -2174,6 +2176,72 @@ class BattleRewardIntegrationTests(unittest.TestCase):
         self.assertEqual(result.status, "failed")
         self.assertNotIn("battle_reward", result.metrics)
         self.assertIs(session.battle_reward_receipt, old)
+
+    def test_chest_currency_is_separate_and_requires_exact_home_delta(self):
+        before = {"gold": 23622890, "elixir": 10028825, "dark_elixir": 441952, "gems": 231}
+        after = {"gold": 23692114, "elixir": 11228617, "dark_elixir": 442729, "gems": 231}
+        settlement = {"loot": {"gold": 70924, "elixir": 237792, "dark_elixir": 777},
+                      "bonus": {"gold": 0, "elixir": 0, "dark_elixir": 0}}
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        first = Path(temp.name) / "home-1.png"
+        second = Path(temp.name) / "home-2.png"
+        first.write_bytes(b"first current HOME capture")
+        second.write_bytes(b"second current HOME capture")
+        first_hash = hashlib.sha256(first.read_bytes()).hexdigest()
+        second_hash = hashlib.sha256(second.read_bytes()).hexdigest()
+        reward = {"kind": "battle_chest_ui", "status": "ui_complete_home_currency_observed",
+                  "returned_home": True, "currency_reward_observed": True,
+                  "reward_item": "elixir", "reward_amount": 962000,
+                  "currency_reward_evidence": {"resource": "elixir", "amount": 962000,
+                                               "frame": str(first), "frame_sha256": first_hash},
+                  "home_frame": str(second), "home_frame_sha256": second_hash,
+                  "home_frames": [{"frame": str(first), "frame_id": "first",
+                                   "frame_sha256": first_hash, "resources": after},
+                                  {"frame": str(second), "frame_id": "second",
+                                   "frame_sha256": second_hash, "resources": after}]}
+        session = SimpleNamespace(client_version="18.647.2")
+        home = frame(7, "village", resources=after)
+        ledger, _ = _reconcile_return_inventory(
+            session, home, before, after, settlement, 1700, [], allow_capacity=False,
+            chest_reward=reward)
+        self.assertTrue(ledger["inventory_reconciled"])
+        self.assertEqual(ledger["inventory_reconciliation_method"], "exact")
+        self.assertEqual(ledger["battle_credited_elixir"], 237792)
+        self.assertEqual(ledger["chest_credited_elixir"], 962000)
+        self.assertEqual(ledger["expected_chest_reward"], {
+            "gold": 0, "elixir": 962000, "dark_elixir": 0})
+        self.assertEqual(ledger["overflow_elixir"], 0)
+        wrong_frame = deepcopy(reward)
+        wrong_frame["currency_reward_evidence"]["frame"] = str(Path(temp.name) / "stale.png")
+        repeated_id = deepcopy(reward)
+        repeated_id["home_frames"][1]["frame_id"] = "first"
+        repeated_path = deepcopy(reward)
+        repeated_path["home_frames"][1]["frame"] = str(first)
+        repeated_path["home_frame"] = str(first)
+        for changed in (
+            dict(reward, reward_amount=962001),
+            dict(reward, currency_reward_evidence={"resource": "gold", "amount": 962000,
+                                                   "frame": str(first), "frame_sha256": first_hash}),
+            dict(reward, currency_reward_observed=False),
+            wrong_frame, repeated_id, repeated_path,
+        ):
+            with self.subTest(reward=changed):
+                rejected, _ = _reconcile_return_inventory(
+                    session, home, before, after, settlement, 1700, [], allow_capacity=False,
+                    chest_reward=changed)
+                self.assertFalse(rejected["inventory_reconciled"])
+        capped = dict(after, elixir=after["elixir"] - 1)
+        rejected, _ = _reconcile_return_inventory(
+            session, frame(8, "village", resources=capped), before, capped,
+            settlement, 1700, [], allow_capacity=False, chest_reward=reward)
+        self.assertFalse(rejected["inventory_reconciled"])
+        first.write_bytes(b"changed after receipt")
+        rejected, _ = _reconcile_return_inventory(
+            session, home, before, after, settlement, 1700, [], allow_capacity=False,
+            chest_reward=reward)
+        self.assertFalse(rejected["inventory_reconciled"])
+        self.assertTrue(rejected["chest_reward_rejected"])
 
 
 if __name__ == "__main__":

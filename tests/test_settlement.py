@@ -12,6 +12,7 @@ import numpy as np
 
 from autococ.ocr import OCRText
 from autococ.combat import _settlement
+from autococ.errors import FlowError
 from autococ.scene import SceneSnapshot
 from autococ.settlement import BONUS_TEMPLATE_CROPS, locate_number_line, recognize_earned_stars
 from autococ.vision import ScreenshotRecognizer
@@ -349,6 +350,41 @@ class DefeatSettlementLayoutTests(unittest.TestCase):
                     result = recognizer._settlement_observation(path, texts, (1280, 720))
                     self.assertIsNone(result["evidence"]["layout"])
                     self.assertTrue(all(value is None for value in result["bonus"].values()))
+
+    def test_anonymized_defeat_claim_requires_current_event_amount_and_icon(self):
+        record = json.loads((self.root / "tests/fixtures/battle_rewards/083520-provenance.json")
+                            .read_text(encoding="utf-8"))["fixtures"]["defeat_claim"]
+        path = self.root / "tests/fixtures/battle_rewards" / record["fixture"]
+        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), record["fixture_sha256"])
+        readings = [OCRText(item["text"], item["confidence"], tuple(item["bbox"]))
+                    for item in record["recorded_ocr"]]
+        provider = Mock()
+        provider.recognize_line.side_effect = lambda _path, roi: (
+            [OCRText("70924", .99894, tuple(roi))] if tuple(roi) == (547, 310, 670, 351) else
+            [OCRText("237792", .99999, tuple(roi))] if tuple(roi) == (554, 366, 666, 391) else [])
+        recognizer = ScreenshotRecognizer(provider=provider)
+        recognizer.client_version = "18.647.2"
+        good = recognizer._settlement_observation(path, readings, (1280, 720))
+        self.assertEqual(good["evidence"]["layout"], "defeat_with_claim_three_rows_v1")
+        self.assertEqual(good["event_reward"]["amount"], 267)
+        self.assertEqual(_settlement(SceneSnapshot("settlement", .95, path,
+                                                  {"settlement": good})), good)
+        for name, changed in (
+            ("missing_label", [item for item in readings if item.text != "酸腐圣水"]),
+            ("duplicate_amount", readings + [OCRText("268", .99, (300, 387, 348, 413))]),
+        ):
+            with self.subTest(case=name):
+                result = recognizer._settlement_observation(path, changed, (1280, 720))
+                self.assertIsNone(result["event_reward"])
+                with self.assertRaisesRegex(FlowError, "event reward"):
+                    _settlement(SceneSnapshot("settlement", .95, path, {"settlement": result}))
+        with TemporaryDirectory() as directory:
+            altered = cv2.imread(str(path))
+            altered[388:422, 260:300] = 0
+            modified = Path(directory) / "event-icon-missing.png"
+            self.assertTrue(cv2.imwrite(str(modified), altered))
+            result = recognizer._settlement_observation(modified, readings, (1280, 720))
+            self.assertIsNone(result["event_reward"])
 
 
 class SparseSettlementNumberTests(unittest.TestCase):
