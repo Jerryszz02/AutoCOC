@@ -326,6 +326,50 @@ def _guard_current(session, snapshot, evidence: dict, end: float) -> None:
         raise FlowError("Blacksmith navigation foreground or source changed")
 
 
+def _guard_unknown_observation(session, snapshot, end: float) -> None:
+    """Allow only a fresh, foreground unknown frame to be observed again."""
+    o = snapshot.observations
+    path = Path(snapshot.screenshot_path)
+    captured = o.get("observed_at_monotonic")
+    frame_id = o.get("frame_id")
+    ocr = o.get("ocr")
+    if not isinstance(ocr, list) or not all(isinstance(item, dict) for item in ocr):
+        raise FlowError("Unknown blacksmith observation OCR is incomplete")
+    ocr_sha = _ocr_digest(ocr)
+
+    def current() -> bool:
+        return (snapshot is session.last_snapshot and snapshot.scene == "unknown"
+                and session.client_version == CLIENT_VERSION
+                and tuple(session.config.game.baseline_resolution) == BASELINE
+                and time.monotonic() < end
+                and isinstance(frame_id, str) and bool(frame_id)
+                and o.get("frame_id") == frame_id
+                and type(captured) in (int, float) and math.isfinite(captured)
+                and o.get("observed_at_monotonic") == captured
+                and 0 <= time.monotonic() - captured <= 8
+                and isinstance(o.get("ocr"), list)
+                and all(isinstance(item, dict) for item in o["ocr"])
+                and _ocr_digest(o["ocr"]) == ocr_sha
+                and o.get("account_in_use") is None
+                and not any("另一个设备正在连接这个村庄" in str(item.get("text", ""))
+                            for item in o["ocr"])
+                and path.is_file())
+
+    session.check_deadline()
+    if not current():
+        raise FlowError("Unknown blacksmith observation is stale, unsupported or account-blocked")
+    frame_sha = _sha256(path)
+    remaining = min(5, session.config.runtime.step_timeout_sec,
+                    end - time.monotonic(), 8 - (time.monotonic() - captured))
+    if remaining <= 0:
+        raise FlowError("Unknown blacksmith observation freshness expired")
+    foreground = foreground_package(session.capture.adb, session.capture.serial,
+                                    timeout_sec=remaining)
+    session.check_deadline()
+    if foreground != session.config.game.package_name or not current() or _sha256(path) != frame_sha:
+        raise FlowError("Unknown blacksmith observation foreground or source changed")
+
+
 def _confirm_return_home(session, close: dict, end: float) -> list[dict]:
     """Require two new ordered, source-bound HOME frames after closing Equipment."""
     previous_frame = close.get("frame")
@@ -383,17 +427,28 @@ def read_current_ore_inventory(session, *, timeout_sec: float = 90) -> dict:
     completed = False
     try:
         selected = None
-        previous_home = None
+        previous_observation = None
         for attempt in range(8):
             remaining()
             if time.monotonic() >= front_end:
                 raise FlowError("Blacksmith front observation deadline exceeded")
             label = f"ore-navigation-current-{attempt + 1}"
-            current = (session.observe(label, purpose="full") if previous_home is None else
-                       _observe_transition(session, label, previous_home, front_end))
+            current = (session.observe(label, purpose="full") if previous_observation is None else
+                       _observe_transition(session, label, previous_observation, front_end))
             session.check_deadline()
-            if time.monotonic() >= front_end or not _home(current):
-                raise FlowError("Blacksmith front observation is not a current HOME")
+            if time.monotonic() >= front_end:
+                raise FlowError("Blacksmith front observation deadline exceeded")
+            if not _home(current):
+                if current.scene != "unknown":
+                    raise FlowError("Blacksmith front observation is not a current HOME")
+                _guard_unknown_observation(session, current, front_end)
+                previous_observation = current
+                if attempt < 7:
+                    next_poll = min(time.monotonic() + 1, front_end)
+                    while time.monotonic() < next_poll:
+                        session.check_deadline()
+                        time.sleep(min(.1, max(0, next_poll - time.monotonic())))
+                continue  # A transient unknown frame never authorizes a tap.
             selected = recognize_selected_blacksmith(
                 current, client_version=session.client_version, line_reader=line_reader)
             if selected is not None:
@@ -402,7 +457,7 @@ def read_current_ore_inventory(session, *, timeout_sec: float = 90) -> dict:
                 raise FlowError("Current selected building is not a verified blacksmith Equipment menu")
             candidate = locate_blacksmith(current, client_version=session.client_version)
             if candidate is None:
-                previous_home = current
+                previous_observation = current
                 if attempt < 7:
                     next_poll = min(time.monotonic() + 1, front_end)
                     while time.monotonic() < next_poll:

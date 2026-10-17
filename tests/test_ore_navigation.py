@@ -111,6 +111,32 @@ def give_each_capture_its_own_path(session: FakeSession, directory: Path) -> Non
     session.observe = observe
 
 
+def mark_captures_unknown(session: FakeSession, indices: set[int], *,
+                          account: bool = False, conflict_ocr: bool = False,
+                          stale: bool = False) -> None:
+    """Return a real saved frame with a transient, incomplete scene reading."""
+    original = session.observe
+
+    def observe(label, *, purpose="full"):
+        snapshot = original(label, purpose=purpose)
+        if len(session.observed) not in indices:
+            return snapshot
+        observations = copy.deepcopy(snapshot.observations)
+        observations["buttons"] = [{"name": "attack"}]
+        if account:
+            observations["account_in_use"] = {"message": True}
+        if conflict_ocr:
+            observations["ocr"].append({"text": "另一个设备正在连接这个村庄"})
+        if stale:
+            observations["observed_at_monotonic"] -= 10
+        unknown = SceneSnapshot("unknown", snapshot.confidence,
+                                snapshot.screenshot_path, observations)
+        session.last_snapshot = unknown
+        return unknown
+
+    session.observe = observe
+
+
 class OreNavigationTests(unittest.TestCase):
     def test_two_scale_train_fixture_provenance_and_anonymization(self):
         for directory in (CAL_FIXTURES, SMALL_FIXTURES):
@@ -496,6 +522,67 @@ class OreNavigationTests(unittest.TestCase):
             self.assertEqual([point for point, reason in session.taps
                               if reason == "Select current visible blacksmith front"], [(759, 207)])
 
+    def test_transient_unknown_then_fresh_home_reads_without_unknown_tap(self):
+        names = ["home_visible", "home_visible", "home_immediate_after_tap",
+                 "selected_delayed_after_tap", "ore_first", "ore_second",
+                 "home_new", "home_visible", "home_old"]
+        with TemporaryDirectory() as tmp:
+            session = FakeSession(names)
+            give_each_capture_its_own_path(session, Path(tmp))
+            mark_captures_unknown(session, {1})
+            with patch("autococ.ore_navigation.time.sleep"), patch(
+                    "autococ.ore_navigation.foreground_package",
+                    return_value=session.config.game.package_name), patch(
+                    "autococ.ore_inventory.foreground_package",
+                    return_value=session.config.game.package_name):
+                result = read_current_ore_inventory(session)
+            self.assertEqual(result["status"], "stable_inventory_read")
+            self.assertEqual(session.observed[:2], ["home_visible", "home_visible"])
+            self.assertEqual([point for point, reason in session.taps
+                              if reason == "Select current visible blacksmith front"], [(759, 207)])
+
+    def test_all_unknown_stops_after_eight_fresh_captures_without_input(self):
+        with TemporaryDirectory() as tmp:
+            session = FakeSession(["home_visible"] * 8)
+            give_each_capture_its_own_path(session, Path(tmp))
+            mark_captures_unknown(session, set(range(1, 9)))
+            with patch("autococ.ore_navigation.time.sleep"), patch(
+                    "autococ.ore_navigation.foreground_package",
+                    return_value=session.config.game.package_name):
+                with self.assertRaisesRegex(FlowError, "eight current HOME captures"):
+                    read_current_ore_inventory(session)
+            self.assertEqual(len(session.observed), 8)
+            self.assertEqual(session.taps, [])
+
+    def test_unknown_account_stale_foreground_and_other_scene_stop_before_input(self):
+        for mode in ("account", "conflict_ocr", "stale", "foreground", "disconnected",
+                     "account_scene", "popup"):
+            with self.subTest(mode=mode), TemporaryDirectory() as tmp:
+                session = FakeSession(["home_visible"])
+                give_each_capture_its_own_path(session, Path(tmp))
+                if mode in {"account", "conflict_ocr", "stale", "foreground"}:
+                    mark_captures_unknown(session, {1}, account=mode == "account",
+                                          conflict_ocr=mode == "conflict_ocr",
+                                          stale=mode == "stale")
+                else:
+                    original = session.observe
+                    def other_scene(label, *, purpose="full"):
+                        snapshot = original(label, purpose=purpose)
+                        changed = SceneSnapshot("account_in_use" if mode == "account_scene" else mode,
+                                                snapshot.confidence, snapshot.screenshot_path,
+                                                snapshot.observations)
+                        session.last_snapshot = changed
+                        return changed
+                    session.observe = other_scene
+                foreground = ("wrong.package" if mode == "foreground"
+                              else session.config.game.package_name)
+                with patch("autococ.ore_navigation.foreground_package",
+                           return_value=foreground):
+                    with self.assertRaises(FlowError):
+                        read_current_ore_inventory(session)
+                self.assertEqual(len(session.observed), 1)
+                self.assertEqual(session.taps, [])
+
     def test_front_observation_thirty_second_cap_and_nonhome_stop_without_input(self):
         with TemporaryDirectory() as tmp:
             session = FakeSession(["home_occluded", "home_visible"])
@@ -515,7 +602,7 @@ class OreNavigationTests(unittest.TestCase):
             snapshot = original(label, purpose=purpose)
             if len(session.observed) == 1:
                 return snapshot
-            unknown = SceneSnapshot("unknown", snapshot.confidence,
+            unknown = SceneSnapshot("disconnected", snapshot.confidence,
                                     snapshot.screenshot_path, snapshot.observations)
             session.last_snapshot = unknown
             return unknown

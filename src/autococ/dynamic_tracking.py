@@ -12,7 +12,8 @@ import time
 import cv2
 import numpy as np
 
-from .errors import SceneError
+from .errors import LocatorError, SceneError
+from .locator import scale_box
 from .dynamic_vision import (BUILDING_STATES, CARD_STATES, DynamicFrame,
                              DynamicObservation, DynamicUnavailable, hero_skill_identity)
 
@@ -56,12 +57,38 @@ def read_hero_deployment_evidence(source_path: str | Path, frame: DynamicFrame,
         return None
     identity = result.get("evidence", {}).get("portrait_identity")
     confidence = identity.get("confidence") if isinstance(identity, dict) else None
+    evidence = result.get("evidence", {})
+    yellow = evidence.get("yellow_health_bar")
+    closed = evidence.get("closed_card")
+    anchors = evidence.get("current_equipment_matches") or {}
+    yellow_ready = False
+    if (frame.client_version == "18.647.2" and hero_id == "grand_warden"
+            and result.get("ability_ready") is True and result.get("ability_used") is False
+            and isinstance(yellow, dict)
+            and yellow.get("method") == "yellow_fill_enclosed_by_dark_hp_frame"
+            and isinstance(yellow.get("frame_support"), list)
+            and len(yellow["frame_support"]) == 4
+            and all(type(value) in (int, float) and math.isfinite(value) and value >= .85
+                    for value in yellow["frame_support"])
+            and isinstance(closed, dict) and closed.get("frame") == str(path)
+            and closed.get("template_client_version") == frame.client_version
+            and isinstance(closed.get("bbox"), list) and len(closed["bbox"]) == 4
+            and all(type(value) is int for value in closed["bbox"])
+            and (evidence.get("ability_ready") or {}).get("yellow_hp_ready_contract") is not None
+            and anchors.get("ready_book") is not None and anchors.get("ready_card") is not None
+            and anchors.get("used_book") is None and anchors.get("used_card") is None):
+        try:
+            yellow_ready = (scale_box(tuple(closed["bbox"]),
+                                      from_resolution=(1280, 720),
+                                      to_resolution=(frame.width, frame.height)) == roi_bbox)
+        except LocatorError:
+            yellow_ready = False
     if (result.get("deployed") is not True or
             result.get("frame") != str(path) or result.get("slot_bbox") != list(roi_bbox) or
             not isinstance(identity, dict) or identity.get("unit_id") != hero_id or
             identity.get("version_verified") is not True or
             type(confidence) not in (int, float) or not math.isfinite(confidence) or
-            confidence < .95 or result.get("evidence", {}).get("health_bar") is None):
+            confidence < .95 or (evidence.get("health_bar") is None and not yellow_ready)):
         return None
     return HeroDeploymentEvidence(hero_id, True, float(confidence), frame.session_id,
                                   frame.camera_epoch, frame.frame_id,

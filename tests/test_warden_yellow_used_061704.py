@@ -100,18 +100,11 @@ def test_later_frame_meets_current_topology_without_rewriting_historical_failure
     assert anchors["ready_book"] is None and anchors["ready_card"] is None
 
 
-def test_yellow_ready_cannot_authorize_input():
-    ready = _image(BEFORE)
-    yellow = _image(AFTER)
-    # Only the native HP strip changes. The ready book, card and portrait remain.
-    ready[1138:1172, 1302:1472] = yellow[1138:1172, 1302:1472]
-    with TemporaryDirectory() as directory:
-        path = Path(directory) / "yellow-ready.png"
-        _write(path, ready)
-        target = _target(path)
-        assert target["state"]["evidence"]["yellow_health_bar"] is not None
-        assert target["state"]["ability_ready"] is not True
-        assert target["verified"] is False
+def test_yellow_used_never_becomes_ready_again():
+    target = _target(AFTER)
+    assert target["state"]["evidence"]["yellow_health_bar"] is not None
+    assert target["state"]["ability_used"] is True
+    assert target["state"]["ability_ready"] is False
 
 
 def test_missing_hp_closed_card_equipment_and_neighbor_portrait_reject():

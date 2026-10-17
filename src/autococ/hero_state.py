@@ -103,6 +103,7 @@ def recognize_hero_state(
     When unit_id is supplied, its portrait must match again in this frame.
     """
     import cv2
+    import math
     import numpy as np
 
     path = Path(screenshot_path)
@@ -256,10 +257,19 @@ def recognize_hero_state(
         used = anchors["used_book"] is not None and anchors["used_card"] is not None
         mixed = ((anchors["ready_book"] is not None or anchors["ready_card"] is not None)
                  and (anchors["used_book"] is not None or anchors["used_card"] is not None))
-        # Yellow HP is independently enclosed and locates a live Warden, but
-        # it cannot authorize a ready skill input. It is only eligible for the
-        # already-used phase when both gray equipment proofs agree.
-        if ready and not mixed and (health is not None or red_health is not None):
+        # This client has an independently sampled yellow-HP ready layout.
+        # A yellow bar alone is never a ready phase: require this frame's
+        # independently closed Warden card, a >=.95 unique portrait, both
+        # active anchors, and absence of *either* used anchor. The older
+        # green/red ready and yellow used paths retain their original gates.
+        confidence = identity.get("confidence")
+        yellow_ready = (yellow_health is not None and ready
+                        and identity.get("unit_id") == "grand_warden"
+                        and identity.get("version_verified") is True
+                        and anchors["used_book"] is None and anchors["used_card"] is None
+                        and type(confidence) in (int, float) and math.isfinite(confidence)
+                        and confidence >= .95)
+        if (ready and not mixed and (health is not None or red_health is not None)) or yellow_ready:
             result.update(state="ability_ready", ability_ready=True, ability_used=False)
             ready_template = Path(anchors["ready_card"]["template"]).name
             ready_source = (CURRENT_WARDEN_READY_CARD_PHASE_SOURCE
@@ -272,6 +282,12 @@ def recognize_hero_state(
                                          "ready_card_source": ready_source,
                                          "template_source": ready_source,
                                          "source_kind": "agent_visual_prototype"}
+            if yellow_ready:
+                evidence["ability_ready"]["yellow_hp_ready_contract"] = {
+                    "health": yellow_health, "closed_card": located,
+                    "portrait_confidence": confidence,
+                    "ready_book": anchors["ready_book"], "ready_card": anchors["ready_card"],
+                    "used_book": None, "used_card": None}
         elif used and not mixed and "battle_used_035742" in str(identity["evidence"][0]["template"]):
             result.update(state="ability_used", ability_ready=False, ability_used=True)
             evidence["ability_used"] = {"hero": unit_id, "equipment_layout": "current_gold_book",

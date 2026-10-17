@@ -175,7 +175,7 @@ class HeroStateTests(unittest.TestCase):
             saved = cv2.imdecode(np.fromfile(fixture, np.uint8), cv2.IMREAD_COLOR)
             self.assertTrue(np.array_equal(saved, expected))
 
-    def test_current_warden_yellow_hp_proves_only_live_deployment(self) -> None:
+    def test_current_warden_yellow_hp_proves_live_deployment(self) -> None:
         for name, fill in (("green_24", "green"), ("yellow_25", "yellow"),
                            ("yellow_26", "yellow")):
             with self.subTest(frame=name):
@@ -199,8 +199,9 @@ class HeroStateTests(unittest.TestCase):
                     self.assertEqual(state["evidence"]["yellow_health_bar"]["fill_bbox"],
                                      [655, 573, 686, 582])
                     self.assertGreaterEqual(min(state["evidence"]["yellow_health_bar"]["frame_support"]), .85)
-                    self.assertIsNone(state["ability_ready"])
-                    self.assertIsNone(state["ability_used"])
+                    # This historical HP fixture has no reviewed ready label.
+                    # The 113248 TRAIN regression owns yellow-ready evidence.
+                    self.assertIsNot(state["ability_used"], True)
 
     def test_current_warden_yellow_hp_requires_correct_frame_card_and_identity(self) -> None:
         path = self.yellow_fixture_dir / "yellow_25.png"

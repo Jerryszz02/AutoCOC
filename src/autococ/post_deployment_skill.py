@@ -83,6 +83,22 @@ def _current_warden(session: Any, snapshot: Any) -> dict[str, object]:
     identity = state.get("evidence", {}).get("portrait_identity") or {}
     evidence = state.get("evidence", {})
     used = evidence.get("ability_used") or {}
+    ready_anchors = evidence.get("current_equipment_matches") or {}
+    closed = evidence.get("closed_card") or {}
+    confidence = identity.get("confidence")
+    yellow_ready_hp = (evidence.get("yellow_health_bar") is not None
+                       and state.get("ability_ready") is True
+                       and state.get("ability_used") is False
+                       and (evidence.get("ability_ready") or {}).get("yellow_hp_ready_contract") is not None
+                       and ready_anchors.get("ready_book") is not None
+                       and ready_anchors.get("ready_card") is not None
+                       and ready_anchors.get("used_book") is None
+                       and ready_anchors.get("used_card") is None
+                       and type(confidence) in (int, float) and math.isfinite(confidence)
+                       and confidence >= .95
+                       and state.get("frame") == str(snapshot.screenshot_path)
+                       and closed.get("frame") == str(snapshot.screenshot_path)
+                       and tuple(closed.get("bbox") or ()) == tuple(locator["bbox"]))
     yellow_used_hp = (evidence.get("yellow_health_bar") is not None
                       and state.get("ability_used") is True
                       and state.get("ability_ready") is False
@@ -94,7 +110,7 @@ def _current_warden(session: Any, snapshot: Any) -> dict[str, object]:
                          and state.get("deployed") is True
                          and (evidence.get("health_bar") is not None
                               or evidence.get("red_health_bar") is not None
-                              or yellow_used_hp)
+                              or yellow_ready_hp or yellow_used_hp)
                          and tuple(locator["bbox"]) == tuple(state.get("slot_bbox") or ())) }
 
 
