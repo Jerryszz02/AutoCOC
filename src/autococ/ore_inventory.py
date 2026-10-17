@@ -20,6 +20,7 @@ import numpy as np
 
 from .device import foreground_package
 from .errors import FlowError
+from .home_evidence import home_navigation_verified
 
 
 CLIENT_VERSION = "18.647.2"
@@ -387,12 +388,10 @@ def close_ore_inventory(session, snapshot, *, timeout_sec: float = 15) -> dict:
         if time.monotonic() >= end:
             break
         current = session.observe(f"ore-inventory-close-{index + 1}", purpose="full")
-        buttons = {item.get("name") for item in current.observations.get("buttons", [])
-                   if isinstance(item, dict)}
         if (current.scene == "village" and current.confidence >= .8 and
                 current.observations.get("village_type") == "home" and
                 current.observations.get("resource_source") == "village_inventory" and
-                {"attack", "shop"} <= buttons):
+                home_navigation_verified(current)):
             return {"status": "home", "frame": str(current.screenshot_path),
                     "reward_inventory_verified": False, "formal_success": False}
     raise FlowError("Hero-equipment close did not return to a confirmed HOME")

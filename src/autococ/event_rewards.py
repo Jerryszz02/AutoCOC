@@ -17,6 +17,7 @@ import numpy as np
 
 from .device import foreground_package
 from .errors import FlowError, StopRequested
+from .home_evidence import home_navigation_verified
 
 
 CLIENT_VERSION = "18.647.2"
@@ -323,12 +324,10 @@ def _bounded_observe(session, label: str, end: float):
 
 
 def _village(snapshot) -> bool:
-    controls = {button.get("name") for button in snapshot.observations.get("buttons", [])
-                if isinstance(button, dict)}
     return (snapshot.scene == "village" and snapshot.confidence >= .8
             and snapshot.observations.get("village_type") == "home"
             and snapshot.observations.get("resource_source") == "village_inventory"
-            and {"attack", "shop"} <= controls)
+            and home_navigation_verified(snapshot))
 
 
 def _panel_close_matches(ocr: list[dict]) -> list[dict]:

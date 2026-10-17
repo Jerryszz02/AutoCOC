@@ -8,6 +8,7 @@ from pathlib import Path
 import time
 
 from .errors import AutoCOCError, FlowError
+from .home_evidence import home_navigation_verified
 from .reporting import TaskResult
 from .scene import SceneSnapshot
 from .session import GameSession
@@ -108,8 +109,8 @@ def recover_connection(session: GameSession, *, initial_snapshot: SceneSnapshot 
                 metrics["welcome_confirm_actions"] = 1
                 continue
             if after.scene == "village" and _confident(after.confidence):
-                if any(len(session.buttons(after, name)) != 1 for name in ("attack", "shop")):
-                    raise FlowError("Recovered village is missing unique attack/shop controls")
+                if not home_navigation_verified(after):
+                    raise FlowError("Recovered village lacks verified HOME navigation evidence")
                 metrics["village_verified"] = True
                 status, reason = "succeeded", "single_retry_and_village_verified"
                 break

@@ -18,6 +18,7 @@ from .config import AppConfig, ProfileConfig, VisionAgentConfig, load_config, lo
 from .device import DeviceManager
 from .strategies import STRATEGIES
 from .errors import ConfigError, StopRequested
+from .home_evidence import home_navigation_verified
 from .flow import FlowRunner
 from .reporting import RunStats, TaskResult, summarize_run, write_report
 from .routine_config import GoalConfig, RoutineConfig, TaskSpec, default_routine, routine_from_dict, routine_to_dict
@@ -316,9 +317,8 @@ class DesktopController:
             if (snapshot.scene != "village" or snapshot.observations.get("village_type") != "home"
                     or not math.isfinite(snapshot.confidence)
                     or snapshot.confidence < .8 or not isinstance(buttons, list)
-                    or any(sum(isinstance(row, dict) and row.get("name") == name for row in buttons) != 1
-                           for name in ("attack", "shop"))):
-                raise ValueError("HOME 双导航入口未核验")
+                    or not home_navigation_verified(snapshot)):
+                raise ValueError("HOME 导航证据未核验")
             return {"frame": str(snapshot.screenshot_path), "sha256": sha(Path(snapshot.screenshot_path)),
                     "observed_at_monotonic": snapshot.observations.get("observed_at_monotonic"),
                     "resources": snapshot.observations.get("resources")}

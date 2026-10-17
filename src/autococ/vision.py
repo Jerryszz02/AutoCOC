@@ -16,6 +16,7 @@ from .locator import find_template, scale_box
 from .ocr import OCRProvider, OCRText, create_ocr_provider, filter_ocr_results
 from .scene import SCENE_ACCOUNT_IN_USE, SCENE_BATTLE, SCENE_BATTLE_REWARD, SCENE_CLAN_CHAT, SCENE_DISCONNECTED, SCENE_ENEMY_VILLAGE, SCENE_MAINTENANCE, SCENE_POPUP, SCENE_REQUEST, SCENE_SEARCH, SCENE_SETTLEMENT, SCENE_STARTING, SCENE_TRAINING, SCENE_UNKNOWN, SCENE_VILLAGE, SceneSnapshot, account_in_use_dialog_evidence, classify_scene_text, surrender_dialog_evidence
 from .model_vision import ModelUnavailable, SceneModel, BuildingModel
+from .home_evidence import RESOURCE_NAMES, RESOURCE_ROIS, ocr_sha256
 
 
 BUTTON_LABELS: dict[str, tuple[str, ...]] = {
@@ -152,6 +153,28 @@ def recognize_village_type(screenshot_path: str | Path, *, client_version: str |
             result["bbox"] = [left + 25, top + 570, left + 25 + width, top + 570 + height]
             result["point"] = [left + 25 + width // 2, top + 570 + height // 2]
     return result
+
+
+def _current_home_full_ocr_resources(texts: list[OCRText]) -> dict[str, dict] | None:
+    """Require four separate, complete OCR numbers at current HOME HUD rows."""
+    anchors: dict[str, dict] = {}
+    for name in RESOURCE_NAMES:
+        roi = RESOURCE_ROIS[name]
+        matches = []
+        for item in texts:
+            if (item.bbox is None or type(item.confidence) not in (int, float)
+                    or not .95 <= item.confidence <= 1
+                    or not (roi[0] <= item.bbox[0] < item.bbox[2] <= roi[2]
+                            and roi[1] <= item.bbox[1] < item.bbox[3] <= roi[3])):
+                continue
+            value = parse_resource_number(item.text)
+            if value is not None:
+                matches.append((item, value))
+        if len(matches) != 1:
+            return None
+        item, value = matches[0]
+        anchors[name] = {"ocr": asdict(item), "value": value}
+    return anchors
 
 
 def detect_collectibles(
@@ -378,15 +401,51 @@ class ScreenshotRecognizer:
                 if battle_reward is not None:
                     scene, confidence, reasons = SCENE_BATTLE_REWARD, .95, ["current_battle_chest_page"]
         village_type_evidence = None
-        if scene == SCENE_UNKNOWN and not account_claim_visible and all(
-            any(normalize_label(item.text) == label and self._in_observed_roi(item, roi)
-                for item in texts)
-            for label, roi in (("商店", (1160, 340, 1255, 420)),
-                               ("建造", (1150, 645, 1250, 715)))
-        ):
-            village_type_evidence = recognize_village_type(path, client_version=self.client_version)
-            if village_type_evidence["type"] == "home":
-                scene, confidence, reasons = SCENE_VILLAGE, .9, ["home_battle_icon", "shop_and_build_hud"]
+        home_hud_proof = None
+        current_home_resources = None
+        if scene == SCENE_UNKNOWN and not account_claim_visible and account_in_use is None:
+            shop = [item for item in texts if normalize_label(item.text) == "商店"
+                    and self._in_observed_roi(item, (1160, 340, 1255, 420))]
+            builder_seen = any(normalize_label(item.text) == "建造"
+                               and self._in_observed_roi(item, (1150, 645, 1250, 715))
+                               for item in texts)
+            builder = [item for item in texts if normalize_label(item.text) == "建造"
+                       and math.isfinite(item.confidence) and .95 <= item.confidence <= 1
+                       and self._in_observed_roi(item, (1150, 645, 1250, 715))]
+            if builder_seen:
+                village_type_evidence = recognize_village_type(path, client_version=self.client_version)
+                if village_type_evidence["type"] == "home" and shop:
+                    scene, confidence, reasons = SCENE_VILLAGE, .9, ["home_battle_icon", "shop_and_build_hud"]
+                elif (village_type_evidence["type"] == "home" and not shop and len(builder) == 1
+                      and self.client_version == "18.647.2"
+                      and Path(str(village_type_evidence.get("template", ""))).name in {
+                          "village_home_battle_18_647_2.png",
+                          "village_home_battle_checklist_18_647_2.png"}):
+                    anchors = _current_home_full_ocr_resources(texts)
+                    if anchors is not None:
+                        resources, evidence = self._village_resources(
+                            path, texts, resolution, new_home_hud=True)
+                        if all(resources.get(name) == anchors[name]["value"] and name in evidence
+                               for name in RESOURCE_NAMES):
+                            template = Path(str(village_type_evidence["template"]))
+                            with path.open("rb") as source:
+                                frame_sha256 = hashlib.file_digest(source, "sha256").hexdigest()
+                            with template.open("rb") as source:
+                                template_sha256 = hashlib.file_digest(source, "sha256").hexdigest()
+                            home_hud_proof = {
+                                "method": "current_icon_builder_four_full_ocr",
+                                "client_version": self.client_version,
+                                "frame": str(path), "frame_sha256": frame_sha256,
+                                "source_resolution": list(resolution),
+                                "baseline_resolution": list(self.baseline_resolution),
+                                "attack_icon": village_type_evidence,
+                                "attack_template_sha256": template_sha256,
+                                "ocr_sha256": ocr_sha256([asdict(item) for item in texts]),
+                                "builder": asdict(builder[0]), "resources": anchors,
+                            }
+                            current_home_resources = (resources, evidence)
+                            scene, confidence, reasons = SCENE_VILLAGE, .9, [
+                                "home_battle_icon", "builder_hud", "four_full_resource_rows"]
         model_scene_evidence: dict[str, object] | None = None
         if self.scene_model is not None and not account_claim_visible and battle_reward_claim is None and battle_reward is None:
             if captured_at is None:
@@ -545,6 +604,7 @@ class ScreenshotRecognizer:
             "resource_capacities": {"gold": None, "elixir": None, "dark_elixir": None},
             "village_type": "unknown",
             "village_type_evidence": None,
+            "home_hud_proof": home_hud_proof,
             "event_panel": event_panel,
             "event_reward_track": event_reward_track,
             "ore_inventory": ore_inventory,
@@ -576,7 +636,8 @@ class ScreenshotRecognizer:
             observations["village_type_evidence"] = village_type
             new_home_hud = str(village_type.get("template", "")).endswith((
                 "village_home_battle_18_647_2.png", "village_home_battle_checklist_18_647_2.png"))
-            resources, evidence = self._village_resources(path, texts, resolution, new_home_hud=new_home_hud)
+            resources, evidence = (current_home_resources if current_home_resources is not None else
+                                   self._village_resources(path, texts, resolution, new_home_hud=new_home_hud))
             observations["resources"] = resources
             observations["resource_evidence"] = evidence
             observations["resource_source"] = "village_inventory"

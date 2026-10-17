@@ -9,6 +9,7 @@ import time
 import tomllib
 
 from .errors import CapabilityUnavailable, ConfigError, FlowError
+from .home_evidence import home_navigation_verified
 from .routine_config import TaskSpec
 
 
@@ -354,10 +355,8 @@ def _observe_page(session, title: str, title_roi, label: str):
 
 
 def _verified_village(snapshot):
-    controls = {button.get("name") for button in snapshot.observations.get("buttons", [])
-                if isinstance(button, dict)}
     return (snapshot.scene == "village" and math.isfinite(snapshot.confidence)
-            and snapshot.confidence >= .8 and {"attack", "shop"} <= controls)
+            and snapshot.confidence >= .8 and home_navigation_verified(snapshot))
 
 
 def _observe_previous_or_home(session, step: NavigationStep):

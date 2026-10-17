@@ -1,0 +1,26 @@
+{
+  "client_version": "18.647.2",
+  "items": [
+    {
+      "fixture": "home_promo_current_18_647_2.png",
+      "fixture_sha256": "eaf0921b4b21935a265d756259b0d84ba3b197f67530b527b632e184b43c208f",
+      "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-131831-595587-7cb8d044\\frames\\00007-collect-verify.png",
+      "source_sha256": "ae9781862dc7f5a216b8bfe682841335e3b5c3a80ff4f5e9e0f8ac86298722e3",
+      "source_split": "prospective_TRAIN",
+      "transformation": "resize_2560x1440_to_1280x720_inter_area; redact_account_upper_left_baseline_0_0_300_130; redact_map_center",
+      "label_scope": "agent_visual_ui_fixture_only",
+      "prospective_train_plan_sha256": "a50ff93d4d07ab6b683d49493d37ff0c14f574091423d7099603274aa2b0afd2"
+    },
+    {
+      "fixture": "home_event_modal_current_18_647_2.png",
+      "fixture_sha256": "118dd0e7752d3cb3fe7996dd4531b4d4f8bc623a089228cf5abe51561a0d026d",
+      "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-131505-658062-cce30062\\frames\\00021-event-reward-track-1.png",
+      "source_sha256": "571489175f2eb8623a0b718a87e37a7a18be4343e8d0c02d5a966c39a8835459",
+      "source_split": "prospective_TRAIN",
+      "transformation": "resize_2560x1440_to_1280x720_inter_area; redact_account_upper_left_baseline_0_0_300_130",
+      "label_scope": "agent_visual_ui_fixture_only",
+      "prospective_train_plan_sha256": "3e38a16d441f88272571ba10f6a2c92c744d12c4f0fd67bb21e0e11d7afcf13d"
+    }
+  ],
+  "formal_label": false
+}

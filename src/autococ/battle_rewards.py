@@ -18,6 +18,7 @@ import numpy as np
 
 from .device import foreground_package
 from .errors import FlowError
+from .home_evidence import home_navigation_verified
 
 
 CLIENT_VERSION = "18.647.2"
@@ -329,8 +330,6 @@ def _read_next(session, expected: tuple[str, int] | str, end: float, evidence: l
                  and 0 <= time.monotonic() - captured <= 8
                  and 0 <= time.monotonic() - requested <= 8)
         if expected == "home":
-            controls = {button.get("name") for button in current.observations.get("buttons", [])
-                        if isinstance(button, dict)}
             resources = current.observations.get("resources")
             complete_resources = (isinstance(resources, dict) and
                                   all(type(resources.get(name)) is int and resources[name] >= 0 for name in
@@ -340,7 +339,7 @@ def _read_next(session, expected: tuple[str, int] | str, end: float, evidence: l
                      and math.isfinite(current.confidence) and current.confidence >= .8
                      and current.observations.get("village_type") == "home"
                      and current.observations.get("resource_source") == "village_inventory"
-                     and {"attack", "shop"} <= controls and complete_resources)
+                     and home_navigation_verified(current) and complete_resources)
         else:
             reward = current.observations.get("battle_reward")
             state = (fresh and current.scene == "battle_reward"

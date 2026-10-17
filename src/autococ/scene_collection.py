@@ -16,6 +16,8 @@ from threading import Event, Thread
 import time
 from typing import Callable
 
+from .home_evidence import home_navigation_verified
+
 
 VERSION = "18.647.2"
 VERSION_CODE = 180647003
@@ -27,6 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_FILES = (
     "src/autococ/scene_collection.py", "scripts/collect_scene_samples.py",
     "src/autococ/session.py", "src/autococ/scene.py", "src/autococ/vision.py",
+    "src/autococ/home_evidence.py",
     "src/autococ/picker_collection.py", "src/autococ/social.py",
     "src/autococ/locator.py", "src/autococ/device.py", "src/autococ/config.py",
 )
@@ -108,7 +111,8 @@ def _home(shot) -> dict[str, int]:
     if obs.get("village_type") != "home" or obs.get("resource_source") != "village_inventory":
         raise SceneCollectionStopped("home_identity_or_inventory_source_unverified")
     _unique_button(shot, "attack")
-    _unique_button(shot, "shop")
+    if not home_navigation_verified(shot):
+        raise SceneCollectionStopped("home_navigation_unverified")
     resources = obs.get("resources")
     if not isinstance(resources, dict) or any(type(resources.get(k)) is not int or resources[k] < 0
                                               for k in RESOURCE_NAMES):

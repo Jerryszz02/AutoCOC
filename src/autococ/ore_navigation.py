@@ -19,6 +19,7 @@ import numpy as np
 
 from .device import foreground_package
 from .errors import FlowError, StopRequested
+from .home_evidence import home_navigation_verified
 from .ore_inventory import (close_ore_inventory, read_ore_inventory_snapshot,
                             verify_stable_ore_inventory)
 
@@ -92,12 +93,11 @@ def _exact(ocr: list[dict], label: str, roi: tuple[int, int, int, int],
 
 def _home(snapshot) -> bool:
     o = snapshot.observations
-    buttons = {item.get("name") for item in o.get("buttons", []) if isinstance(item, dict)}
     return (snapshot.scene == "village" and snapshot.confidence >= .8
             and o.get("village_type") == "home"
             and o.get("resource_source") == "village_inventory"
             and o.get("account_in_use") is None
-            and {"attack", "shop"} <= buttons
+            and home_navigation_verified(snapshot)
             and isinstance(o.get("ocr"), list)
             and not any("另一个设备正在连接这个村庄" in str(item.get("text", ""))
                         for item in o["ocr"] if isinstance(item, dict)))

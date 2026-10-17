@@ -562,7 +562,7 @@ class FlowTests(unittest.TestCase):
         partial = self.snapshot()
         partial.observations["buttons"] = [{"name": "shop"}]
         self.session.observe.return_value = partial
-        with patch("autococ.flow.time.sleep"), self.assertRaisesRegex(FlowError, "both navigation"):
+        with patch("autococ.flow.time.sleep"), self.assertRaisesRegex(FlowError, "HOME navigation evidence"):
             return_to_village(self.session, initial_snapshot=partial)
         self.assertEqual(self.session.observe.call_count, 2)
         self.session.back.assert_not_called()
