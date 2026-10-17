@@ -1323,7 +1323,14 @@ class ScreenshotRecognizer:
 
             def amount(item: OCRText) -> int | None:
                 if (not math.isfinite(item.confidence) or not max(.9, self.ocr_config.confidence_threshold) <= item.confidence <= 1
-                        or not self._in_observed_roi(item, roi)):
+                        or item.bbox is None or not self._in_observed_roi(item, roi)):
+                    return None
+                number_box = scale_box(item.bbox, from_resolution=self.baseline_resolution,
+                                       to_resolution=(1280, 720))
+                # The map remains visible behind settlement. Small troop/hero
+                # levels can fall inside the broad OCR row, but a loot amount
+                # ends immediately to the left of its resource icon.
+                if not 0 <= left - number_box[2] <= 20 or number_box[3] - number_box[1] < 12:
                     return None
                 return parse_resource_number(item.text)
 
@@ -1332,19 +1339,17 @@ class ScreenshotRecognizer:
             if not candidates:
                 read_line = getattr(self.provider, "recognize_line", None)
                 if read_line is not None:
-                    native_roi = scale_box(roi, from_resolution=(1280, 720), to_resolution=resolution)
-                    line = [self._baseline_result(item, resolution) for item in read_line(path, native_roi)]
-                    candidates = [item for item in line if amount(item) is not None]
-                    source = "line_roi"
-                    if not candidates:
-                        from .settlement import locate_number_line
+                    from .settlement import locate_number_line
 
-                        tight_roi = locate_number_line(image, roi)
-                        if tight_roi is not None:
-                            native_roi = scale_box(tight_roi, from_resolution=(1280, 720), to_resolution=resolution)
-                            line = [self._baseline_result(item, resolution) for item in read_line(path, native_roi)]
-                            candidates = [item for item in line if amount(item) is not None]
-                            source = "glyph_line_roi"
+                    # Line OCR reports the requested crop as its bbox. The broad
+                    # row crop cannot prove that its text came from the amount
+                    # beside this icon; only localized glyphs can do that.
+                    tight_roi = locate_number_line(image, roi)
+                    if tight_roi is not None:
+                        native_roi = scale_box(tight_roi, from_resolution=(1280, 720), to_resolution=resolution)
+                        line = [self._baseline_result(item, resolution) for item in read_line(path, native_roi)]
+                        candidates = [item for item in line if amount(item) is not None]
+                        source = "glyph_line_roi"
             if len(candidates) == 1:
                 item = candidates[0]
                 loot[name] = amount(item)

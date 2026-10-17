@@ -393,9 +393,8 @@ class SparseSettlementNumberTests(unittest.TestCase):
         self.assertEqual(result["bonus"], {"gold": 0, "elixir": 0, "dark_elixir": 0})
         self.assertEqual(result["evidence"]["loot"]["gold"]["source"], "glyph_line_roi")
         self.assertEqual(result["evidence"]["loot"]["gold"]["text"], "0")
-        self.assertEqual(provider.recognize_line.call_count, 2)
-        wide, tight = [call.args[1] for call in provider.recognize_line.call_args_list]
-        self.assertGreater(wide[2] - wide[0], 7 * (tight[2] - tight[0]))
+        self.assertEqual(provider.recognize_line.call_count, 1)
+        tight = provider.recognize_line.call_args.args[1]
         self.assertEqual(tight, (1284, 682, 1332, 730))
 
     def test_glyph_localization_alone_never_assigns_zero(self):
@@ -412,7 +411,7 @@ class SparseSettlementNumberTests(unittest.TestCase):
         self.assertIsNone(locate_number_line(image, (479, 328, 672, 379)))
         result, provider = self.result(image=image)
         self.assertIsNone(result["loot"]["gold"])
-        self.assertEqual(provider.recognize_line.call_count, 1)
+        provider.recognize_line.assert_not_called()
 
     def test_conflicting_loot_readings_remain_unknown_without_preferred_reread(self):
         values = [OCRText("0", .999, (640, 339, 668, 367)), OCRText("10", .99, (640, 339, 668, 367))]
@@ -695,6 +694,32 @@ class BackgroundMergedSettlementTitleTests(unittest.TestCase):
         self.assertEqual(anchor["text"], "您得到了")
         self.assertEqual(sum(call.args[1] == self.title_roi for call in provider.recognize_line.call_args_list), 1)
 
+    def test_background_level_near_row_does_not_conflict_with_icon_adjacent_loot(self):
+        elixir = next(item for item in self.texts if item.text == "3470")
+        # The live two-row settlement exposed a tiny hero level behind this row:
+        # baseline box (520, 394, 530, 402), far from the elixir icon at x=674.
+        background_level = OCRText("80", .99998, (520, 394, 530, 402))
+        result, _ = self.replay(texts=self.texts + [background_level])
+        self.assertEqual(result["loot"]["elixir"], 3470)
+        self.assertEqual(result["evidence"]["layout"], "regular_defeat_gold_elixir_only_v1")
+
+        # Frame 133's actual amount and boxes, on the existing anonymized row image.
+        current_amount = replace(elixir, text="556", bbox=(606, 390, 670, 426))
+        result, _ = self.replay(texts=[current_amount if item is elixir else item for item in self.texts]
+                                + [background_level])
+        self.assertEqual(result["loot"]["elixir"], 556)
+        self.assertEqual(result["evidence"]["layout"], "regular_defeat_gold_elixir_only_v1")
+
+        missing_amount = [item for item in self.texts if item is not elixir] + [background_level]
+        result, _ = self.replay(texts=missing_amount)
+        self.assertIsNone(result["loot"]["elixir"])
+        self.assertIsNone(result["evidence"]["layout"])
+
+        adjacent_conflict = self.texts + [background_level, replace(elixir, text="3471")]
+        result, _ = self.replay(texts=adjacent_conflict)
+        self.assertIsNone(result["loot"]["elixir"])
+        self.assertIsNone(result["evidence"]["layout"])
+
     def test_merged_prefix_alone_or_weak_conflicting_line_never_supplies_zero(self):
         good = self.title[0]
         variants = [[], [replace(good, text="您得到了KISTAN")], [replace(good, text="您没有得到")],
@@ -736,4 +761,65 @@ class BackgroundMergedSettlementTitleTests(unittest.TestCase):
             cv2.imencode(".png", image)[1].tofile(path)
             result, _ = self.replay(path=path)
         self.assertIn("received", result["evidence"]["anchors"])
+        self.assertIsNone(result["evidence"]["layout"])
+
+
+class HeroLevelSettlementFixtureTests(unittest.TestCase):
+    root = Path(__file__).resolve().parents[1]
+    provenance = root / "tests/fixtures/settlement-hero-level-background-18_647_2.provenance.json"
+
+    def setUp(self):
+        self.metadata = json.loads(self.provenance.read_text(encoding="utf-8"))
+        self.path = self.provenance.parent / self.metadata["fixture"]
+        self.assertEqual(hashlib.sha256(self.path.read_bytes()).hexdigest(), self.metadata["fixture_sha256"])
+        self.assertFalse(self.metadata["formal_training_data"])
+        self.assertEqual(self.metadata["source_frame"], "00133-battle-settlement.png")
+        self.texts = [OCRText(row["text"], row["confidence"], tuple(row["bbox"]))
+                      for row in self.metadata["recorded_ocr"]]
+
+    def replay(self, texts, *, path=None, broad_level=False):
+        gold = self.metadata["recorded_gold_glyph_reread"]
+        provider = Mock()
+
+        def read_line(_path, roi):
+            if broad_level and roi[2] - roi[0] > 200 and 760 <= roi[1] <= 790:
+                return [OCRText("80", .99998, roi)]
+            if roi[2] - roi[0] < 100 and 650 <= roi[1] <= 740:
+                return [OCRText(gold["text"], gold["confidence"],
+                                tuple(value * 2 for value in gold["bbox"]))]
+            return []
+
+        provider.recognize_line.side_effect = read_line
+        return ScreenshotRecognizer(provider=provider)._settlement_observation(
+            self.path if path is None else path, texts, (2560, 1440))
+
+    def test_recorded_frame_133_amount_excludes_background_hero_level(self):
+        self.assertIn("80", [item.text for item in self.texts])
+        self.assertIn("556", [item.text for item in self.texts])
+        result = self.replay(self.texts)
+        self.assertEqual(result["loot"], {"gold": 0, "elixir": 556, "dark_elixir": 0})
+        self.assertEqual(result["bonus"], {"gold": 0, "elixir": 0, "dark_elixir": 0})
+        self.assertEqual(result["evidence"]["loot"]["elixir"]["source"], "full_ocr")
+        self.assertEqual(result["evidence"]["loot"]["gold"]["source"], "glyph_line_roi")
+        self.assertEqual(result["evidence"]["layout"], "regular_defeat_gold_elixir_only_v1")
+
+    def test_distant_level_cannot_substitute_for_amount_or_hide_nearby_conflict(self):
+        actual = next(item for item in self.texts if item.text == "556")
+        without_amount = self.replay([item for item in self.texts if item is not actual])
+        self.assertIsNone(without_amount["loot"]["elixir"])
+        self.assertIsNone(without_amount["evidence"]["layout"])
+        with_conflict = self.replay(self.texts + [replace(actual, text="557")])
+        self.assertIsNone(with_conflict["loot"]["elixir"])
+        self.assertIsNone(with_conflict["evidence"]["layout"])
+
+    def test_broad_line_ocr_cannot_promote_distant_level_when_amount_is_missing(self):
+        actual = next(item for item in self.texts if item.text == "556")
+        image = cv2.imdecode(np.fromfile(self.path, np.uint8), cv2.IMREAD_COLOR)
+        image[775:855, 1200:1344] = 0  # remove only the visible 556, leaving the distant 80
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "missing-amount.png"
+            cv2.imencode(".png", image)[1].tofile(path)
+            result = self.replay([item for item in self.texts if item is not actual],
+                                 path=path, broad_level=True)
+        self.assertIsNone(result["loot"]["elixir"])
         self.assertIsNone(result["evidence"]["layout"])

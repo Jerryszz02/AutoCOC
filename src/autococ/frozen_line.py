@@ -438,12 +438,15 @@ def _closed_dragon_card_border_primary_18_647_2(current: Any,
                               "connected_pixels": len(connected)}}
 
 
-def _closed_dragon_shifted_gray_border_18_647_2(
-        current: Any, bbox: tuple[int, int, int, int]) -> dict | None:
-    """Prove the sampled 88px spent card whose physical left rim moved one pixel.
+def _closed_dragon_gray_outline_18_647_2(
+        current: Any, bbox: tuple[int, int, int, int], *,
+        source_width: int, physical_left_offset: int,
+        left_band_min: int, right_band_max: int, method: str) -> dict | None:
+    """Prove one exact source-slot geometry with a complete gray outline.
 
-    The source slot and count ROI stay fixed. This is a separate complete gray
-    outline proof, not a tolerance added to the existing strong-edge shape.
+    Both renderings keep their source bbox/count ROI fixed. Only their measured
+    physical rim and side-band cutoffs differ; the connected upper and lower
+    outline requirements are shared.
     """
     from collections import deque
 
@@ -451,8 +454,8 @@ def _closed_dragon_shifted_gray_border_18_647_2(
     import numpy as np
 
     source_left, top, right, bottom = bbox
-    left = source_left - 1
-    if (current.shape[:2] != (720, 1280) or right - source_left != 88 or
+    left = source_left + physical_left_offset
+    if (current.shape[:2] != (720, 1280) or right - source_left != source_width or
             not (590 <= top <= 600 and 705 <= bottom <= 715) or
             left < 2 or right >= 1278):
         return None
@@ -464,11 +467,22 @@ def _closed_dragon_shifted_gray_border_18_647_2(
         return [float(np.median(band)) for band in np.array_split(side[625:695, x], 7)]
 
     left_bands, right_bands = bands(left), bands(right - 1)
-    # The left rim must be uniquely at source_left-1. The two adjacent columns
-    # cannot independently satisfy the same seven-band edge proof.
-    if (min(left_bands) < 175 or max(left_bands) > 300 or
-            min(bands(source_left)) >= 175 or min(bands(source_left + 1)) >= 175 or
-            max(right_bands) > -160 or min(right_bands) < -300):
+    if (min(left_bands) < left_band_min or max(left_bands) > 300 or
+            max(right_bands) > right_band_max or min(right_bands) < -300):
+        return None
+    if physical_left_offset == -1:
+        # Preserve the original 88px shifted-rim uniqueness gate exactly.
+        if min(bands(source_left)) >= 175 or min(bands(source_left + 1)) >= 175:
+            return None
+    else:
+        # The 89px source and physical rims coincide. Neither neighboring
+        # column on either side may independently prove the same straight rim.
+        if (min(bands(left - 1)) >= left_band_min or
+                min(bands(left + 1)) >= left_band_min or
+                max(bands(right - 2)) <= right_band_max or
+                max(bands(right)) <= right_band_max):
+            return None
+    if physical_left_offset not in (-1, 0):
         return None
     hsv = cv2.cvtColor(current, cv2.COLOR_BGR2HSV)
     inner = hsv[top + 32:bottom - 20, left + 20:right - 20]
@@ -577,10 +591,10 @@ def _closed_dragon_shifted_gray_border_18_647_2(
         bottom_bands.append(min(strengths))
     if min(bottom_bands) < 100:
         return None
-    return {"method": "18.647.2_dragon_shifted_gray_closed_card",
+    return {"method": method,
             "source_card_bbox": list(bbox),
             "physical_card_bbox": [left, top, right, bottom],
-            "physical_offset_from_source": [-1, 0, 0, 0],
+            "physical_offset_from_source": [physical_left_offset, 0, 0, 0],
             "left_side_bands": left_bands, "right_side_bands": right_bands,
             "gray_inner_saturation_median": float(np.median(inner[:, :, 1])),
             "gray_inner_value_median": float(np.median(inner[:, :, 2])),
@@ -596,12 +610,33 @@ def _closed_dragon_shifted_gray_border_18_647_2(
                               "bottom_inner_gradient_min": min(bottom_bands)}}
 
 
+def _closed_dragon_shifted_gray_border_18_647_2(
+        current: Any, bbox: tuple[int, int, int, int]) -> dict | None:
+    """Prove the sampled 88px spent card with its physical left rim at -1."""
+    return _closed_dragon_gray_outline_18_647_2(
+        current, bbox, source_width=88, physical_left_offset=-1,
+        left_band_min=175, right_band_max=-160,
+        method="18.647.2_dragon_shifted_gray_closed_card")
+
+
+def _closed_dragon_exact_gray_border_18_647_2(
+        current: Any, bbox: tuple[int, int, int, int]) -> dict | None:
+    """Prove the sampled 89px spent card at its exact frozen source slot."""
+    return _closed_dragon_gray_outline_18_647_2(
+        current, bbox, source_width=89, physical_left_offset=0,
+        left_band_min=170, right_band_max=-140,
+        method="18.647.2_dragon_exact_gray_closed_card")
+
+
 def _closed_dragon_card_border_18_647_2(current: Any,
                                          bbox: tuple[int, int, int, int]) -> dict | None:
     original = _closed_dragon_card_border_primary_18_647_2(current, bbox)
     if original is not None:
         return original
-    return _closed_dragon_shifted_gray_border_18_647_2(current, bbox)
+    shifted = _closed_dragon_shifted_gray_border_18_647_2(current, bbox)
+    if shifted is not None:
+        return shifted
+    return _closed_dragon_exact_gray_border_18_647_2(current, bbox)
 
 
 def _post_troop_reading(session: Any, post_path: Any, source_path: str,
