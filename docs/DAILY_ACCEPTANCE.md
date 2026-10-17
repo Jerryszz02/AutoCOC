@@ -1,5 +1,7 @@
 # 日常助手交付与实机证据
 
+最新限次实测 `a07d2fa /20261017-031053-174268-aaee6d94` 在两个目标的边界检查停止：36 帧、7 次菜单点击、2 次返回、97.360 秒，满编零加兵，**零投放、技能、结算和完整战斗**。第二目标第 29 帧尚未选中，30/31 帧已选中但未通过边界检测。独立像素复核确认各帧均缺少通过外沿检查的完整边界对；未证实误拒，保留门槛与失败结果。自动回村库存 **21,882,337 / 8,266,057 / 410,714 / 227**，根独立对账净 **−3,400 / 0 / 0 / 0**，与两次搜索费一致，累计确认开发搜索费 **153,000**。原回执 `inventory_reconciled=false` 和任务失败均保留；不计红血技能或连续验收。审计 `diagnostics/mixed-battle-031053-root-v1.json`（SHA-256 `695fc2f3e16b8557def79a19a72d169e1cdf08b9832e2ef9430ce3743c5a2c6d`）。
+
 项目内 `collect-picker` 已在干净提交 `bf13c1d` 完成新实机采集（0304）：38.854 秒、11 张原帧、6 次菜单点击和 2 次滑动，取得 3 页兵种及法术首屏；四类军队容量、单位及数量前后相同，选中行像素稳定。真实导入 `E:/projects/AutoCOC-training/candidates/picker-20261017-0304-project-v1` 得到 4 张原字节候选、1 个来源组，标签 null、审核 pending、人审/训练就绪/正式验收均 false。根审计 `diagnostics/project-picker-0304-root-v1.json`（SHA-256 `ccc9db0b023f724b7094cbd6192c46d9957fa2f10ed1e013f00e1bcf69c86677`）绑定全部原帧、事件、采集模块/校准资产及导入文件；未改变原始证据。分页到配置上限，不宣称已遍历全部兵种；GUI 仍只有离线测试。结束在军队页，不能计完整日常或战斗验收。
 
 红血、日常预算与项目内采集工具最终组合回归 **465 passed、51 skipped、280 subtests passed**，另 **3** 个预算测试通过。测试收据 `pytest-warden-budget-picker-final-v2-20261017.json`（`2cc46fa281ced733c0139cffc6600b236e019ed53f52b3ada4806ef77b924e66`）；独立审查收据 `diagnostics/warden-budget-picker-independent-review-v1.json`（`e4cb7ee610075ee172af256280df2c0a9d40fc12cc1c5cca262b9d1390140399`），两项已确认 P2 已修、无剩余已确认 P1/P2。实际原图回放收据 `diagnostics/warden-red-023658-original-replay-v1.json`（`c8adc38fbe5889b015b11100ecce9428a787dd44df0d6baf2dd32ca7879b38d1`）只证明当前像素识别，未模拟或实施游戏技能输入，不追补正式实机成功。
