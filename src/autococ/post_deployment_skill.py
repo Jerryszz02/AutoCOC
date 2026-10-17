@@ -23,6 +23,7 @@ CLIENT_VERSION = "18.647.2"
 HERO_ID = "grand_warden"
 FRESH_SECONDS = 8.0  # Existing manual sampler's capture-to-input bound.
 MAX_AFTER_FRAMES = 2
+MAX_EXTRA_BEFORE_FRAMES = 2
 SETTLEMENT_RESERVE_SECONDS = 90.0
 STABILIZATION_TRANSLATION_LIMIT = 4.0  # Read-only retry only; an input still needs the original <3 proof.
 
@@ -64,6 +65,7 @@ def _frame(session: Any, snapshot: Any, *, previous: Any | None = None,
             or (after_input is not None and captured <= after_input)
             or (previous is not None and
                 (captured <= previous.observations.get("requested_at_monotonic", math.inf)
+                 or observed <= previous.observations.get("observed_at_monotonic", math.inf)
                  or str(snapshot.screenshot_path) == str(previous.screenshot_path)))):
         raise FlowError("Skill frame source, version, display geometry or capture order is unverified")
     return {"frame": str(snapshot.screenshot_path), "sha256": _sha(snapshot.screenshot_path),
@@ -163,44 +165,79 @@ def execute_post_deployment_hero_skill(
             session.check_deadline()
             time.sleep(min(.1, max(0., delay_sec - (time.monotonic() - start))))
         session.check_deadline()
+        if (session.capture.input_display_id != display_id or session.client_version != CLIENT_VERSION
+                or _sha(source_path) != source_sha):
+            return fail("deployment_source_or_display_changed")
         _foreground(session)
         fresh = session.observe("post-deployment-skill-before", purpose="full")
         latest = fresh
         before = _frame(session, fresh, previous=deployed)
+        session.check_deadline()
+        _foreground(session)
         receipt["evidence"].append(before["frame"])
         receipt["before"] = before
         if fresh.scene == "settlement":
             return fail("battle_already_settled")
-        if (_sha(source_path) != source_sha or session.capture.input_display_id != display_id):
+        if (_sha(source_path) != source_sha or before["sha256"] == source_sha
+                or session.capture.input_display_id != display_id or session.client_version != CLIENT_VERSION):
             return fail("deployment_source_or_display_changed")
         motion = measure_camera_motion(source_path, fresh.screenshot_path)
         receipt["camera_motion"] = motion
-        if not _minimum_zoom_motion(motion):
+        first_strict = _minimum_zoom_motion(motion)
+        attempts = [{"index": 1, "frame": before, "motion": motion,
+                     "strict_motion_verified": first_strict}]
+        receipt["before_attempts"] = attempts
+        if not first_strict:
             if not _bounded_stabilization_candidate(motion):
                 return fail("camera_not_strictly_stationary")
             receipt["stabilization"] = {"first": before, "first_motion": motion,
                                         "status": "one_read_only_observation_pending"}
-            session.check_deadline()
-            if time.monotonic() >= min(session.deadline, session.task_deadline) - SETTLEMENT_RESERVE_SECONDS:
-                return fail("insufficient_settlement_reserve_for_stabilization")
-            _foreground(session)
-            second = session.observe("post-deployment-skill-stabilized-before", purpose="full")
-            latest = second
-            second_seen = _frame(session, second, previous=fresh)
-            receipt["evidence"].append(second_seen["frame"])
-            receipt["stabilization"]["second"] = second_seen
-            if second.scene == "settlement":
-                return fail("battle_already_settled")
-            if (_sha(source_path) != source_sha or _sha(fresh.screenshot_path) != before["sha256"]
-                    or session.capture.input_display_id != display_id):
-                return fail("stabilization_source_or_display_changed")
-            second_motion = measure_camera_motion(fresh.screenshot_path, second.screenshot_path)
-            receipt["stabilization"]["second_motion"] = second_motion
-            if not _minimum_zoom_motion(second_motion):
-                return fail("camera_not_strictly_stationary_after_one_observation")
-            receipt["stabilization"]["status"] = "strict_motion_verified"
-            fresh, before = second, second_seen
-            receipt["before"] = before
+            seen_paths = {str(source_path), before["frame"]}
+            seen_hashes = {source_sha, before["sha256"]}
+            for extra in range(1, MAX_EXTRA_BEFORE_FRAMES + 1):
+                session.check_deadline()
+                if time.monotonic() >= min(session.deadline, session.task_deadline) - SETTLEMENT_RESERVE_SECONDS:
+                    return fail("insufficient_settlement_reserve_for_stabilization")
+                if session.capture.input_display_id != display_id or session.client_version != CLIENT_VERSION:
+                    return fail("stabilization_source_or_display_changed")
+                if (_sha(source_path) != source_sha or _sha(fresh.screenshot_path) != before["sha256"]):
+                    return fail("stabilization_source_or_display_changed")
+                _foreground(session)
+                session.check_deadline()
+                label = ("post-deployment-skill-stabilized-before" if extra == 1
+                         else "post-deployment-skill-stabilized-before-3")
+                observed = session.observe(label, purpose="full")
+                latest = observed
+                current = _frame(session, observed, previous=fresh)
+                session.check_deadline()
+                _foreground(session)
+                receipt["evidence"].append(current["frame"])
+                receipt["stabilization"]["second" if extra == 1 else "third"] = current
+                if observed.scene == "settlement":
+                    return fail("battle_already_settled")
+                if (_sha(source_path) != source_sha or _sha(fresh.screenshot_path) != before["sha256"]
+                        or session.capture.input_display_id != display_id or session.client_version != CLIENT_VERSION):
+                    return fail("stabilization_source_or_display_changed")
+                if current["frame"] in seen_paths or current["sha256"] in seen_hashes:
+                    return fail("stabilization_frame_not_new")
+                seen_paths.add(current["frame"])
+                seen_hashes.add(current["sha256"])
+                adjacent_motion = measure_camera_motion(fresh.screenshot_path, observed.screenshot_path)
+                receipt["stabilization"]["second_motion" if extra == 1 else "third_motion"] = adjacent_motion
+                strict = _minimum_zoom_motion(adjacent_motion)
+                attempts.append({"index": extra + 1, "frame": current, "motion": adjacent_motion,
+                                 "strict_motion_verified": strict})
+                fresh, before = observed, current
+                receipt["before"] = before
+                if strict:
+                    receipt["stabilization"]["status"] = "strict_motion_verified"
+                    break
+                if not _bounded_stabilization_candidate(adjacent_motion) or extra == MAX_EXTRA_BEFORE_FRAMES:
+                    receipt["stabilization"]["status"] = "bounded_observations_exhausted"
+                    return fail("camera_not_strictly_stationary_after_one_observation" if extra == 1
+                                else "camera_not_strictly_stationary_after_two_observations")
+                receipt["stabilization"]["status"] = "second_read_only_observation_pending"
+        receipt["selected_current_frame"] = before
         target = _current_warden(session, fresh)
         receipt["target_before"] = target
         state = target.get("state") or {}

@@ -16,6 +16,7 @@ import numpy as np
 from autococ.errors import CaptureError, FlowError, StopRequested
 from autococ.scene import SceneSnapshot
 from autococ.post_deployment_skill import execute_post_deployment_hero_skill
+from autococ import post_deployment_skill as skill_module
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,6 +96,129 @@ class PostDeploymentSkillTests(unittest.TestCase):
                    return_value={"stationary": True}), \
              patch("autococ.post_deployment_skill._minimum_zoom_motion", return_value=True):
             return execute_post_deployment_hero_skill(session, deployed, hero_id=hero_id, delay_sec=delay)
+
+    def execute_with_motions(self, session: FakeSession, deployed: SceneSnapshot, motions: list[dict]):
+        with patch("autococ.post_deployment_skill.foreground_package",
+                   return_value="com.supercell.clashofclans"), \
+             patch("autococ.post_deployment_skill.measure_camera_motion", side_effect=motions):
+            return execute_post_deployment_hero_skill(session, deployed,
+                                                      hero_id="grand_warden", delay_sec=0)
+
+    def test_third_strict_before_frame_can_authorize_one_tap(self):
+        deployed = snapshot(23, deployment=True)
+        session = FakeSession(deployed, [snapshot(25), snapshot(26), snapshot(24), snapshot(27)])
+        latest, receipt = self.execute_with_motions(session, deployed,
+            [camera_motion(3.1, 0), camera_motion(3.2, 0), camera_motion(.2, 0)])
+        self.assertTrue(receipt["verified"])
+        self.assertEqual(latest.screenshot_path, snapshot(27).screenshot_path)
+        self.assertEqual(len(session.taps), 1)
+        self.assertEqual(session.taps[0][0].screenshot_path, snapshot(24).screenshot_path)
+        self.assertEqual([attempt["strict_motion_verified"] for attempt in receipt["before_attempts"]],
+                         [False, False, True])
+        self.assertEqual(receipt["selected_current_frame"]["frame"], str(snapshot(24).screenshot_path))
+        self.assertEqual(receipt["stabilization"]["third"]["frame"], str(snapshot(24).screenshot_path))
+        self.assertEqual(len(receipt["evidence"]), 4)
+
+    def test_third_borderline_observation_exhausts_without_input(self):
+        deployed = snapshot(23, deployment=True)
+        session = FakeSession(deployed, [snapshot(25), snapshot(26), snapshot(24)])
+        _, receipt = self.execute_with_motions(session, deployed,
+            [camera_motion(3.1, 0), camera_motion(3.2, 0), camera_motion(3.3, 0)])
+        self.assertEqual(receipt["reason"], "camera_not_strictly_stationary_after_two_observations")
+        self.assertEqual(len(receipt["before_attempts"]), 3)
+        self.assertNotIn("selected_current_frame", receipt)
+        self.assertEqual(session.frames, [])
+        self.assertEqual(session.taps, [])
+
+    def test_second_motion_must_remain_bounded_before_third_observation(self):
+        bad_motions = [camera_motion(4, 0), camera_motion(3.1, 0, stationary=False),
+                       camera_motion(3.1, 0, inliers=70), camera_motion(3.1, 0, rotation=.003)]
+        for bad in bad_motions:
+            with self.subTest(bad=bad):
+                deployed = snapshot(23, deployment=True)
+                session = FakeSession(deployed, [snapshot(25), snapshot(26), snapshot(24)])
+                _, receipt = self.execute_with_motions(session, deployed,
+                    [camera_motion(3.1, 0), bad])
+                self.assertEqual(receipt["reason"], "camera_not_strictly_stationary_after_one_observation")
+                self.assertEqual(len(session.frames), 1)
+                self.assertEqual(session.taps, [])
+
+    def test_third_ready_frame_without_live_hp_cannot_authorize_tap(self):
+        image = cv2.imdecode(np.fromfile(snapshot(24).screenshot_path, np.uint8), cv2.IMREAD_COLOR)
+        image[573:586, 654:731] = 30
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "third-without-hp.png"
+            cv2.imencode(".png", image)[1].tofile(path)
+            deployed = snapshot(23, deployment=True)
+            third = replace(snapshot(24), screenshot_path=path)
+            session = FakeSession(deployed, [snapshot(25), snapshot(26), third])
+            _, receipt = self.execute_with_motions(session, deployed,
+                [camera_motion(3.1, 0), camera_motion(3.2, 0), camera_motion(.2, 0)])
+        self.assertEqual(receipt["reason"], "current_warden_ready_with_live_hp_unverified")
+        self.assertFalse(receipt["attempted"])
+        self.assertEqual(session.taps, [])
+
+    def test_third_frame_must_be_fresh_and_new(self):
+        offset = [0.0]
+        real_clock = time.monotonic
+        class StaleThird(FakeSession):
+            def observe(self, label, *, purpose="full"):
+                item = super().observe(label, purpose=purpose)
+                if label.endswith("before-3"):
+                    offset[0] = 9.0
+                return item
+        deployed = snapshot(23, deployment=True)
+        session = StaleThird(deployed, [snapshot(25), snapshot(26), snapshot(24)])
+        with patch.object(skill_module.time, "monotonic", side_effect=lambda: real_clock() + offset[0]):
+            _, receipt = self.execute_with_motions(session, deployed,
+                [camera_motion(3.1, 0), camera_motion(3.2, 0), camera_motion(.2, 0)])
+        self.assertEqual(receipt["reason"], "fresh_skill_input_source_stale_or_changed")
+        self.assertEqual(session.taps, [])
+
+        with TemporaryDirectory() as directory:
+            repeat = Path(directory) / "third-repeated-pixels.png"
+            repeat.write_bytes(snapshot(25).screenshot_path.read_bytes())
+            deployed = snapshot(23, deployment=True)
+            session = FakeSession(deployed, [snapshot(25), snapshot(26),
+                                            replace(snapshot(24), screenshot_path=repeat)])
+            _, receipt = self.execute_with_motions(session, deployed,
+                [camera_motion(3.1, 0), camera_motion(3.2, 0)])
+        self.assertEqual(receipt["reason"], "stabilization_frame_not_new")
+        self.assertEqual(session.taps, [])
+
+    def test_third_observation_stop_account_or_display_change_sends_zero_inputs(self):
+        class StopBeforeThird(FakeSession):
+            def observe(self, label, *, purpose="full"):
+                item = super().observe(label, purpose=purpose)
+                if label == "post-deployment-skill-stabilized-before":
+                    self.stop_on_check = self.checks + 2
+                return item
+        deployed = snapshot(23, deployment=True)
+        session = StopBeforeThird(deployed, [snapshot(25), snapshot(26), snapshot(24)])
+        with self.assertRaises(StopRequested):
+            self.execute_with_motions(session, deployed,
+                [camera_motion(3.1, 0), camera_motion(3.2, 0)])
+        self.assertEqual(session.taps, [])
+
+        deployed = snapshot(23, deployment=True)
+        session = FakeSession(deployed, [snapshot(25), snapshot(26), snapshot(24, scene="account_in_use")])
+        with self.assertRaisesRegex(FlowError, "account_in_use"):
+            self.execute_with_motions(session, deployed,
+                [camera_motion(3.1, 0), camera_motion(3.2, 0)])
+        self.assertEqual(session.taps, [])
+
+        class ChangedDisplay(FakeSession):
+            def observe(self, label, *, purpose="full"):
+                item = super().observe(label, purpose=purpose)
+                if label.endswith("before-3"):
+                    self.capture.input_display_id += 1
+                return item
+        deployed = snapshot(23, deployment=True)
+        session = ChangedDisplay(deployed, [snapshot(25), snapshot(26), snapshot(24)])
+        _, receipt = self.execute_with_motions(session, deployed,
+            [camera_motion(3.1, 0), camera_motion(3.2, 0)])
+        self.assertEqual(receipt["reason"], "stabilization_source_or_display_changed")
+        self.assertEqual(session.taps, [])
 
     def test_real_camera_borderline_allows_one_observation_but_empty_hp_never_taps(self):
         deployed = stabilization_snapshot(25, deployment=True)
@@ -176,21 +300,18 @@ class PostDeploymentSkillTests(unittest.TestCase):
 
     def test_second_stabilization_must_be_new_strict_battle_and_keep_reserve(self):
         first = camera_motion(3.1, 0.0)
-        for second, expected in ((camera_motion(3.1, 0.0), "camera_not_strictly_stationary_after_one_observation"),
-                                 (camera_motion(.1, 0.0, inliers=50, matches=100),
-                                  "camera_not_strictly_stationary_after_one_observation")):
-            with self.subTest(second_motion=second):
-                deployed = snapshot(23, deployment=True)
-                session = FakeSession(deployed, [snapshot(25), snapshot(24)])
-                with patch("autococ.post_deployment_skill.foreground_package",
-                           return_value="com.supercell.clashofclans"), \
-                     patch("autococ.post_deployment_skill.measure_camera_motion",
-                           side_effect=[first, second]):
-                    _, receipt = execute_post_deployment_hero_skill(session, deployed,
-                                                                    hero_id="grand_warden", delay_sec=0)
-                self.assertEqual(receipt["reason"], expected)
-                self.assertEqual(session.taps, [])
-                self.assertEqual(len(session.frames), 0)
+        second = camera_motion(.1, 0.0, inliers=50, matches=100)
+        deployed = snapshot(23, deployment=True)
+        session = FakeSession(deployed, [snapshot(25), snapshot(24)])
+        with patch("autococ.post_deployment_skill.foreground_package",
+                   return_value="com.supercell.clashofclans"), \
+             patch("autococ.post_deployment_skill.measure_camera_motion",
+                   side_effect=[first, second]):
+            _, receipt = execute_post_deployment_hero_skill(session, deployed,
+                                                            hero_id="grand_warden", delay_sec=0)
+        self.assertEqual(receipt["reason"], "camera_not_strictly_stationary_after_one_observation")
+        self.assertEqual(session.taps, [])
+        self.assertEqual(len(session.frames), 0)
 
         deployed = snapshot(23, deployment=True)
         session = FakeSession(deployed, [snapshot(25), snapshot(24, scene="unknown")])
@@ -450,14 +571,18 @@ class PostDeploymentSkillTests(unittest.TestCase):
                          "insufficient_settlement_reserve_for_skill")
         self.assertEqual(session.taps, [])
 
+        offset = [0.0]
+        real_clock = time.monotonic
         class StaleFrame(FakeSession):
             def observe(self, label, *, purpose="full"):
                 item = super().observe(label, purpose=purpose)
-                item.observations["observed_at_monotonic"] -= 9
+                offset[0] = 9.0
                 return item
 
         session = StaleFrame(deployed, [snapshot(25)])
-        self.assertEqual(self.execute(session, deployed)[1]["reason"],
+        with patch.object(skill_module.time, "monotonic", side_effect=lambda: real_clock() + offset[0]):
+            _, stale_receipt = self.execute(session, deployed)
+        self.assertEqual(stale_receipt["reason"],
                          "fresh_skill_input_source_stale_or_changed")
         self.assertEqual(session.taps, [])
 
