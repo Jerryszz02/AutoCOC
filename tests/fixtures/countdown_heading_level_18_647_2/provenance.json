@@ -1,0 +1,44 @@
+{
+  "schema": "countdown_heading_level_anonymized_v1",
+  "source_frame_base": "reports/completion-20261015/live/20261017-082113-863838-6581b8fd/frames",
+  "source_frame_name": "00016-line-boundary.png",
+  "source_sha256": "0478686de9aa921c8d6bbff1ab65c81d1db562191d52267b4f16f4bb7d7173d8",
+  "events_sha256": "c9b93f8bc8fc06b032c274b6a812bf96a09bb4478481d5b2f6e098380102f651",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "preserved_xyxy": [
+    1120,
+    16,
+    1400,
+    180
+  ],
+  "preserved_pixel_sha256": "f05a1f38bc6df185e1d61fde3143bc9b8a0051557a39c3e466da9f9dbe1f390e",
+  "output_sha256": "104bb79917cf961c569b09f7ffba259314287f0b4609701f41781b12db6aa84b",
+  "mask": "All BGR pixels outside preserved_xyxy set to zero; PNG is a HUD-only engineering fixture, not a model training sample.",
+  "source_role": "prospective TRAIN candidate; this scene is used here for rule development and is not independent validation.",
+  "recorded_full_ocr_heading_and_timer": [
+    {
+      "text": "20开战倒计时",
+      "confidence": 0.91943,
+      "bbox": [
+        570,
+        12,
+        680,
+        39
+      ]
+    },
+    {
+      "text": "12秒",
+      "confidence": 0.99925,
+      "bbox": [
+        602,
+        34,
+        678,
+        78
+      ]
+    }
+  ],
+  "recorded_full_ocr_source": "same-capture recognition_enrichment"
+}

@@ -12,6 +12,8 @@ R-card 首个 Agent 原型已完成 35 帧/8 窗口/4 独立组冻结、12 epoch
 
 该原型随后发现负事件窗口含输入前可用帧的语义问题；v2 Agent 草案已保留分组和帧字段完成分窗修订，但旧验证正窗的采样间隔仍不足。旧指标仅作过程记录；现新增 233306 独立连续 val，另建 34 帧 train/val-only Agent 原型快照（18/16 帧、2/2 组），旧 test 单独不透明封存。v2 已完成 12 epoch、16/16 ONNX parity 与 val 评估，仍为 0 TP/2 FN；ONNX 与 v1 相同，不能称为权重改进。逐帧诊断确认新 val 可用帧均低于 .95，旧 val 无有效连续对子；保持运行禁用与原 T6。详见训练工具说明。
 
+S 场景 recipe3 控制实验已实际训练、导出和验证：保持 **43 train / 9 val / 11 test**、原 split/seed/预处理及运行阈值，12 epoch 后选择 epoch 4，验证 NLL **0.275131**；完整流水线 73.67 秒。ONNX parity **9/9**、最大误差 **5.72e−6**，导出模型与 recipe2 **字节相同**（`bb7e8fbcae94ea5b2ec04b5fa89fc2663774d4bdcb51d25837e4aab3ac02652f`），运行门下仍仅 **2/9 接受、7/9 拒绝**，没有质量提升。验证只覆盖 battle/enemy_village/settlement，原始宏 F1=1 不代表全类别通过；保持 prototype/unvalidated/runtime disabled。test 仅由标准快照校验读取图像哈希和标注一致性，未训练、推理、评估或用于选择；不改变 R held-out 的不透明封存。审计 `diagnostics/s-scene-recipe3-control-root-v1.json`（`27b49edf1f00f4ace81797f148a57d2d74e479bb576fb49a5bb032e14c4417b3`）；人工复核仍未完成。
+
 ## 1. 为什么拆出本计划
 
 主计划已经规定战前规划、连续投放、0.5 秒完整动作目标和模型分工，但尚缺数据准入、训练配方、导出兼容性和模型级验收步骤。本次补齐这些实施细节，并把“首轮同时积累前戏素材”的新要求落实到数据流程。

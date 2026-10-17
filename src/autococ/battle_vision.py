@@ -165,6 +165,32 @@ def preparation_label_line_recovery_candidate(snapshot: SceneSnapshot,
         return None
     items = _preparation_countdown_items(snapshot, baseline_resolution, 0)
     anchors, candidates = _preparation_countdown_candidates(items, baseline_resolution)
+    if not anchors and not candidates and len(items) == 2:
+        # The opponent hero level can touch the 18.647.2 preparation heading.
+        # Full OCR then emits e.g. "20开战倒计时" as one strong item. Only a
+        # separate exact current-frame title crop may repair that heading.
+        headings = [item for item in items if re.fullmatch(r"[1-9]\d?开战倒计时", item["text"])]
+        if len(headings) == 1:
+            label = headings[0]
+            timer = next(item for item in items if item is not label)
+            box = scale_box(tuple(label["bbox"]), from_resolution=baseline_resolution,
+                            to_resolution=(1280, 720))
+            timer_box = scale_box(tuple(timer["bbox"]), from_resolution=baseline_resolution,
+                                  to_resolution=(1280, 720))
+            title_roi = (588, 10, 690, 41)
+            if (label["confidence"] >= .9 and timer["confidence"] >= .9
+                    and _preparation_seconds(timer["text"]) is not None
+                    and 565 <= box[0] <= 575 and 8 <= box[1] <= 16
+                    and 670 <= box[2] <= 690 and 35 <= box[3] <= 45
+                    and 595 <= timer_box[0] <= 610 and 30 <= timer_box[1] <= 42
+                    and 670 <= timer_box[2] <= 690 and 72 <= timer_box[3] <= 90
+                    and _preparation_timer_aligned(timer_box, title_roi, (1280, 720))):
+                return {"reason": "one_level_merged_heading_and_one_strong_timer",
+                        "frame": str(snapshot.screenshot_path), "raw_label": label,
+                        "timer": timer, "baseline_roi": scale_box(
+                            title_roi, from_resolution=(1280, 720),
+                            to_resolution=baseline_resolution),
+                        "allow_one_trailing_colon": True}
     if len(anchors) != 1 or len(candidates) != 1:
         return None
     label, _ = anchors[0]

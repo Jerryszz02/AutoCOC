@@ -777,12 +777,16 @@ class ScreenshotRecognizer:
             receipt["reason"] = "line_reader_not_unique"
             return
         local = self._baseline_result(reads[0], resolution)
-        if (local.text.strip() != "开战倒计时" or not math.isfinite(local.confidence)
+        title = local.text.strip()
+        if (candidate.get("allow_one_trailing_colon") is True and
+                title in {"开战倒计时：", "开战倒计时:"}):
+            title = "开战倒计时"
+        if (title != "开战倒计时" or not math.isfinite(local.confidence)
                 or not max(.9, self.ocr_config.confidence_threshold) <= local.confidence <= 1
                 or local.bbox is None or any(abs(a - b) > 1 for a, b in zip(local.bbox, roi))):
             receipt["reason"] = "line_reader_not_exact_strong_heading"
             return
-        corrected = {**asdict(local), "frame": str(snapshot.screenshot_path),
+        corrected = {**asdict(local), "text": title, "frame": str(snapshot.screenshot_path),
                      "source": "current_frame_heading_line_roi"}
         snapshot.observations["ocr"].append(corrected)
         receipt.update(status="exact_current_frame_heading", correction=corrected)
