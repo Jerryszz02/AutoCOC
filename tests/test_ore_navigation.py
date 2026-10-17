@@ -615,6 +615,22 @@ class OreNavigationTests(unittest.TestCase):
         self.assertEqual(session.observed, ["home_occluded", "home_visible"])
         self.assertEqual(session.taps, [])
 
+    def test_transition_observation_crossing_budget_reports_deadline_not_stale(self):
+        from autococ.ore_navigation import _observe_transition
+
+        previous = shot("home_occluded", frame_id="previous")
+        current = shot("home_visible", frame_id="current")
+        session = Mock()
+        session.observe.return_value = current
+        session.last_snapshot = current
+        clock = iter((29.0, 31.0))
+        with patch("autococ.ore_navigation.time",
+                   SimpleNamespace(monotonic=lambda: next(clock))):
+            with self.assertRaisesRegex(FlowError, "transition deadline exceeded"):
+                _observe_transition(session, "ore-navigation-current-8", previous, 30.0)
+        session.observe.assert_called_once_with("ore-navigation-current-8", purpose="full")
+        session.check_deadline.assert_called()
+
     def test_stop_during_obstructed_front_wait_has_no_input(self):
         session = FakeSession(["home_occluded", "home_visible"])
         checked = 0

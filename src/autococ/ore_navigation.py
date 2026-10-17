@@ -275,11 +275,13 @@ def _observe_transition(session, label: str, previous, end: float):
         raise FlowError("Ore navigation transition deadline exceeded")
     current = session.observe(label, purpose="full")
     session.check_deadline()
+    if time.monotonic() >= end:
+        raise FlowError("Ore navigation transition deadline exceeded")
     o = current.observations
     prior = previous.observations
     captured = o.get("observed_at_monotonic")
     earlier = prior.get("observed_at_monotonic")
-    if (time.monotonic() >= end or current is not session.last_snapshot
+    if (current is not session.last_snapshot
             or session.client_version != CLIENT_VERSION
             or tuple(session.config.game.baseline_resolution) != BASELINE
             or o.get("account_in_use") is not None
