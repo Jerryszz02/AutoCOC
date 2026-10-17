@@ -19,6 +19,10 @@ PLAN_SCHEMA = "u_capture_plan_v1"
 CAPTURE_SCHEMA = "u_capture_manifest_v1"
 RUN_SCOPE_PLAN_SCHEMA = "u_run_scope_plan_v1"
 RUN_CAPTURE_SCHEMA = "u_run_capture_manifest_v1"
+RUN_PROSPECTIVE_ROLES = {
+    "prospective_continuous_daily_train_candidate_v1": ("train_candidate", "train"),
+    "prospective_u_normal_development_val_v1": ("development_validation", "val"),
+}
 ADJUDICATED_QUEUE_SCHEMA = "u_adjudicated_candidate_queue_v1"
 FRAME_FIELDS = {
     "frame_id", "image", "sha256", "width", "height", "captured_at_utc",
@@ -151,6 +155,19 @@ def _prelaunch_scope_bound(prospective: dict, launch: dict, binding: dict,
                 and binding.get("prospective_plan") == scope)
 
 
+def _prospective_run_split(prospective: dict) -> str:
+    """Map an explicit normal-run declaration to its immutable dataset role."""
+    schema = prospective.get("schema")
+    role = RUN_PROSPECTIVE_ROLES.get(schema) if isinstance(schema, str) else None
+    _need(role is not None and prospective.get("split_role") == role[0],
+          "Unsupported prospective normal-run schema/split role")
+    if role[1] == "val":
+        _need(prospective.get("validation_purpose") == "development_validation"
+              and prospective.get("independent_final_heldout") is False,
+              "Development VAL declaration cannot claim final heldout status")
+    return role[1]
+
+
 def _verify_run_scope_evidence(plan: dict) -> None:
     """Recheck the exact launch/report/scope files behind a derived run queue."""
     evidence = plan.get("source_evidence")
@@ -196,6 +213,13 @@ def _verify_run_scope_evidence(plan: dict) -> None:
           and launch.get("normal_cli") is True
           and launch.get("raw_sampler_installed") is False,
           "Launch proof is not a clean, unchanged normal CLI run")
+    if plan.get("split") == "val":
+        _need(launch.get("kind") == "normal_u_development_val_candidate"
+              and launch.get("split_role") == "development_validation"
+              and launch.get("independent_final_heldout") is False
+              and launch.get("max_battles") == 1
+              and launch.get("max_searches_per_battle") == 3,
+              "Development VAL launch bounds/role are not proven")
     candidates = launch.get("report_candidates")
     _need(isinstance(candidates, list)
           and str(report_path) in {str(Path(item).resolve()) for item in candidates
@@ -216,24 +240,24 @@ def _verify_run_scope_evidence(plan: dict) -> None:
               and module_hash == source_hashes[relative],
               f"Loaded module {name} does not match the run source snapshot")
     prospective_created = prospective.get("created_at_utc")
+    split = _prospective_run_split(prospective)
     _need(prospective.get("source_head") == plan.get("source_head")
-          and prospective.get("split_role") == "train_candidate"
           and prospective.get("declared_before_any_new_session_pixels") is True
           and prospective.get("admitted_to_training") is False
           and prospective.get("human_review") is False
           and prospective.get("raw_sampler_installed") is False
           and prospective.get("normal_cli") is True
           and "U existing post-batch frames" in prospective.get("candidate_uses", []),
-          "Prospective declaration does not preassign this normal run to U TRAIN candidates")
+          "Prospective declaration does not preassign this normal run to U candidates")
     _need(plan.get("created_at_utc") == prospective_created,
           "Derived run plan does not preserve prospective scope creation time")
     _need(_aware_utc(prospective_created, "prospective.created_at_utc") <
           _aware_utc(launch.get("started_at_utc"), "launch.started_at_utc"),
           "Prospective U scope was not established before launch")
-    _need(plan.get("split") == "train" and plan.get("event_group_id") ==
+    _need(plan.get("split") == split and plan.get("event_group_id") ==
           f'u-run:{plan["session_id"]}' and plan.get("battle_id") is None
           and plan.get("layout_id") is None,
-          "Run-scope assignment invents a battle/layout or changes the TRAIN group")
+          "Run-scope assignment invents a battle/layout or changes the declared group")
     _need(launch.get("runtime_binding_path") == str(Path(evidence["binding"]["path"]).resolve())
           and launch.get("runtime_binding_sha256") == evidence["binding"]["sha256"]
           and launch.get("external_files_unchanged") is True,
@@ -243,7 +267,10 @@ def _verify_run_scope_evidence(plan: dict) -> None:
         Path(evidence["prospective"]["path"]).resolve(),
         evidence["prospective"]["sha256"])
     _need(plan.get("prelaunch_scope_binding_verified") is prospective_bound,
-          "Run plan misstates the launch binding of its prospective TRAIN declaration")
+          "Run plan misstates the launch binding of its prospective declaration")
+    if split == "val":
+        _need(prospective_bound,
+              "Development VAL requires complete prelaunch parent/child scope binding")
     launch_files = launch.get("source_files")
     _need(isinstance(launch_files, dict)
           and all(launch_files.get(name) == digest for name, digest in source_hashes.items()),

@@ -2,7 +2,9 @@
 
 ## U 战场目标候选队列
 
-`U` 表示战场单位/单位群的原图框，不是卡槽身份。已预先逐帧规划的采集可通过 `scripts/collect_u_candidates.py --batch <batch.json> --output <新目录>` 建立待复核队列。对事前声明整场 TRAIN 候选用途的普通 CLI 运行，可用 `scripts/produce_u_run_candidates.py --report <run.json> --launch <launch.json> --binding <binding.json> --prospective <声明.json> --output <新目录>` 导入**所有 battle observation 原图**，保留原帧 ID、原图 SHA、时间原值及整场分组；不解码图像或推测目标框。输出为 pending，`boxes` 和 `identity_labels` 均为 null。
+`U` 表示战场单位/单位群的原图框，不是卡槽身份。已预先逐帧规划的采集可通过 `scripts/collect_u_candidates.py --batch <batch.json> --output <新目录>` 建立待复核队列。对事前声明整场 TRAIN 候选用途或明确 development_validation 用途的普通 CLI 运行，可用 `scripts/produce_u_run_candidates.py --report <run.json> --launch <launch.json> --binding <binding.json> --prospective <声明.json> --output <新目录>` 导入**所有 battle observation 原图**，保留原帧 ID、原图 SHA、时间原值及整场分组；不解码图像或推测目标框。输出为 pending，`boxes` 和 `identity_labels` 均为 null。
+
+开发 VAL 使用独立的 `prospective_u_normal_development_val_v1` 声明，要求 parent/child 在采集前绑定精确文件 SHA、整场同组、单场最多三搜；`validation_purpose=development_validation`、`independent_final_heldout=false`。训练选型/早停用过的开发 VAL 不再是最终独立测试，后者必须另留未使用会话。旧 TRAIN 声明和旧数据分配保持不变。
 
 普通运行若未记录 ROI、相机、缩放或阵型事实，可另以 `scripts/adjudicate_u_capture.py --parent-queue <queue.json> --decisions <decisions.json> --output <新目录> --policy prototype` 创建独立派生队列。决策文件须覆盖每张父帧，逐张 admit 或说明原因 quarantine；admit 须分别引用与父队列 SHA、帧 ID、原图 SHA 绑定的 ROI、camera epoch、稳定相机、缩放和 battle/layout 五项外部证据文件（每项含路径与 SHA）。这五份 JSON 仅记录 Agent 实际逐图查看或外部测量后的判断，哈希只证明引用与字节绑定，**不能自动证明**相机稳定、缩放或阵型；目前没有生成这些事实的编辑界面，需要在 CLI 前独立准备。仅接受 `agent_visual` 原型复核，不会改父队列或自动产生单位标签。原始启动前声明、捕获时间或来源证明缺口不能靠后补覆盖层清除。早期 113248 普通运行未把 prospective 声明纳入启动器 `external_files` 与 child binding，仍有 `prelaunch_scope_binding_unverified` 阻断；不能直接导入快照。
 

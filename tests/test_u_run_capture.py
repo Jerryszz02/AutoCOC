@@ -152,6 +152,22 @@ def _bind_prospective_to_launch_and_child(inputs: dict) -> None:
     _json(inputs["launch"], launch)
 
 
+def _development_val_scope(inputs: dict) -> None:
+    prospective = json.loads(inputs["prospective"].read_text(encoding="utf-8"))
+    prospective.update(schema="prospective_u_normal_development_val_v1",
+                       split_role="development_validation",
+                       validation_purpose="development_validation",
+                       independent_final_heldout=False,
+                       scope="synthetic whole-run U development validation")
+    _json(inputs["prospective"], prospective)
+    launch = json.loads(inputs["launch"].read_text(encoding="utf-8"))
+    launch.update(kind="normal_u_development_val_candidate",
+                  split_role="development_validation",
+                  independent_final_heldout=False,
+                  max_battles=1, max_searches_per_battle=3)
+    _json(inputs["launch"], launch)
+
+
 def test_real_schema_producer_keeps_source_ids_bytes_raw_times_and_pending_only(tmp_path):
     inputs, output = _fixture(tmp_path)
     result = _produce(inputs, output)
@@ -220,6 +236,44 @@ def test_future_explicit_launch_binding_of_prospective_is_revalidated(tmp_path):
         load_candidate_queue(output / "queue" / "queue.json")
 
 
+def test_normal_run_development_val_is_full_run_bound_and_pending(tmp_path):
+    inputs, output = _fixture(tmp_path)
+    _development_val_scope(inputs)
+    _bind_prospective_to_launch_and_child(inputs)
+    result = _produce(inputs, output)
+    queue, _, _ = load_candidate_queue(output / "queue" / "queue.json")
+    plan = json.loads((output / "plan.json").read_text(encoding="utf-8"))
+    assert result["split"] == plan["split"] == "val"
+    assert plan["prelaunch_scope_binding_verified"] is True
+    assert plan["event_group_id"] == "u-run:synthetic-normal-run"
+    assert queue["sources"][0]["planned_frame_ids"] == ["source-frame-1", "source-frame-2"]
+    assert {row["split"] for row in queue["frames"]} == {"val"}
+    assert all(row["review_status"] == "pending" and row["boxes"] is None
+               and row["identity_labels"] is None and row["import_blockers"]
+               for row in queue["frames"])
+    assert inputs["home"].name not in {row["source_image_path"] for row in queue["frames"]}
+
+
+def test_development_val_rejects_unbound_or_misdeclared_scope(tmp_path):
+    inputs, output = _fixture(tmp_path)
+    _development_val_scope(inputs)
+    with pytest.raises(CandidateError, match="prelaunch parent/child"):
+        _produce(inputs, output)
+    assert not output.exists()
+    _bind_prospective_to_launch_and_child(inputs)
+    prospective = json.loads(inputs["prospective"].read_text(encoding="utf-8"))
+    prospective["independent_final_heldout"] = True
+    _json(inputs["prospective"], prospective)
+    with pytest.raises(CandidateError, match="final heldout"):
+        _produce(inputs, output)
+    prospective["independent_final_heldout"] = False
+    prospective["split_role"] = "train_candidate"
+    _json(inputs["prospective"], prospective)
+    with pytest.raises(CandidateError, match="schema/split role"):
+        _produce(inputs, output)
+    assert not output.exists()
+
+
 def test_source_drift_is_rejected_after_queue_generation(tmp_path):
     inputs, output = _fixture(tmp_path)
     _produce(inputs, output)
@@ -233,7 +287,7 @@ def test_prospective_or_binding_drift_refuses_production(tmp_path):
     prospective = json.loads(inputs["prospective"].read_text(encoding="utf-8"))
     prospective["declared_before_any_new_session_pixels"] = False
     _json(inputs["prospective"], prospective)
-    with pytest.raises(CandidateError, match="Prospective TRAIN"):
+    with pytest.raises(CandidateError, match="Prospective U"):
         _produce(inputs, output)
     assert not output.exists()
     prospective["declared_before_any_new_session_pixels"] = True

@@ -15,12 +15,11 @@ import zlib
 from .u_candidates import (
     BATCH_SCHEMA, RUN_CAPTURE_SCHEMA, RUN_SCOPE_PLAN_SCHEMA, CandidateError,
     _load_json, _load_jsonl, _need, _prelaunch_scope_bound, _safe_absolute,
-    _safe_rel, _validate_plan,
+    _safe_rel, _validate_plan, _prospective_run_split,
     _write_bytes_new, build_candidate_queue, sha256_bytes, sha256_file,
 )
 
 
-PROSPECTIVE_SCHEMA = "prospective_continuous_daily_train_candidate_v1"
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
@@ -43,17 +42,23 @@ def _json_bytes(value: dict) -> bytes:
                        allow_nan=False) + "\n").encode("utf-8")
 
 
-def _require_prospective(prospective: dict, launch: dict, report: dict) -> None:
-    _need(prospective.get("schema") == PROSPECTIVE_SCHEMA
-          and prospective.get("split_role") == "train_candidate"
-          and prospective.get("declared_before_any_new_session_pixels") is True
+def _require_prospective(prospective: dict, launch: dict, report: dict) -> str:
+    split = _prospective_run_split(prospective)
+    if split == "val":
+        _need(launch.get("kind") == "normal_u_development_val_candidate"
+              and launch.get("split_role") == "development_validation"
+              and launch.get("independent_final_heldout") is False
+              and launch.get("max_battles") == 1
+              and launch.get("max_searches_per_battle") == 3,
+              "Development VAL launch bounds/role are not proven")
+    _need(prospective.get("declared_before_any_new_session_pixels") is True
           and prospective.get("human_review") is False
           and prospective.get("admitted_to_training") is False
           and prospective.get("normal_cli") is True
           and prospective.get("raw_sampler_installed") is False
           and "U existing post-batch frames" in prospective.get("candidate_uses", [])
           and prospective.get("source_head") == launch.get("commit"),
-          "Prospective TRAIN scope is absent or changed")
+          "Prospective U scope is absent or changed")
     created = prospective.get("created_at_utc")
     started = launch.get("started_at_utc")
     try:
@@ -65,6 +70,7 @@ def _require_prospective(prospective: dict, launch: dict, report: dict) -> None:
           "Prospective scope was not established before launch")
     _need(isinstance(launch.get("report_candidates"), list),
           "Launch has no explicit report candidates")
+    return split
 
 
 def _require_runtime(report: dict, report_path: Path, launch: dict,
@@ -177,7 +183,7 @@ def produce_run_candidate_queue(report_path: Path, launch_path: Path,
     _need(paths["report"].parent == source_root.parent,
           "Report is not adjacent to its source run")
     paths["events"] = events_path
-    _require_prospective(prospective, launch, report)
+    split = _require_prospective(prospective, launch, report)
     _require_runtime(report, paths["report"], launch, binding, paths["binding"],
                      sha256_file(paths["binding"]))
     event_rows = _load_jsonl(events_path.read_bytes(), str(events_path))
@@ -190,6 +196,9 @@ def produce_run_candidate_queue(report_path: Path, launch_path: Path,
     prospective_bound = _prelaunch_scope_bound(
         prospective, launch, binding, paths["prospective"],
         evidence["prospective"]["sha256"])
+    if split == "val":
+        _need(prospective_bound,
+              "Development VAL requires complete prelaunch parent/child scope binding")
     run_id = report["run_id"]
     plan = {
         "schema": RUN_SCOPE_PLAN_SCHEMA, "schema_version": 1,
@@ -198,7 +207,7 @@ def produce_run_candidate_queue(report_path: Path, launch_path: Path,
         "created_at_utc": prospective["created_at_utc"],
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "session_id": run_id, "event_group_id": f"u-run:{run_id}",
-        "split": "train", "battle_id": None, "layout_id": None,
+        "split": split, "battle_id": None, "layout_id": None,
         "client_version": version, "source_head": launch["commit"],
         "source_fingerprint_sha256": report["provenance"]["source_fingerprint_sha256"],
         "effective_config_sha256": report["provenance"]["effective_config_sha256"],
@@ -240,7 +249,7 @@ def produce_run_candidate_queue(report_path: Path, launch_path: Path,
         _write_bytes_new(output / "batch.json", _json_bytes(batch))
         result = {
             "schema": "u_run_candidate_producer_result_v1",
-            "source_run_id": run_id, "frames": len(frames), "split": "train",
+            "source_run_id": run_id, "frames": len(frames), "split": split,
             "plan": str(output / "plan.json"),
             "plan_sha256": sha256_file(output / "plan.json"),
             "capture": str(output / "capture.json"),

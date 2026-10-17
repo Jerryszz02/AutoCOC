@@ -45,6 +45,18 @@ class FakeCardModel(FakeModel):
     kind = "r_card"
 
 
+class FakeUModel(FakeModel):
+    kind = "u_position"
+
+    def infer(self, image, roi_bbox, frame, *, target_id, offline_replay):
+        assert offline_replay
+        return [DynamicObservation(self.kind, label, tuple(bbox), confidence,
+                frame.session_id, frame.camera_epoch, frame.frame_id,
+                frame.captured_at_monotonic, tuple(roi_bbox), None,
+                self.model_sha256, self.contract_sha256, frame.source_sha256)
+                for label, bbox, confidence in self.labels.get(frame.frame_id, [])]
+
+
 def window(root, name, truth, *, group=None, split="test"):
     frames = []
     for index in (1, 2, 3):
@@ -120,6 +132,61 @@ def test_u_reviewed_empty_boxes_and_source_bound_positive_freeze():
         negative = u_window(source, "negative")
         assert verify_dynamic_windows(source, [negative], kind="u_position",
                                       prototype_only=True)["frames"] == 3
+
+
+def test_u_evaluation_matches_each_truth_once_by_descending_confidence():
+    with TemporaryDirectory() as temp:
+        root = Path(temp)
+        reviewed = u_window(root, boxes=[
+            {"frame_id": "f2", "label": "troop_group", "bbox": [3, 3, 10, 10]},
+            {"frame_id": "f2", "label": "troop_group", "bbox": [7, 3, 14, 10]},
+        ])
+        # The lower-confidence box is listed first and matches only truth A.
+        # The higher-confidence box matches A best but also overlaps B at IoU .5.
+        # Confidence ordering must give A to the higher score, leaving B unmatched.
+        detections = {"f2": [
+            ("troop_group", [3, 3, 10, 10], .96),
+            ("troop_group", [4, 3, 12, 10], .99),
+        ]}
+        report = evaluate_dynamic(FakeUModel(detections), root, [reviewed],
+                                  prototype_only=True)
+        assert {key: report["metrics"][key] for key in ("tp", "fp", "fn")} == {
+            "tp": 1, "fp": 1, "fn": 1}
+        assert report["metrics"]["inference_failures"] == 0
+
+        # Distinct same-class targets can both match when each has its own box.
+        detections["f2"] = [
+            ("troop_group", [7, 3, 14, 10], .96),
+            ("troop_group", [3, 3, 10, 10], .98),
+        ]
+        report = evaluate_dynamic(FakeUModel(detections), root, [reviewed],
+                                  prototype_only=True)
+        assert {key: report["metrics"][key] for key in ("tp", "fp", "fn")} == {
+            "tp": 2, "fp": 0, "fn": 0}
+
+
+def test_u_evaluation_wrong_class_and_per_frame_match_reset():
+    with TemporaryDirectory() as temp:
+        root = Path(temp)
+        reviewed = u_window(root, boxes=[
+            {"frame_id": "f2", "label": "troop_group", "bbox": [3, 3, 12, 12]},
+            {"frame_id": "f3", "label": "troop_group", "bbox": [12, 12, 17, 17]},
+        ])
+        detections = {"f2": [("hero:king", [3, 3, 12, 12], .99)],
+                      "f3": [("troop_group", [12, 12, 17, 17], .98)]}
+        report = evaluate_dynamic(FakeUModel(detections), root, [reviewed],
+                                  prototype_only=True)
+        assert {key: report["metrics"][key] for key in ("tp", "fp", "fn")} == {
+            "tp": 1, "fp": 1, "fn": 1}
+
+        # A duplicate on f2 is a false positive; its matched truth index
+        # cannot consume the independent truth on f3.
+        detections["f2"] = [("troop_group", [3, 3, 12, 12], .99),
+                            ("troop_group", [3, 3, 12, 12], .96)]
+        report = evaluate_dynamic(FakeUModel(detections), root, [reviewed],
+                                  prototype_only=True)
+        assert {key: report["metrics"][key] for key in ("tp", "fp", "fn")} == {
+            "tp": 2, "fp": 1, "fn": 0}
 
 
 def test_card_requires_known_hero_and_independent_deployment_truth():
