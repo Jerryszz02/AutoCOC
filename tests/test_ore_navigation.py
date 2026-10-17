@@ -8,13 +8,14 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
 import cv2
 import numpy as np
 
-from autococ.errors import FlowError
+from autococ.errors import FlowError, StopRequested
 from autococ.ocr import OCRText
 from autococ.ore_inventory import observe_ore_inventory
 from autococ.ore_navigation import (locate_blacksmith, read_current_ore_inventory,
@@ -81,6 +82,23 @@ class FakeSession:
             raise FlowError("obsolete")
         self.taps.append((tuple(point), reason))
         self.last_snapshot = None
+
+
+def give_each_capture_its_own_path(session: FakeSession, directory: Path) -> None:
+    """Model saved pixels in distinct current captures without changing fixtures."""
+    original = session.observe
+
+    def observe(label, *, purpose="full"):
+        snapshot = original(label, purpose=purpose)
+        if snapshot.scene == "popup":
+            return snapshot  # Ore evidence is already bound to its fixture source path.
+        path = directory / f"{len(session.observed):02d}-{snapshot.screenshot_path.name}"
+        path.write_bytes(snapshot.screenshot_path.read_bytes())
+        fresh = SceneSnapshot(snapshot.scene, snapshot.confidence, path, snapshot.observations)
+        session.last_snapshot = fresh
+        return fresh
+
+    session.observe = observe
 
 
 class OreNavigationTests(unittest.TestCase):
@@ -350,10 +368,77 @@ class OreNavigationTests(unittest.TestCase):
                 self.assertEqual(len(session.taps), 2)
 
     def test_obstructed_home_reobserves_without_click_and_fails_closed(self):
-        session = FakeSession(["home_occluded", "home_failed", "home_occluded"])
-        with self.assertRaises(FlowError):
+        with TemporaryDirectory() as tmp:
+            session = FakeSession(["home_occluded"] * 8)
+            give_each_capture_its_own_path(session, Path(tmp))
+            with patch("autococ.ore_navigation.time.sleep"):
+                with self.assertRaisesRegex(FlowError, "eight current HOME captures"):
+                    read_current_ore_inventory(session)
+            self.assertEqual(len(session.observed), 8)
+            self.assertEqual(session.taps, [])
+
+    def test_three_obstructed_home_captures_then_clear_front_selects_once(self):
+        names = (["home_occluded", "home_failed", "home_occluded", "home_visible",
+                  "home_immediate_after_tap", "selected_delayed_after_tap", "ore_first",
+                  "ore_second", "home_new", "home_visible", "home_old"])
+        with TemporaryDirectory() as tmp:
+            session = FakeSession(names)
+            give_each_capture_its_own_path(session, Path(tmp))
+            with patch("autococ.ore_navigation.time.sleep"), patch(
+                    "autococ.ore_navigation.foreground_package",
+                    return_value=session.config.game.package_name), patch(
+                    "autococ.ore_inventory.foreground_package",
+                    return_value=session.config.game.package_name):
+                result = read_current_ore_inventory(session)
+            self.assertEqual(result["status"], "stable_inventory_read")
+            self.assertEqual(session.observed[:4], names[:4])
+            self.assertEqual([point for point, reason in session.taps
+                              if reason == "Select current visible blacksmith front"], [(759, 207)])
+
+    def test_front_observation_thirty_second_cap_and_nonhome_stop_without_input(self):
+        with TemporaryDirectory() as tmp:
+            session = FakeSession(["home_occluded", "home_visible"])
+            give_each_capture_its_own_path(session, Path(tmp))
+            clock = [time.monotonic()]
+            fake_time = SimpleNamespace(monotonic=lambda: clock[0],
+                                        sleep=lambda _seconds: clock.__setitem__(0, clock[0] + 31))
+            with patch("autococ.ore_navigation.time", fake_time):
+                with self.assertRaisesRegex(FlowError, "front observation deadline"):
+                    read_current_ore_inventory(session)
+            self.assertEqual(session.observed, ["home_occluded"])
+            self.assertEqual(session.taps, [])
+
+        session = FakeSession(["home_occluded", "home_visible"])
+        original = session.observe
+        def nonhome(label, *, purpose="full"):
+            snapshot = original(label, purpose=purpose)
+            if len(session.observed) == 1:
+                return snapshot
+            unknown = SceneSnapshot("unknown", snapshot.confidence,
+                                    snapshot.screenshot_path, snapshot.observations)
+            session.last_snapshot = unknown
+            return unknown
+        session.observe = nonhome
+        with TemporaryDirectory() as tmp:
+            give_each_capture_its_own_path(session, Path(tmp))
+            with patch("autococ.ore_navigation.time.sleep"):
+                with self.assertRaisesRegex(FlowError, "not a current HOME"):
+                    read_current_ore_inventory(session)
+        self.assertEqual(session.observed, ["home_occluded", "home_visible"])
+        self.assertEqual(session.taps, [])
+
+    def test_stop_during_obstructed_front_wait_has_no_input(self):
+        session = FakeSession(["home_occluded", "home_visible"])
+        checked = 0
+        def stop():
+            nonlocal checked
+            checked += 1
+            if checked >= 3:
+                raise StopRequested("requested stop")
+        session.check_deadline = stop
+        with self.assertRaises(StopRequested):
             read_current_ore_inventory(session)
-        self.assertEqual(len(session.observed), 3)
+        self.assertEqual(session.observed, ["home_occluded"])
         self.assertEqual(session.taps, [])
 
 

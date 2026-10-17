@@ -359,6 +359,7 @@ def read_current_ore_inventory(session, *, timeout_sec: float = 90) -> dict:
     if (session.client_version != CLIENT_VERSION or
             tuple(session.config.game.baseline_resolution) != BASELINE):
         raise FlowError("Unsupported blacksmith navigation version or resolution")
+    front_end = min(time.monotonic() + 30, end)
 
     def remaining() -> float:
         session.check_deadline()
@@ -372,9 +373,17 @@ def read_current_ore_inventory(session, *, timeout_sec: float = 90) -> dict:
     completed = False
     try:
         selected = None
-        for attempt in range(3):
+        previous_home = None
+        for attempt in range(8):
             remaining()
-            current = session.observe(f"ore-navigation-current-{attempt + 1}", purpose="full")
+            if time.monotonic() >= front_end:
+                raise FlowError("Blacksmith front observation deadline exceeded")
+            label = f"ore-navigation-current-{attempt + 1}"
+            current = (session.observe(label, purpose="full") if previous_home is None else
+                       _observe_transition(session, label, previous_home, front_end))
+            session.check_deadline()
+            if time.monotonic() >= front_end or not _home(current):
+                raise FlowError("Blacksmith front observation is not a current HOME")
             selected = recognize_selected_blacksmith(
                 current, client_version=session.client_version, line_reader=line_reader)
             if selected is not None:
@@ -383,8 +392,14 @@ def read_current_ore_inventory(session, *, timeout_sec: float = 90) -> dict:
                 raise FlowError("Current selected building is not a verified blacksmith Equipment menu")
             candidate = locate_blacksmith(current, client_version=session.client_version)
             if candidate is None:
-                continue  # At most two further no-input observations for a moving hero.
-            _guard_current(session, current, candidate, end)
+                previous_home = current
+                if attempt < 7:
+                    next_poll = min(time.monotonic() + 1, front_end)
+                    while time.monotonic() < next_poll:
+                        session.check_deadline()
+                        time.sleep(min(.1, max(0, next_poll - time.monotonic())))
+                continue  # The moving hero may uncover the front; never infer its point.
+            _guard_current(session, current, candidate, front_end)
             session.tap(current, tuple(candidate["point"]), reason="Select current visible blacksmith front")
             for selected_attempt in range(3):
                 remaining()
@@ -400,7 +415,7 @@ def read_current_ore_inventory(session, *, timeout_sec: float = 90) -> dict:
                 raise FlowError("Selected building was not verified across three fresh captures")
             break
         if selected is None:
-            raise FlowError("No unique visible blacksmith front across three current HOME captures")
+            raise FlowError("No unique visible blacksmith front across eight current HOME captures")
         _guard_current(session, current, selected, end)
         session.tap(current, tuple(selected["point"]), reason="Open verified blacksmith Equipment menu")
         first = None
