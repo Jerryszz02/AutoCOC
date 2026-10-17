@@ -43,6 +43,11 @@ def test_real_toolbar_provenance_and_current_deployed_templates_are_hash_bound()
     new_queen = current["_queen_template"]
     later = json.loads((FIXTURES / "current_post_hero_005304.provenance.json").read_text(encoding="utf-8"))
     later_sources = {row["path"]: row for row in later["assets"]}
+    latest = json.loads((FIXTURES / "current_post_hero_113248.provenance.json").read_text(encoding="utf-8"))
+    assert latest["source_split"] == "TRAIN"
+    newest_sources = {row["path"]: row for row in latest["assets"]}
+    assert not set(later_sources) & set(newest_sources)
+    later_sources.update(newest_sources)
     skill = json.loads((FIXTURES / "hero_skill_035742_18_647_2.provenance.json").read_text(encoding="utf-8"))
     skill_path = "units/grand_warden_battle_used_035742_18_647_2.png"
     skill_asset = skill["assets"][Path(skill_path).name]

@@ -1,0 +1,95 @@
+{
+  "client_version": "18.647.2",
+  "run": "20261017-113248-916295-c8ee9009",
+  "source_split": "TRAIN",
+  "review": "root agent visual review of original 155/156/157; not human ground truth",
+  "note": "Only deployed identity/closed card/HP; 155 minion prince remains transitional unknown. No model acceptance or human labels.",
+  "derivation": "Decode exact original PNG, resize to 1280x720 with cv2.INTER_AREA; sample source_bbox_1280; fixture zeroes pixels outside y=545..719. No cross-frame recognition.",
+  "assets": [
+    {
+      "unit_id": "archer_queen",
+      "surface": "battle",
+      "path": "units/archer_queen_battle_deployed_113248_156_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261017-113248-916295-c8ee9009/frames/00156-frozen-line-post-recheck.png",
+      "source_bbox_1280": [
+        964,
+        632,
+        1001,
+        674
+      ],
+      "source_card_bbox_1280": [
+        937,
+        595,
+        1026,
+        711
+      ],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "c5c131996da8fe87eee74a8f7a03c9f435b97290166e204dd8132fa59a404fb8",
+      "template_sha256": "fcf46cdbbe684fb42e4c34d7ff8daefe323263709dd66896683a9f36338a5961"
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "battle",
+      "path": "units/minion_prince_battle_deployed_113248_157_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261017-113248-916295-c8ee9009/frames/00157-frozen-line-post-recheck.png",
+      "source_bbox_1280": [
+        864,
+        632,
+        903,
+        675
+      ],
+      "source_card_bbox_1280": [
+        840,
+        595,
+        929,
+        711
+      ],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "a048b0c4518fd54641833833a85044c7d7e3789fcc5ef6a81b65c069af842ffa",
+      "template_sha256": "e935c70893b803d66cdaa93675237d5a3f70f377ed369be218f230dba279d123"
+    }
+  ],
+  "fixtures": {
+    "current_post_hero_113248_00155.png": {
+      "source_frame": "reports/completion-20261015/live/20261017-113248-916295-c8ee9009/frames/00155-frozen-line-post.png",
+      "source_sha256": "16a8f6ac97c5b9bd01be72a98e5a12f66c2efac0a20009c819cf8ae0707d365c",
+      "fixture_sha256": "6676ac6f2f5740c91a98994cf7a109173db1208776a7fc42089f3f7a1929c714",
+      "retained_roi_1280": [
+        0,
+        545,
+        1280,
+        720
+      ],
+      "split": "TRAIN",
+      "status": "agent_visual_prototype"
+    },
+    "current_post_hero_113248_00156.png": {
+      "source_frame": "reports/completion-20261015/live/20261017-113248-916295-c8ee9009/frames/00156-frozen-line-post-recheck.png",
+      "source_sha256": "c5c131996da8fe87eee74a8f7a03c9f435b97290166e204dd8132fa59a404fb8",
+      "fixture_sha256": "b92c539ea639608327dd3e36217900e2b4d4f126814673fd85498b6de5be25ab",
+      "retained_roi_1280": [
+        0,
+        545,
+        1280,
+        720
+      ],
+      "split": "TRAIN",
+      "status": "agent_visual_prototype"
+    },
+    "current_post_hero_113248_00157.png": {
+      "source_frame": "reports/completion-20261015/live/20261017-113248-916295-c8ee9009/frames/00157-frozen-line-post-recheck.png",
+      "source_sha256": "a048b0c4518fd54641833833a85044c7d7e3789fcc5ef6a81b65c069af842ffa",
+      "fixture_sha256": "6fb0a056580590fc73a8bf35677d9af7710471eb1c0fc8da57e644b851e7331d",
+      "retained_roi_1280": [
+        0,
+        545,
+        1280,
+        720
+      ],
+      "split": "TRAIN",
+      "status": "agent_visual_prototype"
+    }
+  }
+}

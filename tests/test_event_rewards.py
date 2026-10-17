@@ -91,6 +91,22 @@ def initial_view_ocr() -> list[dict]:
     )
 
 
+def terminal_view_112226_ocr() -> list[dict]:
+    # Only the reviewed upper-row OCR/geometry is retained. The lower-row
+    # glowy 120 is deliberately not a claim proof in this navigation test.
+    rows = upper_row(
+        ("800", (412, 220, 465, 246)),
+        ("裂隙奖章", (400, 248, 468, 271)),
+        ("120", (724, 220, 766, 245)),
+        ("璀璨矿石", (706, 248, 774, 272)),
+        ("35", (1038, 224, 1058, 242)),
+        ("120", (721, 469, 762, 494)),
+        ("璀璨矿石", (703, 498, 771, 522)),
+    )
+    rows[4]["confidence"] = .98671
+    return rows
+
+
 class FakeSession:
     def __init__(self, snapshots, *, version="18.647.2"):
         self.snapshots = list(snapshots)
@@ -272,7 +288,7 @@ class EventRewardTests(unittest.TestCase):
                 bad = dict(second.observations, **{field: value})
                 self.assertFalse(module._fresh_pair(first, Mock(
                     screenshot_path=Path("second.png"), observations=bad)))
-        self.assertIsNotNone(module._start_position(initial_view_ocr()))
+        self.assertEqual(module._start_position(initial_view_ocr())[0], "100_800")
         obscured_third = [row for row in initial_view_ocr() if row["text"] != "12"]
         self.assertIsNotNone(module._start_position(obscured_third))
         verified = {"position_verified": True, "position_offset_px": -180,
@@ -281,6 +297,70 @@ class EventRewardTests(unittest.TestCase):
         self.assertTrue(module._stable_position(verified, jittered, "shiny"))
         self.assertFalse(module._stable_position(verified,
             {**verified, "position_offset_px": -182}, "shiny"))
+
+    def test_reviewed_112226_terminal_viewport_binds_only_navigation_evidence(self):
+        from autococ import event_rewards as module
+
+        rows = terminal_view_112226_ocr()
+        start = module._start_position(rows)
+        self.assertEqual(start[0], "800_120_35")
+        self.assertEqual(start[1], (438.5, 745))
+        # The old claim position remains unproved on this viewport.
+        self.assertIsNone(module._upper_position(rows)[0])
+        for name, change in (
+            ("missing_35", lambda values: values.pop(4)),
+            ("weak_35", lambda values: values[4].update(confidence=.94)),
+            ("duplicate_800", lambda values: values.append(dict(values[0]))),
+            ("wrong_lower_row_only", lambda values: values[2].update(bbox=[724, 469, 766, 495])),
+            ("wrong_upper_label", lambda values: values[3].update(text="星辉矿石")),
+            ("offset_120", lambda values: values[2].update(bbox=[765, 220, 807, 245])),
+        ):
+            with self.subTest(name=name):
+                modified = json.loads(json.dumps(rows))
+                change(modified)
+                self.assertIsNone(module._start_position(modified))
+
+    def test_terminal_viewport_swipe_is_shiny_only_and_still_needs_old_after_position(self):
+        # This checks the one-swipe control flow with fake observations, not
+        # pixel equivalence to the 112226 frames or a completed live claim.
+        def snapshot(name, ocr, *, positioned=False):
+            return SceneSnapshot("popup", .95, FIXTURES / f"{name}.png", {
+                "ocr": ocr,
+                "event_reward_track": {
+                    "position_verified": positioned,
+                    "position_offset_px": 0 if positioned else None,
+                    "targets": {"shiny": {"visible": positioned},
+                                "glowy": {"visible": False}},
+                },
+            })
+
+        before = lambda: [
+            snapshot("shiny_before", terminal_view_112226_ocr()),
+            snapshot("both_empty", terminal_view_112226_ocr()),
+        ]
+        wrong_target = FakeSession(before())
+        with patch("autococ.event_rewards.foreground_package",
+                   return_value=wrong_target.config.game.package_name), \
+             patch("autococ.event_rewards._require_current", return_value={"status": "unknown"}):
+            rejected = locate_reward_track_position(
+                wrong_target, "glowy", enabled=True, task_id="free_glowy_ore")
+        self.assertEqual(rejected["status"], "unknown")
+        self.assertIn("terminal_viewport_target_not_supported", rejected["reasons"])
+        wrong_target.context.swipe.assert_not_called()
+
+        session = FakeSession(before() + [
+            snapshot("glowy_before", [], positioned=True),
+            snapshot("glowy_animation", [], positioned=True),
+        ])
+        with patch("autococ.event_rewards.foreground_package",
+                   return_value=session.config.game.package_name), \
+             patch("autococ.event_rewards._require_current", return_value={"status": "unknown"}):
+            located = locate_reward_track_position(
+                session, "shiny", enabled=True, task_id="free_shiny_ore")
+        self.assertEqual(located["status"], "positioned")
+        self.assertEqual(located["starting_viewport"], "800_120_35")
+        self.assertEqual(session.context.swipe.call_count, 1)
+        self.assertEqual(session.action_count, 1)
 
     def test_merged_list_text_needs_independent_icon_and_two_position_pairs(self):
         from autococ import event_rewards as module

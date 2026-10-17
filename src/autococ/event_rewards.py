@@ -558,28 +558,42 @@ def close_reward_track(session, *, timeout_sec: float = 20) -> dict:
     raise FlowError("Event reward close did not return to a confirmed home")
 
 
-def _start_position(ocr: object) -> tuple[float, float] | None:
-    """Recognize the one observed 100/800 starting viewport, never guess scroll direction."""
+def _start_position(ocr: object) -> tuple[str, tuple[float, float]] | None:
+    """Bind one reviewed starting viewport before the sole backwards swipe.
+
+    The 800/120 terminal viewport is navigation evidence only: it does not
+    make either old free target visible or claimable.
+    """
     if not isinstance(ocr, list):
         return None
-    centers = []
-    for amount, label in (("100", "璀璨矿石"), ("800", "裂隙奖章")):
-        numbers = _exact(ocr, amount, _UPPER_AMOUNT_ROI)
-        if len(numbers) != 1:
-            return None
-        center = _center_x(numbers[0]["bbox"])
-        labels = [item for item in _exact(ocr, label, _UPPER_LABEL_ROI)
-                  if abs(_center_x(item["bbox"]) - center) <= 22]
-        if len(labels) != 1:
-            return None
-        centers.append(center)
-    # The third slot is partly covered by the trader; only the two complete
-    # amount/name pairs may establish this exact starting viewport.
-    if (not 425 <= centers[0] <= 450
-            or not 730 <= centers[1] <= 755
-            or not 295 <= centers[1] - centers[0] <= 320):
-        return None
-    return tuple(centers)
+    candidates = []
+    for variant, pair_labels, trailing_amount in (
+        ("100_800", (("100", "璀璨矿石"), ("800", "裂隙奖章")), None),
+        ("800_120_35", (("800", "裂隙奖章"), ("120", "璀璨矿石")), "35"),
+    ):
+        centers = []
+        for amount, label in pair_labels:
+            numbers = _exact(ocr, amount, _UPPER_AMOUNT_ROI)
+            if len(numbers) != 1:
+                break
+            center = _center_x(numbers[0]["bbox"])
+            labels = [item for item in _exact(ocr, label, _UPPER_LABEL_ROI)
+                      if abs(_center_x(item["bbox"]) - center) <= 22]
+            if len(labels) != 1:
+                break
+            centers.append(center)
+        if (len(centers) != 2 or not 425 <= centers[0] <= 450
+                or not 730 <= centers[1] <= 755
+                or not 295 <= centers[1] - centers[0] <= 320):
+            continue
+        if trailing_amount is not None:
+            # In 112226 the third label was OCR-merging with the trader, but
+            # its strong number remained independently legible in the upper row.
+            third = _exact(ocr, trailing_amount, _UPPER_AMOUNT_ROI)
+            if len(third) != 1 or not 1035 <= _center_x(third[0]["bbox"]) <= 1065:
+                continue
+        candidates.append((variant, tuple(centers)))
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def _fresh_pair(first, second) -> bool:
@@ -658,9 +672,15 @@ def locate_reward_track_position(session, target: str, *, enabled: bool = False,
             return receipt
         start_a = _start_position(first.observations.get("ocr"))
         start_b = _start_position(second.observations.get("ocr"))
-        if (start_a is None or start_b is None
-                or any(abs(x - y) > 4 for x, y in zip(start_a, start_b))):
+        if (start_a is None or start_b is None or start_a[0] != start_b[0]
+                or any(abs(x - y) > 4 for x, y in zip(start_a[1], start_b[1]))):
             receipt["reasons"].append("starting_viewport_not_independently_bound")
+            return receipt
+        receipt["starting_viewport"] = start_b[0]
+        if start_b[0] == "800_120_35" and target != "shiny":
+            # The observed glowy 120 is a different reward variant. Do not
+            # navigate it as though the original glowy 115 were requested.
+            receipt["reasons"].append("terminal_viewport_target_not_supported")
             return receipt
         if end - time.monotonic() < 15:
             receipt["reasons"].append("insufficient_budget_for_one_swipe_and_after_frames")

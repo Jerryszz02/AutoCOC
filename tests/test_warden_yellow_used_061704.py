@@ -62,7 +62,7 @@ def test_anonymization_and_provenance():
         assert hashlib.sha256(image[y0:y1, x0:x1].tobytes()).hexdigest() == row["retained_pixels_sha256"]
 
 
-def test_anonymous_transition_keeps_original_edge_rejection():
+def test_anonymous_transition_requires_current_used_equipment():
     # Original-frame replay is recorded separately; this portable test uses anonymous fixtures.
     assert _target(BEFORE)["verified"] is True
     assert _target(BEFORE)["state"]["ability_ready"] is True
@@ -76,8 +76,28 @@ def test_anonymous_transition_keeps_original_edge_rejection():
     assert evidence["current_equipment_matches"]["used_card"] is not None
     assert evidence["current_equipment_matches"]["ready_book"] is None
     assert evidence["current_equipment_matches"]["ready_card"] is None
-    assert _target(EDGE)["verified"] is False
-    assert _target(EDGE)["locator"] is None
+
+
+def test_later_frame_meets_current_topology_without_rewriting_historical_failure():
+    # The original run predates the gray-card topology fallback and remains
+    # attempted_unverified. This asserts today's pixel contract, not skill truth.
+    meta = json.loads((FIXTURES / "provenance.json").read_text(encoding="utf-8"))
+    assert meta["source_role"] == "TRAIN_candidate_attempted_unverified"
+    assert meta["no_identity_or_training_truth"] is True
+    target = _target(EDGE)
+    assert target["verified"] is True
+    assert target["locator"]["bbox"] == BOX
+    topology = target["locator"]["gray_used_topology"]
+    assert topology["paired_rows"] == 70
+    assert topology["longest_paired_run"] == 70
+    assert topology["dark_line"]["paired_dark_trough_rows"] >= 45
+    state = target["state"]
+    assert state["ability_used"] is True
+    assert state["ability_ready"] is False
+    assert state["evidence"]["yellow_health_bar"]["frame_support"] == [1., 1., 1., 1.]
+    anchors = state["evidence"]["current_equipment_matches"]
+    assert anchors["used_book"] is not None and anchors["used_card"] is not None
+    assert anchors["ready_book"] is None and anchors["ready_card"] is None
 
 
 def test_yellow_ready_cannot_authorize_input():

@@ -828,6 +828,50 @@
       "client_version": "18.647.2",
       "source_sha256": "07b28a38a067d27d9e5ab90a08cca182ff71a600062a9daea84f7bf0e0ea3979",
       "template_sha256": "a795790cf761cacef62e5d38661f097efdede804a05b1479bed8309caafabbba"
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "battle",
+      "path": "units/archer_queen_battle_deployed_113248_156_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261017-113248-916295-c8ee9009/frames/00156-frozen-line-post-recheck.png",
+      "source_bbox_1280": [
+        964,
+        632,
+        1001,
+        674
+      ],
+      "source_card_bbox_1280": [
+        937,
+        595,
+        1026,
+        711
+      ],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "c5c131996da8fe87eee74a8f7a03c9f435b97290166e204dd8132fa59a404fb8",
+      "template_sha256": "fcf46cdbbe684fb42e4c34d7ff8daefe323263709dd66896683a9f36338a5961"
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "battle",
+      "path": "units/minion_prince_battle_deployed_113248_157_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261017-113248-916295-c8ee9009/frames/00157-frozen-line-post-recheck.png",
+      "source_bbox_1280": [
+        864,
+        632,
+        903,
+        675
+      ],
+      "source_card_bbox_1280": [
+        840,
+        595,
+        929,
+        711
+      ],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "a048b0c4518fd54641833833a85044c7d7e3789fcc5ef6a81b65c069af842ffa",
+      "template_sha256": "e935c70893b803d66cdaa93675237d5a3f70f377ed369be218f230dba279d123"
     }
   ]
 }

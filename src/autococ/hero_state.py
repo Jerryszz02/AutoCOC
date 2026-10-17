@@ -171,6 +171,15 @@ def recognize_hero_state(
     result["selected"] = selected is not None
     evidence["selected_border"] = selected
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    if client_version == "18.647.2" and unit_id != "grand_warden":
+        # The public state reader can receive a caller-supplied box. For this
+        # client, a portrait and HP inside a shifted box are insufficient:
+        # independently close both sides and the bottom of that very card.
+        outline = _current_nonwarden_deployed_card_outline(hsv, gray, box)
+        evidence["current_deployed_card_outline"] = outline
+        if not outline["verified"]:
+            evidence["reason"] = "current_nonwarden_card_not_independently_closed"
+            return result
     health = _health_bar(hsv, gray, pet["bbox"]) if pet is not None else None
     if health is None and unit_id is not None:
         # A deployed card's enclosed HP frame is anchored to the card, while
@@ -405,6 +414,7 @@ def locate_current_deployed_hero_card(
                                 gray[712, left + 8:right - 8].mean())
         gray_used_border = None
         gray_used_topology = None
+        nonwarden_outline = None
         if (unit_id == "grand_warden" and "battle_used_035742" in template_path.name):
             # The used card loses its purple side colour. Its opposite dark
             # outline gradients and closed bottom remain visible in 27-29.
@@ -419,21 +429,53 @@ def locate_current_deployed_hero_card(
                 gray_used_topology = _current_warden_gray_card_topology(gray, left, right)
                 closed = gray_used_topology is not None
         else:
-            closed = min(sides) >= .5
+            if unit_id == "grand_warden":
+                closed = min(sides) >= .5
+            else:
+                nonwarden_outline = _current_nonwarden_deployed_card_outline(
+                    hsv, gray, (left, top, right, bottom))
+                closed = nonwarden_outline["verified"]
         if not closed or bottom_contrast < 40:
             continue
         candidates.append((score, (left, top, right, bottom), sides, bottom_contrast,
-                           str(template_path), gray_used_border, gray_used_topology))
+                           str(template_path), gray_used_border, gray_used_topology,
+                           nonwarden_outline))
     if not candidates:
         return None
-    score, box, sides, bottom_contrast, template_path, gray_used_border, gray_used_topology = max(
+    score, box, sides, bottom_contrast, template_path, gray_used_border, gray_used_topology, nonwarden_outline = max(
         candidates, key=lambda row: row[0])
-    return {"bbox": list(box), "portrait_score": round(score, 5), "template": template_path,
-            "template_client_version": client_version, "frame": str(screenshot_path),
-            "card_sides": sides, "gray_used_border": gray_used_border,
-            "gray_used_topology": gray_used_topology,
+    result = {"bbox": list(box), "portrait_score": round(score, 5), "template": template_path,
+              "template_client_version": client_version, "frame": str(screenshot_path),
+              "card_sides": sides, "gray_used_border": gray_used_border,
+              "gray_used_topology": gray_used_topology, "bottom_contrast": bottom_contrast,
+              "method": "current_versioned_deployed_portrait_and_closed_card"}
+    if nonwarden_outline is not None:
+        result["current_nonwarden_card_outline"] = nonwarden_outline
+    return result
+
+
+def _current_nonwarden_deployed_card_outline(hsv, gray, box: tuple[int, int, int, int]) -> dict:
+    """Prove both directed side edges and the bottom of one current card."""
+    import cv2
+    import numpy as np
+
+    left, top, right, bottom = box
+    if not (3 <= left < right <= 1277 and 80 <= right - left <= 110
+            and 590 <= top <= 605 and 705 <= bottom <= 715):
+        return {"verified": False, "reason": "invalid_card_geometry"}
+    mask = cv2.inRange(hsv, np.array([75, 65, 60]), np.array([170, 255, 255]))
+    sides = [max(float((mask[625:695, edge + shift:edge + shift + 3] > 0).mean())
+                 for shift in (-2, -1, 0, 1, 2)) for edge in (left, right - 3)]
+    direction = np.median(cv2.Sobel(gray[625:695], cv2.CV_32F, 1, 0, ksize=3), axis=0)
+    left_edge = float(max(direction[left - 2:left + 3]))
+    right_edge = float(min(direction[right - 4:right]))
+    bottom_contrast = float(gray[709:711, left + 8:right - 8].mean() -
+                            gray[712, left + 8:right - 8].mean())
+    return {"verified": (min(sides) >= .5 and left_edge >= 150 and
+                         right_edge <= -150 and bottom_contrast >= 40),
+            "card_sides": sides, "directed_side_edges": [left_edge, right_edge],
             "bottom_contrast": bottom_contrast,
-            "method": "current_versioned_deployed_portrait_and_closed_card"}
+            "method": "current_colored_card_paired_directed_edges_and_bottom"}
 
 
 def _current_warden_gray_card_topology(gray, left: int, right: int) -> dict | None:
