@@ -295,8 +295,24 @@ def selected_card_bbox(path, bbox, baseline_resolution=(1280, 720)):
         top_support, selected_top = horizontal(top - 10, top - 2)
         bottom_support, selected_bottom = horizontal(bottom - 5, bottom + 1)
         width, height = selected_right - selected_left + 1, selected_bottom - selected_top + 1
-        if (left_support >= .38 and right_support >= .50 and
-                top_support >= .75 and bottom_support >= .65 and
+        # A one-pixel vertical rim has only ~1/3 mean occupancy in this
+        # three-pixel band. Accept it only if it is a continuous line, and
+        # the other three independent sides are almost solid white.
+        left_band = bright[top + 20 - 565:bottom - 10 - 565,
+                           selected_left - x0 - 1:selected_left - x0 + 2]
+        left_rows = np.any(left_band, axis=1)
+        missing_run = longest_missing_run = 0
+        for present in left_rows:
+            missing_run = 0 if present else missing_run + 1
+            longest_missing_run = max(longest_missing_run, missing_run)
+        thin_continuous_left = (left_band.shape[1] == 3 and len(left_rows) >= 80 and
+                                float(left_rows.mean()) >= .9 and
+                                float(np.mean(left_band, axis=0).max()) >= .9 and
+                                longest_missing_run <= 3 and
+                                right_support >= .90 and top_support >= .90 and
+                                bottom_support >= .90)
+        if ((left_support >= .38 or thin_continuous_left) and
+                right_support >= .50 and top_support >= .75 and bottom_support >= .65 and
                 80 <= width <= 108 and 105 <= height <= 135 and
                 abs((selected_left + selected_right) / 2 - (left + right) / 2) <= 7):
             return scale_box((selected_left, selected_top, selected_right + 1, selected_bottom + 1),

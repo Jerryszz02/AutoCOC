@@ -200,8 +200,10 @@ def test_mixed_filler_checkpoint_requires_third_independent_card(monkeypatch, tm
     elif fault == "duplicate_checkpoint":
         plan = replace(plan, checkpoint_cards=plan.checkpoint_cards[:-1] +
                        (plan.checkpoint_cards[0],))
-    monkeypatch.setattr("autococ.images.read_frame",
-                        lambda _p: np.zeros((1440, 2560, 3), dtype=np.uint8))
+    # Use real synthetic pixels instead of replacing the shared image loader:
+    # a lazy hero_state import could otherwise retain the temporary function.
+    cv2.imencode(".png", np.zeros((1440, 2560, 3), dtype=np.uint8))[1].tofile(
+        current.screenshot_path)
     monkeypatch.setattr("autococ.mixed_probe._current_card_edges", lambda *_a: {"closed": True})
     monkeypatch.setattr("autococ.mixed_probe._count_proves",
                         lambda reading, *_a: bool(reading.get("text")))

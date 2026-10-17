@@ -1,0 +1,202 @@
+{
+  "client_version": "18.647.2",
+  "source_events": "reports/completion-20261015/live/20261017-012659-125068-9a324e9f/events.jsonl",
+  "source_events_sha256": "8ff655162b176939e301926ebb52c71b24f64407bfc53c6a83432bc951e79e5d",
+  "human_reviewed": false,
+  "formal_success": false,
+  "counts_toward_acceptance": false,
+  "retained_native_rectangle_xyxy": [
+    240,
+    1130,
+    500,
+    1440
+  ],
+  "outside_pixel_value": 45,
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "slot_bbox_at_1280x720": [
+    141,
+    595,
+    230,
+    711
+  ],
+  "frames": [
+    {
+      "source_frame": "reports/completion-20261015/live/20261017-012659-125068-9a324e9f/frames/00029-line-boundary.png",
+      "source_sha256": "40f20f3400d18cd56d7d40bbc86b66b1d8514c9de94d549d602e8cfcef9b2ab9",
+      "path": "tests/fixtures/dragon_border_012659_00029.png",
+      "sha256": "55916ad8377692a8688379e9d2dfdc30f0f70895fe32c187a04384dd4851bbef",
+      "selected": false,
+      "cached_scene": "enemy_village",
+      "cached_ocr": [],
+      "cached_fast_count": []
+    },
+    {
+      "source_frame": "reports/completion-20261015/live/20261017-012659-125068-9a324e9f/frames/00034-mixed-dragon-selected-0.png",
+      "source_sha256": "a94ac5d31d6c66c831a6543169c9ad1eec1b6960a2919dd38f53259cf8c6974d",
+      "path": "tests/fixtures/dragon_border_012659_00034.png",
+      "sha256": "cf9a0bce26c66dcfef5baf63159234128f97a130aa56140c0504d8f142dd9fd0",
+      "selected": false,
+      "cached_scene": "battle",
+      "cached_ocr": [
+        {
+          "text": "x1",
+          "confidence": 0.9466,
+          "bbox": [
+            144,
+            593,
+            228,
+            628
+          ],
+          "source": "fast_header_line"
+        }
+      ],
+      "cached_fast_count": [
+        {
+          "count": 1,
+          "confidence": 0.9466,
+          "slot_bbox": [
+            141,
+            595,
+            230,
+            711
+          ],
+          "roi": [
+            144,
+            593,
+            228,
+            628
+          ],
+          "readings": [
+            {
+              "text": "x1",
+              "confidence": 0.9466,
+              "bbox": [
+                144,
+                593,
+                228,
+                628
+              ],
+              "source": "fast_header_line"
+            }
+          ],
+          "portrait_score": 0.9999993443489075,
+          "portrait_scale": 1.0,
+          "portrait_source": "current_frame_saved_battle_portrait"
+        }
+      ]
+    },
+    {
+      "source_frame": "reports/completion-20261015/live/20261017-012659-125068-9a324e9f/frames/00035-mixed-dragon-selected-1.png",
+      "source_sha256": "d1f742d4979913683ae1d6af96489449920ba9f31d4f09da7620f59aa2da4c69",
+      "path": "tests/fixtures/dragon_border_012659_00035.png",
+      "sha256": "354f74ae7210c6f6169e8869efb381f514f24bafa9febbed3f4e52dc1d3940cf",
+      "selected": true,
+      "cached_scene": "battle",
+      "cached_ocr": [
+        {
+          "text": "x1",
+          "confidence": 0.94389,
+          "bbox": [
+            140,
+            585,
+            233,
+            620
+          ],
+          "source": "fast_header_line"
+        }
+      ],
+      "cached_fast_count": [
+        {
+          "count": 1,
+          "confidence": 0.94389,
+          "slot_bbox": [
+            141,
+            595,
+            230,
+            711
+          ],
+          "roi": [
+            140,
+            585,
+            233,
+            620
+          ],
+          "readings": [
+            {
+              "text": "x1",
+              "confidence": 0.94389,
+              "bbox": [
+                140,
+                585,
+                233,
+                620
+              ],
+              "source": "fast_header_line"
+            }
+          ],
+          "portrait_score": 0.9599510431289673,
+          "portrait_scale": 1.1,
+          "portrait_source": "current_frame_saved_battle_portrait"
+        }
+      ]
+    },
+    {
+      "source_frame": "reports/completion-20261015/live/20261017-012659-125068-9a324e9f/frames/00036-mixed-dragon-selected-2.png",
+      "source_sha256": "588c99706298e9db6ef9e2133cb4bd904e3421d2103e22ed2cda9bd7332848f1",
+      "path": "tests/fixtures/dragon_border_012659_00036.png",
+      "sha256": "e2ad26f8be594e050d67d287f9706135df04876e4392d1d256a4be89900fdf77",
+      "selected": true,
+      "cached_scene": "battle",
+      "cached_ocr": [
+        {
+          "text": "x1",
+          "confidence": 0.94408,
+          "bbox": [
+            140,
+            585,
+            233,
+            620
+          ],
+          "source": "fast_header_line"
+        }
+      ],
+      "cached_fast_count": [
+        {
+          "count": 1,
+          "confidence": 0.94408,
+          "slot_bbox": [
+            141,
+            595,
+            230,
+            711
+          ],
+          "roi": [
+            140,
+            585,
+            233,
+            620
+          ],
+          "readings": [
+            {
+              "text": "x1",
+              "confidence": 0.94408,
+              "bbox": [
+                140,
+                585,
+                233,
+                620
+              ],
+              "source": "fast_header_line"
+            }
+          ],
+          "portrait_score": 0.9599510431289673,
+          "portrait_scale": 1.1,
+          "portrait_source": "current_frame_saved_battle_portrait"
+        }
+      ]
+    }
+  ]
+}
