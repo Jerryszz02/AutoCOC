@@ -1,5 +1,13 @@
 # 本地视觉训练工具
 
+## U 战场目标候选队列
+
+`U` 表示战场单位/单位群的原图框，不是卡槽身份。已预先逐帧规划的采集可通过 `scripts/collect_u_candidates.py --batch <batch.json> --output <新目录>` 建立待复核队列。对事前声明整场 TRAIN 候选用途的普通 CLI 运行，可用 `scripts/produce_u_run_candidates.py --report <run.json> --launch <launch.json> --binding <binding.json> --prospective <声明.json> --output <新目录>` 导入**所有 battle observation 原图**，保留原帧 ID、原图 SHA、时间原值及整场分组；不解码图像或推测目标框。输出为 pending，`boxes` 和 `identity_labels` 均为 null。
+
+普通运行若未记录 ROI、相机、缩放或阵型事实，可另以 `scripts/adjudicate_u_capture.py --parent-queue <queue.json> --decisions <decisions.json> --output <新目录> --policy prototype` 创建独立派生队列。决策文件须覆盖每张父帧，逐张 admit 或说明原因 quarantine；admit 须分别引用与父队列 SHA、帧 ID、原图 SHA 绑定的 ROI、camera epoch、稳定相机、缩放和 battle/layout 五项外部证据文件（每项含路径与 SHA）。这五份 JSON 仅记录 Agent 实际逐图查看或外部测量后的判断，哈希只证明引用与字节绑定，**不能自动证明**相机稳定、缩放或阵型；目前没有生成这些事实的编辑界面，需要在 CLI 前独立准备。仅接受 `agent_visual` 原型复核，不会改父队列或自动产生单位标签。原始启动前声明、捕获时间或来源证明缺口不能靠后补覆盖层清除。早期 113248 普通运行未把 prospective 声明纳入启动器 `external_files` 与 child binding，仍有 `prelaunch_scope_binding_unverified` 阻断；不能直接导入快照。
+
+在证据完整的新运行中，使用 `scripts/review_u_boxes.py serve --queue <派生queue.json> --journal <新events.jsonl> --policy prototype` 显式复核每帧 ROI 内全部框或隔离该帧；再用同脚本的 `export` 子命令导出 journal，并运行 `scripts/import_reviewed_u.py --queue <queue.json> --journal <events.jsonl> --reviews <reviews.jsonl> --snapshot <新目录> --policy prototype`。仅完整且穷尽的框审查可进入原型快照；隔离帧不作为负例。即使后续框由人工复核，`agent_visual` 捕获元数据仍不得升格为 formal。上述命令不会采集设备、训练模型或启用运行时识别；所有输出目录必须不存在。
+
 为另行验证黄色 HP，按原顺序离线检查 101600 和 113248 两个既定 TRAIN 全组 **279 帧**（272 程序帧 + 7 raw），零读取错误、原图/源码哈希不变。发现 113248 的 162/165/166/167/168 五张像素候选具备同帧黄 HP、闭卡、身份及 ready 成对锚；Root 已原尺寸复看 162/168，实际仍在战斗中。现已集成窄 yellow-ready 修复及五张匿名 TRAIN 夹具：当前版本咏王同帧闭卡/黄HP/头像≥.95/双ready且零used才可通过，技能和动态部署调用方同步核验。五模块87测试/101子检查通过、50跳过，27项文件哈希不变；最终收据 `diagnostics/warden-yellow-ready-integration-v2/receipt.json`（`ce8d3bb75ae1bc62ca96de6f24ba5e5d21a4b0515d356f1a84a4eb91d257e76e`）。这不是人工真值、模型训练或正式验收，不重评120916/旧VAL/TEST，不启用模型；原实战失败保留。全帧回执 `diagnostics/warden-yellow-train-audit-run-v1/receipt.json`（`77b7c28d7a782e9b4dcdadf39659adc753d177fc5ad287c96f40c84e910a575e`）。
 
 新增独立 VAL 诊断快照 `r-card-dense-agent-val-20261017-120916-v1`，与旧 v5 快照并列保存，**2 帧、1 组、1 正窗、0 负窗**。整场采集前已声明 VAL；三张 pre 原图逐图 Agent 复核后，前两张间隔 0.118909 秒且严格相机证明通过，第三张位移 3.394 像素超门限而隔离，未采到 post。外部 raw 适配器保留全部原字节及 admit/quarantine 原因，既有 `import_reviewed_r.py` 完成权威校验；旧45帧和模型文件不变，90对哈希无重复或近重复冲突。冻结 v5 仅评估一次，**not_established、0 TP / 0 FP / 1 FN、2 帧部署未验证、0 可评估正窗、recall=null**：该次冻结版本的 `dynamic_tracking` 不接受黄血条部署证据，未绕过该门。模型仍禁用，本组没有训练或调参；单组正窗不构成正式质量估计，`event_at` 是首次观察可用而非真实起始时刻。证据 `reports/completion-20261015/diagnostics/r-dense-120916-pipeline-v1/`；评估报告 SHA `cf4a7b660fe4803fa2cce950e9dbe85c00a437a8d3c8e7e373c585ef4b121d44`。
