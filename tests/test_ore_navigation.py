@@ -25,6 +25,8 @@ from autococ.scene import SceneSnapshot
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "blacksmith_navigation_18_647_2"
+CAL_FIXTURES = ROOT / "tests" / "fixtures" / "blacksmith_navigation_123737_18_647_2"
+SMALL_FIXTURES = ROOT / "tests" / "fixtures" / "blacksmith_navigation_small_120645_18_647_2"
 ORE_FIXTURES = ROOT / "tests" / "fixtures" / "hero_equipment_18_647_2"
 VERSION = "18.647.2"
 TITLE_ROI = (535, 452, 740, 508)
@@ -37,6 +39,14 @@ def shot(name: str, *, frame_id: str | None = None) -> SceneSnapshot:
                         baseline_resolution=[1280, 720])
     return SceneSnapshot(observations.pop("scene"), observations.pop("confidence"),
                          FIXTURES / f"{name}.png", observations)
+
+
+def calibrated_shot(directory: Path, name: str) -> SceneSnapshot:
+    observations = json.loads((directory / f"{name}.json").read_text(encoding="utf-8"))
+    observations.update(frame_id=name, observed_at_monotonic=time.monotonic(),
+                        baseline_resolution=[1280, 720])
+    return SceneSnapshot(observations.pop("scene"), observations.pop("confidence"),
+                         directory / f"{name}.png", observations)
 
 
 def ore_shot(name: str, frame_id: str) -> SceneSnapshot:
@@ -102,6 +112,97 @@ def give_each_capture_its_own_path(session: FakeSession, directory: Path) -> Non
 
 
 class OreNavigationTests(unittest.TestCase):
+    def test_two_scale_train_fixture_provenance_and_anonymization(self):
+        for directory in (CAL_FIXTURES, SMALL_FIXTURES):
+            with self.subTest(directory=directory.name):
+                provenance = json.loads((directory / "provenance.json").read_text(encoding="utf-8"))
+                self.assertEqual(provenance["split"], "TRAIN")
+                self.assertFalse(provenance["formal_acceptance"])
+                self.assertFalse(provenance["account_verified"])
+                self.assertEqual(len(provenance["prospective_train_declarations"]), 2)
+                self.assertEqual(len({row["sha256"] for row in
+                                      provenance["prospective_train_declarations"]}), 2)
+                review = provenance["root_two_scale_review"]
+                self.assertRegex(review["sha256"], r"^[0-9a-f]{64}$")
+                template = provenance["template"]
+                path = ROOT / template["path"]
+                self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), template["sha256"])
+                self.assertEqual(cv2.imread(str(path)).shape, (22, 18, 3))
+                x1, y1, x2, y2 = provenance["transformation"]["retained_roi_xyxy"]
+                for name, entry in provenance["fixtures"].items():
+                    image = cv2.imread(str(ROOT / entry["derived_path"]))
+                    self.assertEqual(image.shape, (720, 1280, 3))
+                    self.assertEqual(hashlib.sha256((ROOT / entry["derived_path"]).read_bytes()).hexdigest(),
+                                     entry["derived_sha256"])
+                    self.assertEqual(hashlib.sha256((ROOT / entry["context_path"]).read_bytes()).hexdigest(),
+                                     entry["context_sha256"])
+                    self.assertEqual(hashlib.sha256(image[y1:y2, x1:x2].tobytes()).hexdigest(),
+                                     entry["retained_roi_pixel_sha256"])
+                    image[y1:y2, x1:x2] = (24, 24, 24)
+                    self.assertTrue((image == (24, 24, 24)).all(), name)
+
+    def test_verified_train_front_scales_and_obscuration(self):
+        expected = ((CAL_FIXTURES, "home_calibrated", [753, 200], "verified_123737"),
+                    (SMALL_FIXTURES, "home_small_07", [746, 210], "small_verified_120645"),
+                    (SMALL_FIXTURES, "home_small_08", [746, 210], "small_verified_120645"),
+                    (SMALL_FIXTURES, "home_small_13", [746, 210], "small_verified_120645"))
+        for directory, name, point, asset_fragment in expected:
+            with self.subTest(name=name):
+                result = locate_blacksmith(calibrated_shot(directory, name), client_version=VERSION)
+                self.assertIsNotNone(result)
+                self.assertEqual(result["point"], point)
+                self.assertIn(asset_fragment, result["template"])
+                self.assertGreaterEqual(result["ncc"], .985)
+                self.assertLessEqual(result["mad"], 3)
+                self.assertGreaterEqual(result["ncc"] - result["runner_up"], .15)
+        for directory, name in ((CAL_FIXTURES, "home_obscured"),
+                                (SMALL_FIXTURES, "home_small_09"),
+                                (SMALL_FIXTURES, "home_small_12")):
+            with self.subTest(name=name):
+                self.assertIsNone(locate_blacksmith(calibrated_shot(directory, name),
+                                                     client_version=VERSION))
+
+    def test_same_front_variants_are_one_candidate_but_distinct_fronts_conflict(self):
+        current = calibrated_shot(SMALL_FIXTURES, "home_small_13")
+        one = locate_blacksmith(current, client_version=VERSION)
+        self.assertIsNotNone(one)
+        from autococ import ore_navigation
+        with patch.dict(ore_navigation._FRONTS,
+                        {"same_front_copy": ore_navigation._FRONTS["small120645"]}):
+            self.assertIsNotNone(locate_blacksmith(current, client_version=VERSION))
+        source = cv2.imread(str(current.screenshot_path))
+        template = cv2.imread(str(ROOT / "assets" / "templates" /
+                                   "ore_navigation_blacksmith_front_small_verified_120645_18_647_2.png"))
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "other-front.png"
+            source[300:322, 500:518] = template
+            self.assertTrue(cv2.imwrite(str(path), source))
+            duplicate = SceneSnapshot(current.scene, current.confidence, path,
+                                      copy.deepcopy(current.observations))
+            self.assertIsNone(locate_blacksmith(duplicate, client_version=VERSION))
+
+    def test_calibrated_front_rejects_neighbor_only_wrong_version_stale_and_outside_roi(self):
+        current = calibrated_shot(SMALL_FIXTURES, "home_small_13")
+        self.assertIsNone(locate_blacksmith(current, client_version="18.647.3"))
+        current.observations["observed_at_monotonic"] -= 9
+        self.assertIsNone(locate_blacksmith(current, client_version=VERSION))
+        current = calibrated_shot(SMALL_FIXTURES, "home_small_13")
+        source = cv2.imread(str(current.screenshot_path))
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "neighbor.png"
+            source[207:229, 751:769] = (24, 24, 24)
+            self.assertTrue(cv2.imwrite(str(path), source))
+            neighbor = SceneSnapshot(current.scene, current.confidence, path,
+                                     copy.deepcopy(current.observations))
+            self.assertIsNone(locate_blacksmith(neighbor, client_version=VERSION))
+            template = cv2.imread(str(ROOT / "assets" / "templates" /
+                                   "ore_navigation_blacksmith_front_small_verified_120645_18_647_2.png"))
+            source[300:322, 100:118] = template
+            self.assertTrue(cv2.imwrite(str(path), source))
+            outside = SceneSnapshot(current.scene, current.confidence, path,
+                                    copy.deepcopy(current.observations))
+            self.assertIsNone(locate_blacksmith(outside, client_version=VERSION))
+
     def test_fixture_provenance_and_anonymization(self):
         p = json.loads((FIXTURES / "provenance.json").read_text(encoding="utf-8"))
         self.assertFalse(p["formal_acceptance"])

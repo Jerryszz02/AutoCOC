@@ -37,6 +37,16 @@ _FRONTS = {
     # Same verified front at the independently measured ~1.03 HOME map zoom.
     "zoom103": {"file": "ore_navigation_blacksmith_front_zoom103_18_647_2.png",
                 "reference_roi": (762, 192, 780, 214), "tap_offset": (1, 10)},
+    # Same building selected at (753, 200) in the separately reviewed 123737
+    # TRAIN calibration. Keep the old variants for their independently observed
+    # map scales; a low-scoring different zoom must still be refused.
+    "verified123737": {"file": "ore_navigation_blacksmith_front_verified_123737_18_647_2.png",
+                       "reference_roi": (758, 197, 776, 219), "tap_offset": (-5, 3)},
+    # The same building at the separately reviewed smaller HOME map scale.
+    # Its tap is the calibrated selection point projected through the measured
+    # same-village affine; Equipment still requires a fresh exact title/icon.
+    "small120645": {"file": "ore_navigation_blacksmith_front_small_verified_120645_18_647_2.png",
+                    "reference_roi": (751, 207, 769, 229), "tap_offset": (-5, 3)},
 }
 _TITLE = "铁匠铺（10级）"
 _TITLE_ROI = (535, 450, 740, 510)
