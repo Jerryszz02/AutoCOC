@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+from datetime import datetime
 import math
 import os
 from pathlib import Path
@@ -30,6 +31,7 @@ class AutoCOCApp:
         self.controller = controller or DesktopController()
         self.closing = False
         self.active = False
+        self.picker_active = False
         self.progress_state = {}
         self.report_path: Path | None = None
         self.history: dict[str, tuple[Path, dict]] = {}
@@ -80,8 +82,35 @@ class AutoCOCApp:
         self.pages.pack(fill="both", expand=True, padx=16, pady=12)
         run_page = ttk.Frame(self.pages)
         settings_page = ttk.Frame(self.pages)
+        data_page = ttk.Frame(self.pages)
         self.pages.add(run_page, text="运行")
         self.pages.add(settings_page, text="配置")
+        self.pages.add(data_page, text="数据工具")
+        picker_card = ttk.Frame(data_page, style="Card.TFrame", padding=18)
+        picker_card.pack(fill="x", padx=12, pady=12)
+        ttk.Label(picker_card, text="当前军队分页采集", style="Title.TLabel").grid(row=0, column=0, columnspan=3, sticky="w")
+        ttk.Label(picker_card,
+                  text="实机动作：打开/关闭兵种与法术选择器，兵种最多滑动 4 次；不选单位、不更改军队。只生成原始证据，需另行导入及人工复核。",
+                  style="Muted.TLabel", wraplength=700, justify="left").grid(
+                      row=1, column=0, columnspan=3, sticky="w", pady=(6, 12))
+        self.picker_output = tk.StringVar()
+        self.picker_pages = tk.StringVar(value="3")
+        self.picker_limit = tk.StringVar(value="150")
+        self.picker_status = tk.StringVar(value="未采集。请选择新的外部输出目录。")
+        ttk.Label(picker_card, text="新输出目录").grid(row=2, column=0, sticky="w")
+        ttk.Entry(picker_card, textvariable=self.picker_output, width=58).grid(row=2, column=1, sticky="ew", padx=8)
+        ttk.Button(picker_card, text="选择位置", command=self._choose_picker_output).grid(row=2, column=2)
+        ttk.Label(picker_card, text="兵种页数上限（1–5）").grid(row=3, column=0, sticky="w", pady=9)
+        ttk.Entry(picker_card, textvariable=self.picker_pages, width=8).grid(row=3, column=1, sticky="w", padx=8)
+        ttk.Label(picker_card, text="运行时限（60–180 秒）").grid(row=4, column=0, sticky="w")
+        ttk.Entry(picker_card, textvariable=self.picker_limit, width=8).grid(row=4, column=1, sticky="w", padx=8)
+        self.picker_start_button = ttk.Button(picker_card, text="开始实机只读采集", command=self.start_picker)
+        self.picker_start_button.grid(row=5, column=0, pady=(12, 6), sticky="w")
+        self.picker_stop_button = ttk.Button(picker_card, text="停止采集", command=self.stop, state="disabled")
+        self.picker_stop_button.grid(row=5, column=1, pady=(12, 6), sticky="w")
+        ttk.Label(picker_card, textvariable=self.picker_status, style="Muted.TLabel",
+                  wraplength=700, justify="left").grid(row=6, column=0, columnspan=3, sticky="w")
+        picker_card.columnconfigure(1, weight=1)
         run_page.columnconfigure(1, weight=1)
         run_page.rowconfigure(0, weight=1)
         left = ttk.Frame(run_page, style="Card.TFrame", padding=16)
@@ -514,11 +543,13 @@ class AutoCOCApp:
             transport = f"MuMu 原生通道 · 实例 {config.mumu.instance_index}" if config.mumu else "ADB 通道"
             self._log(f"已加载配置；{transport}。当前为离线预演。")
             self.start_button.state(["!disabled"])
+            self.picker_start_button.state(["!disabled"])
             self.refresh_history()
         except (AutoCOCError, OSError, ValueError) as exc:
             self.status.set(f"配置加载失败：{exc}")
             self._log(str(exc))
             self.start_button.state(["disabled"])
+            self.picker_start_button.state(["disabled"])
             if hasattr(self, "report_dir"):
                 del self.report_dir
 
@@ -650,6 +681,7 @@ class AutoCOCApp:
             messagebox.showerror("无法开始任务", str(exc), parent=self.root)
             return
         self.active = True
+        self.picker_active = False
         self._running_controls(True)
         self.task_table.delete(*self.task_table.get_children())
         for task in (spec.id for spec in options.routine.tasks if spec.enabled):
@@ -662,9 +694,38 @@ class AutoCOCApp:
         self.badge.configure(text="离线预演中" if options.dry_run else "实机运行中")
         self.tabs.select(0)
 
+    def _choose_picker_output(self) -> None:
+        parent = filedialog.askdirectory(parent=self.root, title="选择采集证据的外部父目录")
+        if parent:
+            self.picker_output.set(str(Path(parent) / f"picker-{datetime.now():%Y%m%d-%H%M%S-%f}"))
+
+    def start_picker(self) -> None:
+        try:
+            raw = self.picker_output.get().strip()
+            if not raw:
+                raise ValueError("请先选择新的采集输出目录")
+            raw_output = Path(raw)
+            if raw_output.exists() or raw_output.is_symlink():
+                raise ValueError("采集输出目录必须是新的，不能覆盖已有目录")
+            output = raw_output.resolve()
+            pages = int(self.picker_pages.get())
+            limit = int(self.picker_limit.get())
+            self.controller.start_picker(self.config_path, output,
+                                         max_troop_pages=pages, limit_sec=limit)
+        except (OSError, ValueError, RuntimeError) as exc:
+            messagebox.showerror("无法开始军队分页采集", str(exc), parent=self.root)
+            return
+        self.active = True
+        self.picker_active = True
+        self._running_controls(True)
+        self.picker_status.set(f"实机采集中，原始证据目录：{output}")
+        self.status.set("正在实机只读采集；停止后仍需检查设备界面。")
+        self.badge.configure(text="军队采集中")
+
     def stop(self) -> None:
         self.controller.stop()
         self.stop_button.state(["disabled"])
+        self.picker_stop_button.state(["disabled"])
         self.status.set("停止请求已发送，等待当前有时限的调用返回并保存报告。")
         self.badge.configure(text="正在停止")
 
@@ -674,6 +735,8 @@ class AutoCOCApp:
         self.pages.tab(1, state="disabled" if running else "normal")
         self.start_button.state(["disabled"] if running else ["!disabled"])
         self.stop_button.state(["!disabled"] if running else ["disabled"])
+        self.picker_start_button.state(["disabled"] if running else ["!disabled"])
+        self.picker_stop_button.state(["!disabled"] if running and self.picker_active else ["disabled"])
 
     def _poll(self) -> None:
         for _ in range(200):
@@ -684,6 +747,7 @@ class AutoCOCApp:
             self._event(event)
         if self.active and not self.controller.running:
             self.active = False
+            self.picker_active = False
             self._running_controls(False)
         if self.closing and not self.controller.running:
             self.root.destroy()
@@ -694,6 +758,17 @@ class AutoCOCApp:
         kind = event["kind"]
         if kind in {"log", "error"}:
             self._log(event["text"])
+        elif kind == "picker_started":
+            self.picker_status.set(f"采集中：{event['output']}")
+        elif kind == "picker_finished":
+            result = event["result"]
+            succeeded = result.get("status") == "completed"
+            detail = "原始证据已保存；尚未导入或人工复核。" if succeeded else (
+                f"采集未完成：{result.get('reason', '未知')}；选择器可能仍打开，请检查设备。")
+            self.picker_status.set(f"{detail} 目录：{event['output']}")
+            self.status.set(detail)
+            self.badge.configure(text="采集完成" if succeeded else "采集未完成")
+            self._log(detail)
         elif kind == "run_started":
             self.progress_state = {}
             self.run_label.set("当前运行 · " + event["run_id"])

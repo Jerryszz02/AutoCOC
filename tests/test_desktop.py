@@ -15,6 +15,37 @@ from autococ.routine_config import GoalConfig, ResourceFilter, RoutineConfig, Ta
 
 
 class DesktopTests(unittest.TestCase):
+    def test_picker_uses_same_worker_slot_and_passes_stop_callback(self):
+        controller = DesktopController()
+        output = self.root / "picker-run"
+        captured = {}
+        def fake_collect(config_path, path, *, max_troop_pages, limit_sec, stop):
+            captured.update({"config": config_path, "output": path, "pages": max_troop_pages,
+                             "limit": limit_sec, "stop": stop})
+            return {"status": "completed"}
+        with patch("autococ.picker_collection.collect_picker", side_effect=fake_collect):
+            controller.start_picker(self.path, output, max_troop_pages=3, limit_sec=150)
+            controller.thread.join(3)
+        self.assertEqual(captured["output"], output)
+        self.assertEqual((captured["pages"], captured["limit"]), (3, 150))
+        self.assertFalse(captured["stop"]())
+        controller.stop()
+        self.assertTrue(captured["stop"]())
+        self.assertEqual(controller.events.get_nowait()["kind"], "picker_started")
+        self.assertEqual(controller.events.get_nowait()["kind"], "picker_finished")
+
+    def test_picker_rejects_existing_or_inside_project_output_before_worker(self):
+        controller = DesktopController()
+        existing = self.root / "picker-existing"
+        existing.mkdir()
+        with self.assertRaises(ValueError):
+            controller.start_picker(self.path, existing)
+        self.assertFalse(controller.running)
+        inside_project = Path(__file__).resolve().parents[1] / "picker-not-created"
+        with self.assertRaises(ValueError):
+            controller.start_picker(self.path, inside_project)
+        self.assertFalse(controller.running)
+
     def test_report_keeps_plan_input_consumption_and_battle_separate(self):
         text = report_text({"mode": "live", "task_results": [{"task": "battle", "status": "failed",
             "metrics": {"vision_agent": {"plan_ready": True, "input_sent": True,

@@ -3,10 +3,13 @@
 已完成的只读 picker 采样可导入独立的待复核候选队列：
 
 ```powershell
+python scripts/vision_data.py collect-picker --config C:\work\AutoCOC\config.toml --output C:\data\new-picker-run --max-troop-pages 3 --limit-sec 150
 python scripts/vision_data.py import-picker-candidates --source-run C:\data\picker-run --output C:\data\picker-candidates
 ```
 
-工具校验 run 摘要、事件、前后完整军队证明与各页 PNG，然后只复制兵种页和法术首页原图。新目录的 `queue.json` 与 `manifest.jsonl` 使用 `picker_candidate_queue_v1`，图像路径均相对该目录；运行时已选行仅是识别证据，不是下方单位身份标签。全部候选保持 `pending`、无人工复核、无身份标签、`training_ready=false`；此队列不供 scene/building 或 R 窗口训练入口直接使用，也不创建 split 或冻结快照。输出目录必须尚不存在。
+`collect-picker` 需明确实机启动，输出必须是项目检出目录外的新目录；当前客户端限定 18.647.2，兵种最多采 5 页、法术只采首页。它会打开/关闭选择器并最多滑动兵种 4 次，输入前核验前台、当前帧及军队证明。GUI 的“数据工具”页提供同一独立动作。校准仅打包小型箭头模板和历史来源哈希；来源帧/事件引用是审计凭据，不宣称完整旧图已随项目提供。
+
+导入工具校验 run 摘要、事件、前后完整军队证明与各页 PNG，然后只复制兵种页和法术首页原图。新目录的 `queue.json` 与 `manifest.jsonl` 使用 `picker_candidate_queue_v1`，图像路径均相对该目录；运行时已选行仅是识别证据，不是下方单位身份标签。全部候选保持 `pending`、无人工复核、无身份标签、`training_ready=false`；此队列不供 scene/building 或 R 窗口训练入口直接使用，也不创建 split 或冻结快照。输出目录必须尚不存在。采集与导入是两个独立命令，采集不会自动导入。
 
 R-card v2 已实际完成 **12 epoch**、ONNX 导出和扩展 val 评估，18 train / 2 组与 16 val / 2 组。导出一致性 **16/16**，最大误差 **1.05e-5**；ONNX SHA `5af0535e61c402d6b39c26e4b2c64de7ce3d2d95fcbaebd05ddd9a3d45d62ecd` 与 v1 相同，因此本轮是扩展验证覆盖，没有证明推理权重改进。帧 argmax 分数 1.0 未应用生产置信门、连续帧或英雄部署条件，且无样本的 selected 类不计入宏分数；运行事件仍为 **0 TP / 0 FP / 2 FN**。逐帧 CPU 诊断与原指标精确对账：新 val 的四张 available 帧概率仅 **0.532–0.684**，均未达 .95，中间两张英雄肖像置信也未达 .95；旧 val 的时间间隔不足。模型继续禁用，不改旧 FN 或阈值。流水线 `diagnostics/r-card-pipeline-20261016-235453-818523/pipeline.json`，独立复核 `diagnostics/r-card-pipeline-independent-review-v2.json`（SHA-256 `3b6f651fee17d8f4065a96659e1632828fa474abc79d1c788514a1783275135a`），逐帧诊断 `diagnostics/r-card-runtime-diagnostic-v1-20261016T230701516318Z.json`（SHA-256 `827de722d6efbabccf47a34b8169f77de502c8edb0c8313d95226b0adf0d7024`）；输入/源码前后不变，test 未解析、解码或推理。
 

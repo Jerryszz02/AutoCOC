@@ -15,6 +15,7 @@ import pytest
 
 from training.vision.data import DatasetError
 from training.vision.picker_candidates import import_picker_candidates
+import training.vision.picker_candidates as picker_module
 
 
 def _sha(data: bytes) -> str:
@@ -276,6 +277,88 @@ def test_summary_formatting_does_not_change_source_group(tmp_path: Path) -> None
     second_row = json.loads((tmp_path / "second" / "manifest.jsonl").read_text().splitlines()[0])
     assert first_row["candidate_id"] == second_row["candidate_id"]
     assert first_row["source_summary_sha256"] != second_row["source_summary_sha256"]
+
+
+def _project_run(tmp_path: Path) -> tuple[Path, dict]:
+    source, summary, _ = _write_run(tmp_path)
+    root = Path(__file__).resolve().parents[1]
+    calibration_path = root / "assets" / "picker" / "18.647.2" / "calibration.json"
+    calibration = json.loads(calibration_path.read_text(encoding="utf-8"))
+    summary["collector_version"] = "project_picker_collection_v1"
+    collector_hash = _sha((root / "src" / "autococ" / "picker_collection.py").read_bytes())
+    summary["runner_sha256_before"] = collector_hash
+    summary["runner_sha256_after"] = collector_hash
+    summary["collector_module_sha256_before"] = summary["runner_sha256_before"]
+    summary["collector_module_sha256_after"] = summary["runner_sha256_after"]
+    summary["calibration_path"] = "assets/picker/18.647.2/calibration.json"
+    summary["calibration_sha256"] = _sha(calibration_path.read_bytes())
+    summary["calibration_template_sha256_before"] = calibration["next_arrow_template"]["sha256"]
+    summary["calibration_template_sha256_after"] = calibration["next_arrow_template"]["sha256"]
+    summary["flow"]["calibration"] = calibration
+    _save_summary(source, summary)
+    return source, summary
+
+
+def test_project_collector_calibration_is_provenance_only(tmp_path: Path) -> None:
+    source, _ = _project_run(tmp_path)
+    output = tmp_path / "project-queue"
+    import_picker_candidates(source, output)
+    queue = json.loads((output / "queue.json").read_text(encoding="utf-8"))
+    assert queue["collector_version"] == "project_picker_collection_v1"
+    assert queue["calibration_source_provenance_only"] is True
+    assert {ref["role"] for ref in queue["calibration_refs"]} == {
+        "template_crop", "source_troop_frame", "source_spell_frame", "source_swipe_event"}
+    assert all(ref["provenance_only"] for ref in queue["calibration_refs"])
+    assert all(not Path(ref["name"]).is_absolute() for ref in queue["calibration_refs"])
+
+
+@pytest.mark.parametrize("change", ["unknown_version", "absolute_calibration", "traversal_calibration",
+                                     "module_drift", "module_forged", "template_drift", "source_provenance_drift"])
+def test_project_collector_rejects_bad_calibration_contract(tmp_path: Path, change: str) -> None:
+    source, summary = _project_run(tmp_path)
+    if change == "unknown_version":
+        summary["collector_version"] = "project_picker_collection_v2"
+    elif change == "absolute_calibration":
+        summary["calibration_path"] = str(tmp_path / "calibration.json")
+    elif change == "traversal_calibration":
+        summary["calibration_path"] = "../calibration.json"
+    elif change == "module_drift":
+        summary["collector_module_sha256_after"] = "0" * 64
+    elif change == "module_forged":
+        summary["runner_sha256_before"] = "0" * 64
+        summary["runner_sha256_after"] = "0" * 64
+        summary["collector_module_sha256_before"] = "0" * 64
+        summary["collector_module_sha256_after"] = "0" * 64
+    elif change == "template_drift":
+        summary["calibration_template_sha256_after"] = "0" * 64
+    else:
+        summary["flow"]["calibration"]["source_spell_first_page"]["sha256"] = "0" * 64
+    _save_summary(source, summary)
+    with pytest.raises(DatasetError):
+        import_picker_candidates(source, tmp_path / "queue")
+    assert not (tmp_path / "queue").exists()
+
+
+def test_project_calibration_junction_cannot_escape_repo(tmp_path: Path, monkeypatch) -> None:
+    source, _ = _project_run(tmp_path)
+    fake_root = tmp_path / "fake-checkout"
+    fake_module = fake_root / "training" / "vision" / "picker_candidates.py"
+    fake_module.parent.mkdir(parents=True)
+    real_collector = Path(__file__).resolve().parents[1] / "src" / "autococ" / "picker_collection.py"
+    fake_collector = fake_root / "src" / "autococ" / "picker_collection.py"
+    fake_collector.parent.mkdir(parents=True)
+    fake_collector.write_bytes(real_collector.read_bytes())
+    fake_calibration = fake_root / "assets" / "picker" / "18.647.2"
+    fake_calibration.parent.mkdir(parents=True)
+    real_calibration = Path(__file__).resolve().parents[1] / "assets" / "picker" / "18.647.2"
+    try:
+        os.symlink(real_calibration, fake_calibration, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    monkeypatch.setattr(picker_module, "__file__", str(fake_module))
+    with pytest.raises(DatasetError, match="escapes project"):
+        import_picker_candidates(source, tmp_path / "queue")
+    assert not (tmp_path / "queue").exists()
 
 
 def test_cli_import_picker_candidates(tmp_path: Path) -> None:

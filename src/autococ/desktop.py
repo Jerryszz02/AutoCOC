@@ -257,6 +257,34 @@ class DesktopController:
         self.thread = Thread(target=self._run, args=(config,), name="AutoCOC-runner", daemon=False)
         self.thread.start()
 
+    def start_picker(self, config_path: Path, output: Path, *, max_troop_pages: int = 3,
+                     limit_sec: int = 150) -> None:
+        """Start an explicit device collection in the same single worker slot."""
+        if self.running:
+            raise RuntimeError("已有任务正在运行")
+        if (type(max_troop_pages) is not int or not 1 <= max_troop_pages <= 5
+                or type(limit_sec) is not int or not 60 <= limit_sec <= 180
+                or output.exists() or output.is_symlink()
+                or output.resolve().is_relative_to(Path(__file__).resolve().parents[2])):
+            raise ValueError("页数、时限或新输出目录无效")
+        self.stop_event.clear()
+        self.thread = Thread(target=self._run_picker,
+                             args=(config_path, output, max_troop_pages, limit_sec),
+                             name="AutoCOC-picker-collector", daemon=False)
+        self.thread.start()
+
+    def _run_picker(self, config_path: Path, output: Path, pages: int, limit_sec: int) -> None:
+        from .picker_collection import collect_picker
+
+        self.events.put({"kind": "picker_started", "output": str(output)})
+        try:
+            result = collect_picker(config_path, output, max_troop_pages=pages,
+                                    limit_sec=limit_sec, stop=self.stop_event.is_set)
+        except Exception as exc:
+            result = {"status": "failed", "reason": f"{type(exc).__name__}: {exc}",
+                      "output": str(output)}
+        self.events.put({"kind": "picker_finished", "result": result, "output": str(output)})
+
     def stop(self) -> None:
         self.stop_event.set()
 

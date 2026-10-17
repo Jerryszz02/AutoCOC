@@ -13,6 +13,45 @@ from autococ.routine_config import GoalConfig, RoutineConfig, TaskSpec
 
 
 class GUITests(unittest.TestCase):
+    def test_picker_action_is_explicit_and_separate_from_daily_start(self):
+        output = self.path.parent / "new-picker-run"
+        self.app.picker_output.set(str(output))
+        self.app.picker_pages.set("3")
+        self.app.picker_limit.set("150")
+        self.app.start_picker()
+        self.controller.start_picker.assert_called_once_with(
+            self.path.resolve(), output.resolve(), max_troop_pages=3, limit_sec=150)
+        self.controller.start.assert_not_called()
+        self.assertTrue(self.app.picker_active)
+        self.assertTrue(self.app.picker_start_button.instate(["disabled"]))
+        self.app.stop()
+        self.controller.stop.assert_called_once_with()
+
+    def test_picker_finish_reports_pending_evidence_and_failure_uncertainty(self):
+        self.app._event({"kind": "picker_finished", "result": {"status": "completed"},
+                         "output": "C:/runs/picker"})
+        self.assertIn("尚未导入或人工复核", self.app.picker_status.get())
+        self.app._event({"kind": "picker_finished", "result": {"status": "failed", "reason": "stopped_by_user"},
+                         "output": "C:/runs/picker"})
+        self.assertIn("选择器可能仍打开", self.app.picker_status.get())
+
+    def test_closing_window_during_picker_requests_stop(self):
+        self.controller.running = True
+        self.app.picker_active = True
+        self.app.close()
+        self.controller.stop.assert_called_once_with()
+        self.assertTrue(self.app.closing)
+        self.assertTrue(self.root.winfo_exists())
+
+    def test_picker_existing_output_is_rejected_before_worker(self):
+        output = self.path.parent / "existing-picker-run"
+        output.mkdir()
+        self.app.picker_output.set(str(output))
+        with patch("autococ.gui.messagebox.showerror") as showerror:
+            self.app.start_picker()
+        showerror.assert_called_once()
+        self.controller.start_picker.assert_not_called()
+
     def test_vision_agent_settings_reach_worker_and_persist(self):
         self.app.agent_enabled.set(True)
         self.app.agent_values["model_dir"].set("models/current")

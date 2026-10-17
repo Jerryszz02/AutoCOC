@@ -18,8 +18,14 @@ from training.vision.picker_candidates import import_picker_candidates
 def parser() -> argparse.ArgumentParser:
     cli = argparse.ArgumentParser(description=__doc__)
     commands = cli.add_subparsers(dest="command", required=True)
-    for name in ("import-legacy", "import-annotations", "import-picker-candidates", "stage", "inspect", "validate", "split", "export"):
+    for name in ("import-legacy", "import-annotations", "import-picker-candidates", "collect-picker", "stage", "inspect", "validate", "split", "export"):
         command = commands.add_parser(name)
+        if name == "collect-picker":
+            command.add_argument("--config", type=Path, required=True)
+            command.add_argument("--output", type=Path, required=True)
+            command.add_argument("--max-troop-pages", type=int, default=3)
+            command.add_argument("--limit-sec", type=int, default=150)
+            continue
         if name == "import-picker-candidates":
             command.add_argument("--source-run", type=Path, required=True)
             command.add_argument("--output", type=Path, required=True)
@@ -75,6 +81,15 @@ def main(argv: list[str] | None = None) -> int:
             report = import_legacy(args.root, args.legacy, args.output)
         elif args.command == "import-picker-candidates":
             report = import_picker_candidates(args.source_run, args.output)
+        elif args.command == "collect-picker":
+            sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+            from autococ.picker_collection import SamplingStopped, collect_picker
+            try:
+                report = collect_picker(args.config, args.output,
+                                        max_troop_pages=args.max_troop_pages,
+                                        limit_sec=args.limit_sec)
+            except SamplingStopped as exc:
+                raise DatasetError(str(exc)) from exc
         elif args.command == "stage":
             report = stage_sources(args.source, args.output)
         elif args.command == "import-annotations":
@@ -116,7 +131,8 @@ def main(argv: list[str] | None = None) -> int:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
         print(json.dumps(report, indent=2, ensure_ascii=False))
-        return 1 if args.command == "validate" and not report["valid"] else 0
+        return 1 if (args.command == "validate" and not report["valid"]
+                     or args.command == "collect-picker" and report["status"] != "completed") else 0
     except (DatasetError, OSError, ValueError) as exc:
         print(f"vision-data: {exc}", file=sys.stderr)
         return 2

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 import tempfile
 
@@ -21,6 +21,8 @@ SOURCE_FILES = frozenset({
     "src/autococ/army_navigation.py", "src/autococ/army_editor.py",
     "src/autococ/session.py", "src/autococ/vision.py",
 })
+PROJECT_COLLECTOR_VERSION = "project_picker_collection_v1"
+PROJECT_CALIBRATION_SHA256 = "89fbc6d767ccb7ff86924a3ca6e51599851280bd6e435fdb76363af2c6dc81a6"
 
 
 def _require(condition: bool, message: str) -> None:
@@ -56,6 +58,70 @@ def _png(path: Path) -> None:
     with path.open("rb") as stream:
         _require(stream.read(8) == b"\x89PNG\r\n\x1a\n", f"invalid PNG: {path.name}")
     decode(path)
+
+
+def _project_calibration(summary: dict, calibration: dict) -> list[dict]:
+    _require(summary.get("collector_version") == PROJECT_COLLECTOR_VERSION,
+             "unsupported collector version")
+    _require(_digest(summary.get("collector_module_sha256_before"))
+             and summary["collector_module_sha256_before"] == summary.get("collector_module_sha256_after")
+             and summary["collector_module_sha256_before"] == summary.get("runner_sha256_before"),
+             "collector module hash drift")
+    _require(summary.get("calibration_path") == "assets/picker/18.647.2/calibration.json"
+             and summary.get("calibration_sha256") == PROJECT_CALIBRATION_SHA256,
+             "unsupported project calibration")
+    repo = Path(__file__).resolve().parents[2]
+    collector_path = (repo / "src/autococ/picker_collection.py").resolve()
+    _require(collector_path.is_relative_to(repo.resolve()) and collector_path.is_file()
+             and summary["collector_module_sha256_before"] == sha256(collector_path),
+             "project collector module hash mismatch")
+    calibration_path = (repo / summary["calibration_path"]).resolve()
+    _require(calibration_path.is_relative_to(repo.resolve()) and calibration_path.is_file(),
+             "calibration path escapes project")
+    _require(sha256(calibration_path) == PROJECT_CALIBRATION_SHA256,
+             "project calibration SHA-256 mismatch")
+    expected = _json(calibration_path)
+    _require(calibration == expected and calibration.get("schema") == "readonly_picker_calibration_v1"
+             and calibration.get("client_version") == summary["client_version"]
+             and calibration.get("client_version_code") == summary["client_version_code"],
+             "project calibration evidence mismatch")
+    template = calibration.get("next_arrow_template")
+    _require(isinstance(template, dict) and template.get("path") == "next-arrow.png"
+             and _digest(template.get("sha256")), "calibration template invalid")
+    template_path = (calibration_path.parent / template["path"]).resolve()
+    _require(template_path.parent == calibration_path.parent and template_path.is_relative_to(repo.resolve())
+             and template_path.is_file() and sha256(template_path) == template["sha256"]
+             and summary.get("calibration_template_sha256_before") == template["sha256"]
+             and summary.get("calibration_template_sha256_after") == template["sha256"],
+             "calibration template path/hash mismatch")
+    def provenance_name(raw: object) -> str:
+        _require(isinstance(raw, str) and bool(raw) and "\\" not in raw,
+                 "calibration provenance name invalid")
+        name = PurePosixPath(raw)
+        _require(not name.is_absolute() and all(part not in (".", "..") for part in name.parts)
+                 and ":" not in raw and str(name) == raw,
+                 "calibration provenance path escapes")
+        return raw
+    refs = []
+    for key, role in (("next_arrow_template", "template_crop"),
+                      ("source_spell_first_page", "source_spell_frame")):
+        item = calibration[key]
+        name = item["path"] if key == "next_arrow_template" else item["frame_name"]
+        digest = item["sha256"]
+        _require(_digest(digest), "calibration provenance hash invalid")
+        refs.append({"role": role, "name": provenance_name(name), "sha256": digest,
+                     "provenance_only": True})
+    first = calibration["next_arrow_template"]
+    _require(_digest(first.get("source_frame_sha256")), "troop source frame hash invalid")
+    refs.append({"role": "source_troop_frame", "name": provenance_name(first.get("source_frame_name")),
+                 "sha256": first["source_frame_sha256"], "provenance_only": True})
+    swipes = calibration.get("source_troop_swipe_events")
+    _require(isinstance(swipes, list) and len(swipes) == 2, "calibration swipe provenance incomplete")
+    for item in swipes:
+        _require(isinstance(item, dict) and _digest(item.get("sha256")), "calibration swipe hash invalid")
+        refs.append({"role": "source_swipe_event", "name": provenance_name(item.get("name")),
+                     "sha256": item["sha256"], "provenance_only": True})
+    return refs
 
 
 def _army_signature(observation: dict, frame: str) -> tuple[list, list]:
@@ -270,20 +336,25 @@ def import_picker_candidates(source_run: Path, output: Path) -> dict:
              and term[0].get("frame_sha256") == pages[-1]["sha256"], "termination event mismatch")
     summary_hash = sha256(summary_path)
     frame_identity = sorted((Path(path).name, digest) for path, digest in inventory.items())
-    group_material = {"collector": SOURCE_KIND, "client_version": summary["client_version"],
+    group_material = {"collector": summary.get("collector_version", SOURCE_KIND),
+                      "client_version": summary["client_version"],
                       "client_version_code": summary["client_version_code"], "frames": frame_identity}
     group_id = hashlib.sha256(json.dumps(group_material, sort_keys=True, separators=(",", ":"))
                               .encode("utf-8")).hexdigest()
     calibration = flow.get("calibration")
     _require(isinstance(calibration, dict), "calibration reference missing")
-    calibration_refs = []
-    for item in (calibration.get("first_troop_frame"), calibration.get("first_spell_frame"),
-                 *(calibration.get("troop_swipe_events") or [])):
-        _require(isinstance(item, dict) and isinstance(item.get("path"), str)
-                 and Path(item["path"]).is_absolute() and _digest(item.get("sha256")),
-                 "calibration reference invalid")
-        calibration_refs.append({"name": Path(item["path"]).name, "sha256": item["sha256"]})
-    _require(len(calibration_refs) >= 2, "calibration reference incomplete")
+    if summary.get("collector_version") == PROJECT_COLLECTOR_VERSION:
+        calibration_refs = _project_calibration(summary, calibration)
+    else:
+        _require("collector_version" not in summary, "unknown collector version")
+        calibration_refs = []
+        for item in (calibration.get("first_troop_frame"), calibration.get("first_spell_frame"),
+                     *(calibration.get("troop_swipe_events") or [])):
+            _require(isinstance(item, dict) and isinstance(item.get("path"), str)
+                     and Path(item["path"]).is_absolute() and _digest(item.get("sha256")),
+                     "calibration reference invalid")
+            calibration_refs.append({"name": Path(item["path"]).name, "sha256": item["sha256"]})
+        _require(len(calibration_refs) >= 2, "calibration reference incomplete")
     metadata = {"schema": QUEUE_SCHEMA, "source_kind": SOURCE_KIND, "source_run_id": source.name,
                 "source_group_id": group_id, "source_summary_sha256": summary_hash,
                 "source_events_sha256": summary["events_sha256"],
@@ -296,6 +367,9 @@ def import_picker_candidates(source_run: Path, output: Path) -> dict:
                 "review_status": "pending", "human_review": False, "formal_acceptance": False,
                 "training_ready": False, "split": None, "scene_labels": None, "building_labels": None,
                 "label": None, "identity_labels": None}
+    if summary.get("collector_version") == PROJECT_COLLECTOR_VERSION:
+        metadata.update({"collector_version": PROJECT_COLLECTOR_VERSION,
+                         "calibration_source_provenance_only": True})
     output.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{output.name}-", dir=output.parent))
     try:
