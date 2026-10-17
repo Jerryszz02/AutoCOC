@@ -10,13 +10,14 @@ import cv2
 import numpy as np
 
 from autococ.battle_vision import selected_card_bbox
-from autococ.errors import DeploymentError, FlowError
+from autococ.errors import DeploymentError, FlowError, StopRequested
 from autococ.frozen_line import FrozenLinePlan, _file_sha256, _plan_digest
 from autococ.mixed_probe import (execute_mixed_probe_line, freeze_mixed_probe_line,
                                  ProbeEvidenceConflict, ProbeSelectionPending,
                                  _probe_count, _remaining_checkpoint,
                                  remainder_burst_limit)
 from autococ.ocr import OCRText
+from autococ.probed_anchor import ExactCameraError
 from autococ.prepared_battle import FramePacket, PreparedInput
 from autococ.scene import SceneSnapshot
 from autococ.strategies import BattleContext, TwoEdgeFurnaceStrategy
@@ -322,6 +323,194 @@ def test_mixed_two_independent_selections_and_consumptions(monkeypatch, tmp_path
         plan.balloon_point, plan.anchors[0], plan.dragon_point, plan.anchors[1]]
     assert receipt["issued_placements"] == receipt["attempted_placements"] == 17
     assert len(session.inputs) == receipt["input_count"]
+
+
+def _mixed_camera_session(monkeypatch, tmp_path, *, dragon_frames):
+    plan, source = make_plan(monkeypatch, tmp_path)
+    balloon_selected = snapshot(tmp_path, "balloon-selected", "enemy_village", 10.1,
+                                fast="mixed_selection_wait")
+    balloon_spent = snapshot(tmp_path, "balloon-spent", "battle", 10.2,
+                             fast="battle_hud")
+    dragon_selected = [snapshot(tmp_path, f"dragon-selected-{index}", "battle",
+                                10.3 + index * .1, fast="mixed_selection_wait")
+                       for index in range(dragon_frames)]
+    dragon_spent = snapshot(tmp_path, "dragon-spent", "battle", 10.7,
+                            fast="battle_hud")
+    final = snapshot(tmp_path, "full-final", "battle", 10.8)
+    session = Session(source, [balloon_selected, balloon_spent, *dragon_selected,
+                               dragon_spent, final])
+    session.capture.adb = object()
+    session.capture.serial = "offline"
+    session.config.game.package_name = "game"
+    monkeypatch.setattr("autococ.device.foreground_package", lambda *_a, **_kw: "game")
+    monkeypatch.setattr("autococ.mixed_probe._remaining_checkpoint",
+                        lambda _s, _p, frame: {"frame": str(frame.screenshot_path),
+                                               "sha256": _file_sha256(frame.screenshot_path)})
+    monkeypatch.setattr("autococ.mixed_probe._verify_frozen_line_post",
+                        lambda _s, _p, receipt, _when, *, sleep: final)
+    return plan, source, session, dragon_selected, final
+
+
+def test_mixed_dragon_transient_exact_camera_requires_new_full_proof(monkeypatch, tmp_path):
+    plan, source, session, selected, final = _mixed_camera_session(
+        monkeypatch, tmp_path, dragon_frames=2)
+    camera_calls = []
+
+    def camera(_source, current, _anchors):
+        camera_calls.append(current)
+        if current == selected[0].screenshot_path:
+            raise ExactCameraError("Probe camera has insufficient stationary map inliers")
+        return {"matches": 100, "inliers": 100, "residual_p95": 0.,
+                "anchor_offsets": [0., 0.]}
+
+    monkeypatch.setattr("autococ.probed_anchor.verify_exact_anchor_camera", camera)
+    count_calls = []
+
+    def count(_s, _p, frame, unit_id, expected, **_kw):
+        count_calls.append((frame, unit_id, expected))
+        return {"count": expected}
+
+    monkeypatch.setattr("autococ.mixed_probe._probe_count", count)
+    assert execute_mixed_probe_line(session, plan, clock=lambda: 10.,
+                                    sleep=lambda _s: None) is final
+    receipt = session.frozen_line_receipt
+    dragon = next(action for action in receipt["actions"]
+                  if action["action_id"] == "select-probe-dragon")
+    assert dragon["camera_rejections"] == [{
+        "frame": str(selected[0].screenshot_path),
+        "sha256": _file_sha256(selected[0].screenshot_path),
+        "message": "Probe camera has insufficient stationary map inliers"}]
+    assert receipt["probe_events"][1]["before"]["frame"] == str(selected[1].screenshot_path)
+    assert selected[0].screenshot_path in camera_calls
+    assert selected[1].screenshot_path in camera_calls
+    assert not any(frame is selected[0] for frame, _unit, _count in count_calls)
+    assert [point for kind, point in session.inputs[:4]] == [
+        plan.balloon_point, plan.anchors[0], plan.dragon_point, plan.anchors[1]]
+    assert session.inputs.count(("tap", plan.dragon_point)) == 1
+
+
+def test_mixed_dragon_three_camera_rejections_exhaust_existing_observations(
+        monkeypatch, tmp_path):
+    plan, _source, session, selected, _final = _mixed_camera_session(
+        monkeypatch, tmp_path, dragon_frames=3)
+
+    def camera(_source, current, _anchors):
+        if current in {frame.screenshot_path for frame in selected}:
+            raise ExactCameraError("Probe camera has insufficient stationary map inliers")
+        return {"matches": 100, "inliers": 100, "residual_p95": 0.,
+                "anchor_offsets": [0., 0.]}
+
+    monkeypatch.setattr("autococ.probed_anchor.verify_exact_anchor_camera", camera)
+    monkeypatch.setattr("autococ.mixed_probe._probe_count",
+                        lambda _s, _p, _f, _unit, expected, **_kw: {"count": expected})
+    with pytest.raises(DeploymentError, match="no fresh selected-card proof"):
+        execute_mixed_probe_line(session, plan, clock=lambda: 10., sleep=lambda _s: None)
+    dragon = next(action for action in session.frozen_line_receipt["actions"]
+                  if action["action_id"] == "select-probe-dragon")
+    assert [row["frame"] for row in dragon["camera_rejections"]] == [
+        str(frame.screenshot_path) for frame in selected]
+    assert session.last_snapshot is selected[-1]
+    assert session.inputs == [("tap", plan.balloon_point), ("tap", plan.anchors[0]),
+                              ("tap", plan.dragon_point)]
+
+
+@pytest.mark.parametrize("fast_count", [0, 2, "malformed_pending"])
+def test_mixed_dragon_camera_rejection_cannot_hide_same_frame_fast_conflict(
+        monkeypatch, tmp_path, fast_count):
+    plan, _source, session, selected, _final = _mixed_camera_session(
+        monkeypatch, tmp_path, dragon_frames=2)
+    if fast_count == "malformed_pending":
+        selected[0].observations["deployment_count_reads"] = []
+        selected[0].observations["deployment_count_pending"] = {
+            "frame": "stale-frame.png", "slot_bbox": list(plan.dragon_bbox),
+            "purpose": "mixed_selection_wait", "reason": "current_frame_count_unavailable"}
+    else:
+        selected[0].observations["deployment_count_reads"][0]["count"] = fast_count
+    camera_calls = []
+
+    def camera(_source, current, _anchors):
+        camera_calls.append(current)
+        if current == selected[0].screenshot_path:
+            raise ExactCameraError("Probe camera has insufficient stationary map inliers")
+        return {"matches": 100, "inliers": 100, "residual_p95": 0.,
+                "anchor_offsets": [0., 0.]}
+
+    monkeypatch.setattr("autococ.probed_anchor.verify_exact_anchor_camera", camera)
+    monkeypatch.setattr("autococ.mixed_probe._probe_count",
+                        lambda _s, _p, _f, _unit, expected, **_kw: {"count": expected})
+    with pytest.raises(DeploymentError, match=(
+            "malformed count-pending" if fast_count == "malformed_pending"
+            else "fast count conflicts")):
+        execute_mixed_probe_line(session, plan, clock=lambda: 10., sleep=lambda _s: None)
+    assert selected[0].screenshot_path not in camera_calls
+    assert session.last_snapshot is selected[0]
+    assert session.inputs == [("tap", plan.balloon_point), ("tap", plan.anchors[0]),
+                              ("tap", plan.dragon_point)]
+    dragon = next(action for action in session.frozen_line_receipt["actions"]
+                  if action["action_id"] == "select-probe-dragon")
+    assert "camera_rejections" not in dragon
+
+
+@pytest.mark.parametrize("fault", ["expired", "stop", "account", "source_changed",
+                                    "version_changed", "display_changed", "reused_frame",
+                                    "stale_observed", "strong_count_conflict"])
+def test_mixed_dragon_camera_wait_does_not_swallow_stronger_failures(
+        monkeypatch, tmp_path, fault):
+    plan, source, session, selected, _final = _mixed_camera_session(
+        monkeypatch, tmp_path, dragon_frames=2)
+    now = {"value": 10.}
+    original_observe = session.observe
+
+    def observe(label, **kwargs):
+        if fault == "stop" and label == "mixed-dragon-selected-1":
+            raise StopRequested("offline stop")
+        frame = original_observe(label, **kwargs)
+        if frame is selected[0] and fault == "expired":
+            now["value"] = 13.1
+        if frame is selected[1] and fault == "source_changed":
+            source.screenshot_path.write_bytes(b"changed frozen source")
+        if frame is selected[1] and fault == "version_changed":
+            session.client_version = "18.600.7"
+        if frame is selected[1] and fault == "display_changed":
+            session.capture.input_display_id = 1
+        if frame is selected[1] and fault == "account":
+            frame = replace(frame, scene="account_in_use")
+            session.last_snapshot = frame
+        if frame is selected[1] and fault == "reused_frame":
+            frame = selected[0]
+            session.last_snapshot = frame
+        if frame is selected[1] and fault == "stale_observed":
+            frame.observations["observed_at_monotonic"] = selected[0].observations[
+                "observed_at_monotonic"]
+        return frame
+
+    session.observe = observe
+
+    def camera(_source, current, _anchors):
+        if current == selected[0].screenshot_path:
+            raise ExactCameraError("Probe camera has insufficient stationary map inliers")
+        return {"matches": 100, "inliers": 100, "residual_p95": 0.,
+                "anchor_offsets": [0., 0.]}
+
+    monkeypatch.setattr("autococ.probed_anchor.verify_exact_anchor_camera", camera)
+
+    def count(_s, _p, frame, unit_id, expected, **_kw):
+        if fault == "strong_count_conflict" and unit_id == "dragon":
+            raise ProbeEvidenceConflict("Mixed dragon strong_count_conflict")
+        return {"count": expected}
+
+    monkeypatch.setattr("autococ.mixed_probe._probe_count", count)
+    expected = StopRequested if fault == "stop" else DeploymentError
+    with pytest.raises(expected):
+        execute_mixed_probe_line(session, plan, clock=lambda: now["value"],
+                                 sleep=lambda _s: None)
+    assert session.inputs == [("tap", plan.balloon_point), ("tap", plan.anchors[0]),
+                              ("tap", plan.dragon_point)]
+    dragon = next(action for action in session.frozen_line_receipt["actions"]
+                  if action["action_id"] == "select-probe-dragon")
+    assert len(dragon["camera_rejections"]) == 1
+    assert not any(event["unit_id"] == "dragon"
+                   for event in session.frozen_line_receipt["probe_events"])
 
 
 def test_first_post_strong_count_two_stops_before_new_frame_or_second_card(monkeypatch, tmp_path):

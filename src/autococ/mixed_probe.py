@@ -18,7 +18,7 @@ from .frozen_line import (_COUNT, _cards, _closed_card_border,
                           _verify_frozen_line_post, freeze_model_free_line)
 from .prepared_battle import PreparedInput
 from .mixed_roster import MIXED_CORE_COUNTS, mixed_archer_count
-from .probed_anchor import (ProbedAnchorPlan, _current_card_edges, _current_frame,
+from .probed_anchor import (ExactCameraError, ProbedAnchorPlan, _current_card_edges, _current_frame,
                             _distance_to_segment, _foreground_now,
                             _spent_balloon_dark_border, remainder_burst_limit)
 
@@ -401,6 +401,8 @@ def execute_mixed_probe_line(session: Any, plan: MixedProbePlan, *,
                                      base.latest_start if index == 0 else total_deadline,
                                      session.deadline, session.task_deadline)
             selected_proof = None
+            selection_after = select_done
+            seen_selection_frames = set()
             for observation in range(3):
                 if clock() >= selection_deadline:
                     break
@@ -409,8 +411,9 @@ def execute_mixed_probe_line(session: Any, plan: MixedProbePlan, *,
                                           slot={"point": list(point), "bbox": list(bbox)})
                 receipt["evidence"].append(str(current.screenshot_path))
                 _guard_fast(current, "mixed_selection_wait")
-                proof = _current_frame(session, plan, current, after=select_done,
-                                       scene="enemy_village" if index == 0 else "battle")
+                if str(current.screenshot_path) in seen_selection_frames:
+                    raise FlowError("Mixed selection reused a prior frame")
+                seen_selection_frames.add(str(current.screenshot_path))
                 pending = current.observations.get("deployment_count_pending")
                 if pending is not None:
                     if (pending != {"frame": str(current.screenshot_path),
@@ -420,18 +423,36 @@ def execute_mixed_probe_line(session: Any, plan: MixedProbePlan, *,
                             current.observations.get("ocr") or
                             current.observations.get("deployment_count_conflict") is not None):
                         raise FlowError("Mixed unproved selection has malformed count-pending evidence")
+                else:
+                    if ("deployment_count_pending" in current.observations or
+                            not isinstance(current.observations.get("deployment_count_reads"), list) or
+                            len(current.observations["deployment_count_reads"]) != 1):
+                        raise FlowError("Mixed selection lacks a valid fast count or pending state")
+                    fast_read = current.observations["deployment_count_reads"][0]
+                    if (not isinstance(fast_read, dict) or type(fast_read.get("count")) is not int or
+                            fast_read["count"] != 1):
+                        raise ProbeEvidenceConflict(
+                            f"Mixed selected {unit_id} fast count conflicts with frozen one")
+                try:
+                    proof = _current_frame(session, plan, current, after=selection_after,
+                                           scene="enemy_village" if index == 0 else "battle")
+                except ExactCameraError as exc:
+                    # The frame envelope has already checked freshness,
+                    # foreground, version, display and immutable source.
+                    # Only a new observation inside this existing budget may
+                    # recover an exact camera proof; no input is repeated.
+                    frame_proof = exc.frame_proof
+                    selection_after = frame_proof["observed_at"]
+                    selection.setdefault("camera_rejections", []).append({
+                        "frame": frame_proof["frame"], "sha256": frame_proof["sha256"],
+                        "message": str(exc)})
+                    continue
+                selection_after = proof["observed_at"]
+                if pending is not None:
                     selection.setdefault("pending_frames", []).append({
                         "frame": proof["frame"], "sha256": proof["sha256"],
                         "status": "count_unproved_waiting", "reason": "current_frame_count_unavailable"})
                     continue  # No count or border proof; only a fresh observation is allowed.
-                if ("deployment_count_pending" in current.observations or
-                        not isinstance(current.observations.get("deployment_count_reads"), list) or
-                        len(current.observations["deployment_count_reads"]) != 1):
-                    raise FlowError("Mixed selection lacks a valid fast count or pending state")
-                fast_read = current.observations["deployment_count_reads"][0]
-                if (not isinstance(fast_read, dict) or type(fast_read.get("count")) is not int or
-                        fast_read["count"] != 1):
-                    raise ProbeEvidenceConflict(f"Mixed selected {unit_id} fast count conflicts with frozen one")
                 try:
                     reading = _probe_count(session, plan, current, unit_id, 1, selected=True)
                 except ProbeSelectionPending as exc:
