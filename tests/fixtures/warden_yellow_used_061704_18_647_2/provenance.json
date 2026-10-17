@@ -1,0 +1,36 @@
+{
+  "schema": "autococ-anonymous-regression-v1",
+  "source_run": "20261017-061704-243920-60346ae3",
+  "source_role": "TRAIN_candidate_attempted_unverified",
+  "source_frame_base": "reports/completion-20261015/live/20261017-061704-243920-60346ae3/frames",
+  "mask": "all pixels outside native [1260,1020,1690,1440) set to zero; retained battle toolbar Warden and adjacent card unmodified",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "client_version": "18.647.2",
+  "rows": [
+    {
+      "source_frame": "00032-post-deployment-skill-before.png",
+      "source_sha256": "21c1e15baa8687529e41a6973f357846ac48bdce7905a825c7813f55fef74552",
+      "fixture": "00032-post-deployment-skill-before.png",
+      "fixture_sha256": "4be2bd73d0f4518e3096fb461978807c54bd3cdc522b82db0ba6c1be97a0d4a4",
+      "retained_pixels_sha256": "dbf067c2823004de57bf70716d14c29b69da8c63355b5b3bd13fc9614fe2b8e6"
+    },
+    {
+      "source_frame": "00033-post-deployment-skill-after-1.png",
+      "source_sha256": "5d1ca9caa8e4f1bcb3dece4d70c3bddfb77d03b9052347b449674cd950a33554",
+      "fixture": "00033-post-deployment-skill-after-1.png",
+      "fixture_sha256": "e295d183383a11f857d6445da1cf7b2f158f1fcf0abbac8a025a0be98932cb88",
+      "retained_pixels_sha256": "30005c1df1d89dcaf50bc65206624e26aad57820d3310a159fbad41a778a6385"
+    },
+    {
+      "source_frame": "00034-post-deployment-skill-after-2.png",
+      "source_sha256": "bb86c57a5a27e94e1923ff03f2973f5f2c9ff4667c6a8dd8b49f588f48f4c670",
+      "fixture": "00034-post-deployment-skill-after-2.png",
+      "fixture_sha256": "e530af7dcf34854ecd518a511033e31823239a584aad3baaa1ff7125a79f3d93",
+      "retained_pixels_sha256": "6dc6822cd60853fe7ea38107f37dd285582de230b7de288dfb866000bd375161"
+    }
+  ],
+  "no_identity_or_training_truth": true
+}

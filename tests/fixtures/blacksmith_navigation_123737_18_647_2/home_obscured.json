@@ -1,0 +1,16 @@
+{
+  "scene": "village",
+  "confidence": 0.9,
+  "village_type": "home",
+  "resource_source": "village_inventory",
+  "account_in_use": null,
+  "buttons": [
+    {
+      "name": "attack"
+    },
+    {
+      "name": "shop"
+    }
+  ],
+  "ocr": []
+}

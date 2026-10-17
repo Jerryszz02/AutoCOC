@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "source_run": "20261017-105007-702492-01517683",
+  "source_frame": "reports/completion-20261015/live/20261017-105007-702492-01517683/frames/00020-event-reward-panel-3.png",
+  "source_sha256": "2578ba35a09b84d74158961ab5746411b54b0e52a26f5a53a4a50aa6ce15a554",
+  "native_resolution": [
+    2560,
+    1440
+  ],
+  "baseline_resolution": [
+    1280,
+    720
+  ],
+  "retained_baseline_rois": [
+    [
+      590,
+      20,
+      690,
+      90
+    ],
+    [
+      1015,
+      20,
+      1090,
+      95
+    ],
+    [
+      195,
+      85,
+      310,
+      145
+    ],
+    [
+      205,
+      125,
+      325,
+      185
+    ],
+    [
+      850,
+      250,
+      1060,
+      315
+    ],
+    [
+      875,
+      330,
+      1045,
+      405
+    ]
+  ],
+  "mask": "All pixels outside listed doubled native ROIs replaced with black; source bytes unchanged.",
+  "fixture_sha256": "b738bc1dc3fe365a06f8d221c4723cda8eab045a138d7cfbdc7dd7456d71d292",
+  "ocr_fixture_sha256": "f59036b89175b615018dcdf3428dea2f17247f3e9da95b9a7b3040393cd7e8f1",
+  "human_review": false,
+  "formal_success": false,
+  "fixture_resolution": [
+    1280,
+    720
+  ],
+  "fixture_transform": "Native pixels masked outside listed ROIs, then resized to 1280x720 using OpenCV INTER_AREA"
+}

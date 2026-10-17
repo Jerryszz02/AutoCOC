@@ -1,0 +1,71 @@
+{
+  "client_version": "18.647.2",
+  "capture_code_commit": "9651dd1",
+  "source_kind": "agent_visual_prototype",
+  "human_ground_truth": false,
+  "dynamic_event_validation": false,
+  "note": "25 to 26 has a measured 3.018 baseline-pixel translation and fails the unchanged <3 strict motion check. 26 to 27 passes strict motion but the Warden lacks live HP in 27, so the actual run provides a safe rejection, not a successful skill attempt.",
+  "derivation": "Decode original native 2560x1440 PNG. Retain exact original BGR pixels in native map ROI x=400..2179,y=220..1059 and toolbar y=1030..1439; set all other pixels to zero. No resize or synthesized game content.",
+  "fixtures": {
+    "hero_skill_stabilization_054932_00025_18_647_2.png": {
+      "source_frame": "reports/completion-20261015/live/20261016-054932-938805-6da48730/frames/00025-frozen-line-post-recheck.png",
+      "source_sha256": "c3327a4f39270caf658af837518d512ab966a07461257668870387031e3c4146",
+      "fixture_sha256": "01ca4e2f8d096dbccd1de9a0945e8dd7affb9087b2f250aaddfe9e5cb80ee81b",
+      "retained_rois_native": [
+        [
+          400,
+          220,
+          2180,
+          1060
+        ],
+        [
+          0,
+          1030,
+          2560,
+          1440
+        ]
+      ],
+      "purpose": "verified_deployment_and_camera_reference"
+    },
+    "hero_skill_stabilization_054932_00026_18_647_2.png": {
+      "source_frame": "reports/completion-20261015/live/20261016-054932-938805-6da48730/frames/00026-post-deployment-skill-before.png",
+      "source_sha256": "e0738ef0de5dfb00ae63900f467051f2d59358b497015f5e91f9edb6405f173c",
+      "fixture_sha256": "2644a66eafc6f475dc84ece4654692aaa20c05b4ff1f62261d81906df51f5d39",
+      "retained_rois_native": [
+        [
+          400,
+          220,
+          2180,
+          1060
+        ],
+        [
+          0,
+          1030,
+          2560,
+          1440
+        ]
+      ],
+      "purpose": "first_before_ready_but_map_translation_3_018px"
+    },
+    "hero_skill_stabilization_054932_00027_18_647_2.png": {
+      "source_frame": "reports/completion-20261015/live/20261016-054932-938805-6da48730/frames/00027-battle-settlement.png",
+      "source_sha256": "5b5f596263888bbbcbccb4e1c9e3559503752116efd5784f7b978d5cfc274ee4",
+      "fixture_sha256": "f06608a3154004bd4d7fd213bc7abc92a8aa60eb8b604b439eb57d0565c1668e",
+      "retained_rois_native": [
+        [
+          400,
+          220,
+          2180,
+          1060
+        ],
+        [
+          0,
+          1030,
+          2560,
+          1440
+        ]
+      ],
+      "purpose": "second_strict_camera_but_dead_hp_negative"
+    }
+  }
+}

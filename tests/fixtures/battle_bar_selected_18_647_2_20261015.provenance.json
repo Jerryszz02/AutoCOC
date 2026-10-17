@@ -1,0 +1,8 @@
+{
+  "client_version": "18.647.2",
+  "source": "reports/completion-20261015/live/20261015-185059-079444-45f30829/frames/00013-line-boundary.png",
+  "source_sha256": "8ccc2e810bb1c28bd8d0118d39645d94134c1309ac292b39d3277cf513386428",
+  "crop_native_xyxy": [170, 1170, 2380, 1440],
+  "fixture_sha256": "5bd94bda696c2e1b13b3ab97e1b4d2a22906b70861bfa62802de375340e560b3",
+  "purpose": "Selected current battle bar card portrait and small x1 count replay"
+}

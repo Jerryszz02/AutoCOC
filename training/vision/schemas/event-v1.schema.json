@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AutoCOC temporal event annotation v1",
+  "type": "object",
+  "required": ["schema_version", "event_id", "battle_id", "event_type", "frame_sample_ids", "review_status"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "event_id": {"type": "string", "minLength": 1},
+    "battle_id": {"type": "string", "minLength": 1},
+    "track_id": {"type": ["string", "null"]},
+    "event_type": {"type": "string", "minLength": 1},
+    "frame_sample_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "event_start_ms": {"type": ["number", "null"]},
+    "event_end_ms": {"type": ["number", "null"]},
+    "action_evidence": {"type": ["object", "null"]},
+    "review_status": {"enum": ["pending", "reviewed", "rejected"]}
+  },
+  "additionalProperties": true
+}

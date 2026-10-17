@@ -1,0 +1,24 @@
+{
+  "client_version": "18.647.2",
+  "source_run": "20261017-054927-949877-c1b376d1",
+  "transform": "resize native 2560x1440 to 1280x720 using cv2.INTER_AREA; retain only [1229,545,1270,589]",
+  "scope": "Development arrow regression crops only; no unit identity labels or formal acceptance.",
+  "source_collector_status": "failed",
+  "source_reason": "next_arrow_ambiguous",
+  "frames": [
+    {
+      "source": "00006-troop-picker-page-1.png",
+      "source_sha256": "821b44cae85f8011f161a851ebeb42ac05ef1f3e5bb46fe9cd496fedcda64501",
+      "fixture": "page-1-arrow-window.png",
+      "fixture_sha256": "2689591000b5c6993b271c0e2b215cd63ddb3c52bf64c7067606dd64107253ed",
+      "pixel_sha256_bgr": "bb2140a0c210305a59ccf3d71dd32dde9207b55860e4d507f11c9f34226fc4af"
+    },
+    {
+      "source": "00007-troop-picker-page-2.png",
+      "source_sha256": "3e9b5d3ca2ffabe8f9be9980059ead49e902f8c104fd110446c1f9025e939684",
+      "fixture": "page-2-arrow-window.png",
+      "fixture_sha256": "ba0c882f8d14c83f3a550384a0cf48c285f3e162285f386fa0c05a372e3a073a",
+      "pixel_sha256_bgr": "91b8a7d2796d1e47a2ebe8fc2008e7e903eaea81751c3e334cde8665174282e5"
+    }
+  ]
+}

@@ -7,6 +7,7 @@ have separate readers. Scrolled/clipped rows and unidentified cards are incomple
 from __future__ import annotations
 
 from dataclasses import asdict
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -33,7 +34,7 @@ def recognize_army_siege(
 ) -> dict[str, object]:
     """Read overlapping siege cards using visible count headers and portraits.
 
-    The 18.600.7 My Army cards overlap, so their outer contours cannot be
+    The sampled My Army cards overlap, so their outer contours cannot be
     counted as separate rectangles. The sampled ``x1`` header only locates
     cards; local OCR verifies that quantity, and a separate portrait sample
     names each machine. Other quantity appearances remain unsupported.
@@ -58,17 +59,20 @@ def recognize_army_siege(
     if used == 0:
         result["unknowns"].append("empty_siege_row_not_calibrated")
         return result
-    provenance_path = CATALOG_ROOT / "siege_count_provenance.json"
+    current_client = client_version == "18.647.2"
+    provenance_path = CATALOG_ROOT / (
+        "siege_count_provenance_18_647_2.json" if current_client else "siege_count_provenance.json")
     try:
         provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         provenance = {}
-    if (not client_version or client_version != template_manifest().get("client")
+    if (not client_version or client_version != template_manifest(client_version=client_version).get("client")
             or client_version != provenance.get("client")):
         result["unknowns"].append("siege_client_version_unverified")
         return result
     image = cv2.resize(image, _BASE, interpolation=cv2.INTER_AREA)
-    sample_path = CATALOG_ROOT / "siege_count_x1_18_600_7.png"
+    sample_path = CATALOG_ROOT / (
+        "siege_count_x1_18_647_2.png" if current_client else "siege_count_x1_18_600_7.png")
     sample = cv2.imdecode(np.fromfile(sample_path, dtype=np.uint8), cv2.IMREAD_COLOR) if sample_path.is_file() else None
     if sample is None:
         result["unknowns"].append("siege_count_header_sample_missing")
@@ -294,7 +298,7 @@ def recognize_army_manifest(
         unknowns.extend({"group": group, "reason": reason} for reason in dict.fromkeys(row_unknowns))
         for box, sides in boxes:
             count, count_evidence = _read_count(path, provider, canonical, box, (width, height), baseline_resolution,
-                                                image, native_image, client_version)
+                                                image, native_image, client_version, group=group)
             card_box = list(scale_box(box, from_resolution=_BASE, to_resolution=baseline_resolution))
             identity = recognize_card_identity(image, box, "troop" if group == "troops" else "spell",
                                                surface="army", client_version=client_version)
@@ -330,7 +334,7 @@ def _inside(item: OCRText, roi: tuple[int, int, int, int]) -> bool:
 
 
 def _read_count(path, provider, texts, box, native_resolution, baseline_resolution,
-                canonical_image, native_image, client_version):
+                canonical_image, native_image, client_version, *, group):
     roi = (box[0], box[1], box[0] + 70, box[1] + 28)
     candidates = [item for item in texts if _confident(item) and _inside(item, roi)
                   and re.fullmatch(r"[xX×]\s*[0-9]+", item.text.strip())]
@@ -381,13 +385,15 @@ def _read_count(path, provider, texts, box, native_resolution, baseline_resoluti
             if len(values) == 1 and next(iter(values)) > 0:
                 evidence["source"] = "contrast_line_roi"
                 return next(iter(values)), evidence
-        # The siege x1 glyph is independent evidence for its shape. A second
-        # troop sample includes the space after the digit, so x11 cannot match
-        # merely by sharing an x1 prefix. Both must agree after OCR fails.
-        if not candidates and not local_values and client_version == template_manifest().get("client"):
-            sample_path = CATALOG_ROOT / "siege_count_x1_18_600_7.png"
+        # Match both the quantity glyph and its following header area, so a
+        # longer count cannot pass merely by sharing an x1 prefix. Samples are
+        # version-bound; the current client has its own observed troop header.
+        pair = (_x1_template_paths(client_version)
+                if not candidates and not local_values
+                and (client_version != "18.647.2" or group == "troops") else None)
+        if pair is not None:
+            sample_path, full_path = pair
             sample = cv2.imdecode(np.fromfile(sample_path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE) if sample_path.is_file() else None
-            full_path = CATALOG_ROOT / "army_count_x1_18_600_7.png"
             full = cv2.imdecode(np.fromfile(full_path, dtype=np.uint8), cv2.IMREAD_GRAYSCALE) if full_path.is_file() else None
             if sample is not None and full is not None:
                 left, top = box[:2]
@@ -399,9 +405,36 @@ def _read_count(path, provider, texts, box, native_resolution, baseline_resoluti
                     full_score = float(cv2.matchTemplate(whole, full, cv2.TM_CCOEFF_NORMED).max())
                     evidence["x1_header_scores"] = {"independent_glyph": round(score, 5),
                                                      "whole_header": round(full_score, 5)}
+                    evidence["x1_header_client_version"] = client_version
                     if score >= .85 and full_score >= .94:
                         evidence["source"] = "sampled_x1_header"
                         return 1, evidence
         return None, evidence
     count = int(re.sub(r"\D", "", candidates[0].text))
     return count if count > 0 else None, evidence
+
+
+def _x1_template_paths(client_version: str | None) -> tuple[Path, Path] | None:
+    if (client_version not in {"18.600.7", "18.647.2"}
+            or client_version != template_manifest(client_version=client_version).get("client")):
+        return None
+    if client_version == "18.600.7":
+        return (CATALOG_ROOT / "siege_count_x1_18_600_7.png",
+                CATALOG_ROOT / "army_count_x1_18_600_7.png")
+    paths = (CATALOG_ROOT / "army_count_x1_glyph_18_647_2.png",
+             CATALOG_ROOT / "army_count_x1_18_647_2.png")
+    try:
+        provenance = json.loads((CATALOG_ROOT / "army_count_provenance_18_647_2.json").read_text(encoding="utf8"))
+        if (not isinstance(provenance, dict) or provenance.get("client") != client_version
+                or type(provenance.get("observed_count")) is not int or provenance["observed_count"] != 1):
+            return None
+        samples = provenance.get("samples")
+        if not isinstance(samples, dict):
+            return None
+        for path in paths:
+            entry = samples.get(path.name)
+            if not isinstance(entry, dict) or hashlib.sha256(path.read_bytes()).hexdigest() != entry.get("sha256"):
+                return None
+    except (OSError, ValueError, TypeError):
+        return None
+    return paths

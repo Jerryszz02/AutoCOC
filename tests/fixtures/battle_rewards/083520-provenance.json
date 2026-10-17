@@ -1,0 +1,821 @@
+{
+  "schema": "autococ.anonymized_battle_chest_083520.v1",
+  "client_version": "18.647.2",
+  "baseline_dimensions": [
+    1280,
+    720
+  ],
+  "source_dimensions": [
+    2560,
+    1440
+  ],
+  "baseline_interpolation": "cv2.INTER_AREA",
+  "mask": "black outside retained baseline rectangles",
+  "human_ground_truth": false,
+  "formal_acceptance": false,
+  "fixtures": {
+    "defeat_claim": {
+      "fixture": "083520-defeat_claim.png",
+      "fixture_sha256": "c2843725573fb97d0eeabe469f129c33f2444dd33b043dfdcba260a2c6478824",
+      "source_frame_relative_to_external": "live/20261017-083520-202309-7aceaf73/frames/00061-battle-settlement.png",
+      "source_sha256": "635467a1834f072f709297ae5375a8604808467726153c2de598303d5dfd97b9",
+      "source_events_relative_to_external": "live/20261017-083520-202309-7aceaf73/events.jsonl",
+      "source_events_sha256": "be1122078055995ee9eef2699e2904833aea828cab350feaaa364095be6fa4f1",
+      "retained_rectangles_at_1280x720": [
+        [
+          430,
+          40,
+          850,
+          260
+        ],
+        [
+          340,
+          275,
+          940,
+          460
+        ],
+        [
+          200,
+          280,
+          430,
+          440
+        ],
+        [
+          530,
+          585,
+          755,
+          655
+        ]
+      ],
+      "recorded_ocr": [
+        {
+          "text": "23",
+          "confidence": 0.99992,
+          "bbox": [
+            1108,
+            26,
+            1139,
+            50
+          ]
+        },
+        {
+          "text": "692114",
+          "confidence": 0.99708,
+          "bbox": [
+            1134,
+            25,
+            1221,
+            52
+          ]
+        },
+        {
+          "text": "alkomafia",
+          "confidence": 0.95822,
+          "bbox": [
+            65,
+            39,
+            164,
+            60
+          ]
+        },
+        {
+          "text": "133",
+          "confidence": 0.99987,
+          "bbox": [
+            772,
+            68,
+            785,
+            78
+          ]
+        },
+        {
+          "text": "10266617",
+          "confidence": 0.99989,
+          "bbox": [
+            1102,
+            73,
+            1220,
+            100
+          ]
+        },
+        {
+          "text": "摧毁率",
+          "confidence": 0.97218,
+          "bbox": [
+            608,
+            82,
+            664,
+            102
+          ]
+        },
+        {
+          "text": "38%",
+          "confidence": 0.99889,
+          "bbox": [
+            610,
+            102,
+            672,
+            132
+          ]
+        },
+        {
+          "text": "442729",
+          "confidence": 0.99999,
+          "bbox": [
+            1127,
+            123,
+            1219,
+            148
+          ]
+        },
+        {
+          "text": "失败",
+          "confidence": 0.99862,
+          "bbox": [
+            608,
+            196,
+            671,
+            236
+          ]
+        },
+        {
+          "text": "您得到了",
+          "confidence": 0.9999,
+          "bbox": [
+            598,
+            286,
+            672,
+            312
+          ]
+        },
+        {
+          "text": "70元924",
+          "confidence": 0.87343,
+          "bbox": [
+            556,
+            312,
+            670,
+            350
+          ]
+        },
+        {
+          "text": "酸腐圣水",
+          "confidence": 0.99998,
+          "bbox": [
+            280,
+            364,
+            350,
+            388
+          ]
+        },
+        {
+          "text": "2LLE2",
+          "confidence": 0.75663,
+          "bbox": [
+            550,
+            361,
+            670,
+            397
+          ]
+        },
+        {
+          "text": "267",
+          "confidence": 0.99989,
+          "bbox": [
+            300,
+            387,
+            348,
+            413
+          ]
+        },
+        {
+          "text": "777",
+          "confidence": 0.99946,
+          "bbox": [
+            589,
+            408,
+            670,
+            445
+          ]
+        },
+        {
+          "text": "损耗的部队",
+          "confidence": 0.99958,
+          "bbox": [
+            592,
+            464,
+            675,
+            484
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.98916,
+          "bbox": [
+            345,
+            491,
+            362,
+            505
+          ]
+        },
+        {
+          "text": "x10",
+          "confidence": 0.99619,
+          "bbox": [
+            446,
+            491,
+            472,
+            506
+          ]
+        },
+        {
+          "text": "领取奖励",
+          "confidence": 0.9998,
+          "bbox": [
+            579,
+            608,
+            648,
+            634
+          ]
+        }
+      ],
+      "human_ground_truth": false
+    },
+    "ordinary_skip": {
+      "fixture": "083520-ordinary_skip.png",
+      "fixture_sha256": "2a6b7681ebd648b07930405bb1cc69d8e42ce9fa8a67c0531d0153cfaba7396f",
+      "source_frame_relative_to_external": "probes/20261017-084944-assisted-chest-skip-083520/frames/00001-before-assisted-chest-skip.png",
+      "source_sha256": "4b722d0a2937136d1369e1885df159a898ff61a1a4bc710d903ec0caaf0de04d",
+      "source_events_relative_to_external": "probes/20261017-084944-assisted-chest-skip-083520/events.jsonl",
+      "source_events_sha256": "2884526a6166c80a249c9ddcd79425a2c9b56dcf05216c0b6f684faa3d5c88f2",
+      "retained_rectangles_at_1280x720": [
+        [
+          30,
+          220,
+          180,
+          360
+        ],
+        [
+          520,
+          260,
+          760,
+          490
+        ],
+        [
+          570,
+          485,
+          700,
+          570
+        ],
+        [
+          515,
+          575,
+          760,
+          630
+        ],
+        [
+          1110,
+          625,
+          1270,
+          685
+        ]
+      ],
+      "recorded_ocr": [
+        {
+          "text": "点击！",
+          "confidence": 0.99934,
+          "bbox": [
+            596,
+            166,
+            662,
+            200
+          ]
+        },
+        {
+          "text": "普通",
+          "confidence": 0.99998,
+          "bbox": [
+            602,
+            513,
+            656,
+            548
+          ]
+        },
+        {
+          "text": "跳过",
+          "confidence": 0.99976,
+          "bbox": [
+            1172,
+            640,
+            1214,
+            666
+          ]
+        }
+      ],
+      "human_ground_truth": false
+    },
+    "skip_confirmation": {
+      "fixture": "083520-skip_confirmation.png",
+      "fixture_sha256": "469b187dc2143bf1924af8e829267c18a0b9fd86e48c6a047e05a01a6bfd6c98",
+      "source_frame_relative_to_external": "probes/20261017-084944-assisted-chest-skip-083520/frames/00002-after-assisted-chest-skip.png",
+      "source_sha256": "e7e2688c7764ecbebf9ebe6244d6ea083d274a394e69676c7776a1f59fcc568a",
+      "source_events_relative_to_external": "probes/20261017-084944-assisted-chest-skip-083520/events.jsonl",
+      "source_events_sha256": "2884526a6166c80a249c9ddcd79425a2c9b56dcf05216c0b6f684faa3d5c88f2",
+      "retained_rectangles_at_1280x720": [
+        [
+          350,
+          185,
+          930,
+          530
+        ]
+      ],
+      "recorded_ocr": [
+        {
+          "text": "跳过开箱动画",
+          "confidence": 0.99912,
+          "bbox": [
+            550,
+            204,
+            730,
+            247
+          ]
+        },
+        {
+          "text": "您将获得奖励，但会跳过开箱动画。仍要跳过",
+          "confidence": 0.99977,
+          "bbox": [
+            379,
+            290,
+            900,
+            324
+          ]
+        },
+        {
+          "text": "吗？",
+          "confidence": 0.97725,
+          "bbox": [
+            610,
+            327,
+            666,
+            362
+          ]
+        },
+        {
+          "text": "是",
+          "confidence": 0.99991,
+          "bbox": [
+            759,
+            448,
+            795,
+            487
+          ]
+        },
+        {
+          "text": "跳过",
+          "confidence": 0.99912,
+          "bbox": [
+            1172,
+            640,
+            1214,
+            664
+          ]
+        }
+      ],
+      "human_ground_truth": false
+    },
+    "home_banner": {
+      "fixture": "083520-home_banner.png",
+      "fixture_sha256": "570ac7efa72e348f3e711bf13b68890494310c1f2b8fceb7a0a3907548d3418d",
+      "source_frame_relative_to_external": "probes/20261017-085342-assisted-chest-skip-confirm-083520/frames/00002-after-assisted-chest-skip-confirm.png",
+      "source_sha256": "5efca3b3f92cda6ebe1be0ebfc7fb077dbcd38ee876dde876443989ab8de88ea",
+      "source_events_relative_to_external": "probes/20261017-085342-assisted-chest-skip-confirm-083520/events.jsonl",
+      "source_events_sha256": "f6fdb28f48032321b958fb2a64fba6bc3f90275dee10ff47860ea910463e6948",
+      "retained_rectangles_at_1280x720": [
+        [
+          495,
+          170,
+          900,
+          235
+        ],
+        [
+          1000,
+          10,
+          1260,
+          210
+        ]
+      ],
+      "recorded_ocr": [
+        {
+          "text": "23692114",
+          "confidence": 0.99995,
+          "bbox": [
+            1104,
+            25,
+            1220,
+            52
+          ]
+        },
+        {
+          "text": "JeRRYSzz",
+          "confidence": 0.80548,
+          "bbox": [
+            122,
+            54,
+            236,
+            82
+          ]
+        },
+        {
+          "text": "荣耀",
+          "confidence": 0.99988,
+          "bbox": [
+            122,
+            78,
+            164,
+            104
+          ]
+        },
+        {
+          "text": "11228617",
+          "confidence": 0.99986,
+          "bbox": [
+            1110,
+            74,
+            1220,
+            100
+          ]
+        },
+        {
+          "text": "442 729",
+          "confidence": 0.9816,
+          "bbox": [
+            1126,
+            124,
+            1218,
+            148
+          ]
+        },
+        {
+          "text": "升级",
+          "confidence": 0.99998,
+          "bbox": [
+            742,
+            156,
+            772,
+            174
+          ]
+        },
+        {
+          "text": "强化",
+          "confidence": 0.99146,
+          "bbox": [
+            294,
+            168,
+            326,
+            188
+          ]
+        },
+        {
+          "text": "231",
+          "confidence": 0.99998,
+          "bbox": [
+            1177,
+            174,
+            1221,
+            200
+          ]
+        },
+        {
+          "text": "打开了一",
+          "confidence": 0.89985,
+          "bbox": [
+            439,
+            181,
+            536,
+            222
+          ]
+        },
+        {
+          "text": "一个宝箱并获得了962000X圣水",
+          "confidence": 0.98261,
+          "bbox": [
+            514,
+            187,
+            858,
+            219
+          ]
+        },
+        {
+          "text": "B天23小时",
+          "confidence": 0.91422,
+          "bbox": [
+            886,
+            202,
+            923,
+            216
+          ]
+        },
+        {
+          "text": "请求增援",
+          "confidence": 0.99978,
+          "bbox": [
+            544,
+            216,
+            608,
+            236
+          ]
+        },
+        {
+          "text": "5小时18分钟",
+          "confidence": 0.99983,
+          "bbox": [
+            1106,
+            226,
+            1220,
+            250
+          ]
+        },
+        {
+          "text": "收集",
+          "confidence": 0.99947,
+          "bbox": [
+            212,
+            249,
+            243,
+            270
+          ]
+        },
+        {
+          "text": "8天13小时",
+          "confidence": 0.9611,
+          "bbox": [
+            950,
+            250,
+            985,
+            262
+          ]
+        },
+        {
+          "text": "商店",
+          "confidence": 0.99999,
+          "bbox": [
+            1190,
+            376,
+            1233,
+            404
+          ]
+        },
+        {
+          "text": "2天B小时",
+          "confidence": 0.97609,
+          "bbox": [
+            961,
+            414,
+            994,
+            426
+          ]
+        },
+        {
+          "text": "2小时12分钟",
+          "confidence": 0.99988,
+          "bbox": [
+            18,
+            480,
+            118,
+            505
+          ]
+        },
+        {
+          "text": "1/50/2",
+          "confidence": 0.99899,
+          "bbox": [
+            1142,
+            540,
+            1252,
+            567
+          ]
+        },
+        {
+          "text": "建造",
+          "confidence": 0.99998,
+          "bbox": [
+            1174,
+            674,
+            1217,
+            700
+          ]
+        }
+      ],
+      "human_ground_truth": false
+    },
+    "home_stable": {
+      "fixture": "083520-home_stable.png",
+      "fixture_sha256": "53ab43f6a7f658aa874b92c0b545df87bfb8244b4302457834c0302a301de0e1",
+      "source_frame_relative_to_external": "probes/20261017-085407-observe/frames/00001-before.png",
+      "source_sha256": "1de755e07e6228e7a7d969795536bd8f204d21220131ab31a251cbda535bfd9c",
+      "source_events_relative_to_external": "probes/20261017-085407-observe/events.jsonl",
+      "source_events_sha256": "6d6ab0a5b63fc4b5f3cd3ab7b3e5c8b882196fb954675e7b9dc68beaf6fc1cd9",
+      "retained_rectangles_at_1280x720": [
+        [
+          1000,
+          10,
+          1260,
+          210
+        ]
+      ],
+      "recorded_ocr": [
+        {
+          "text": "23692114",
+          "confidence": 0.9999,
+          "bbox": [
+            1104,
+            25,
+            1220,
+            52
+          ]
+        },
+        {
+          "text": "JeRRYSZz",
+          "confidence": 0.78478,
+          "bbox": [
+            121,
+            51,
+            237,
+            84
+          ]
+        },
+        {
+          "text": "荣耀",
+          "confidence": 0.99988,
+          "bbox": [
+            122,
+            78,
+            164,
+            104
+          ]
+        },
+        {
+          "text": "11228 617",
+          "confidence": 0.94865,
+          "bbox": [
+            1110,
+            74,
+            1220,
+            100
+          ]
+        },
+        {
+          "text": "1小时-26分卯",
+          "confidence": 0.8195,
+          "bbox": [
+            740,
+            94,
+            778,
+            106
+          ]
+        },
+        {
+          "text": "442 729",
+          "confidence": 0.96736,
+          "bbox": [
+            1127,
+            124,
+            1218,
+            147
+          ]
+        },
+        {
+          "text": "升级",
+          "confidence": 0.99997,
+          "bbox": [
+            743,
+            156,
+            771,
+            172
+          ]
+        },
+        {
+          "text": "强化",
+          "confidence": 0.99146,
+          "bbox": [
+            294,
+            168,
+            326,
+            188
+          ]
+        },
+        {
+          "text": "231",
+          "confidence": 0.99998,
+          "bbox": [
+            1177,
+            174,
+            1221,
+            200
+          ]
+        },
+        {
+          "text": "B天23小时",
+          "confidence": 0.91417,
+          "bbox": [
+            886,
+            202,
+            923,
+            216
+          ]
+        },
+        {
+          "text": "5小时18分钟",
+          "confidence": 0.99978,
+          "bbox": [
+            1106,
+            226,
+            1220,
+            250
+          ]
+        },
+        {
+          "text": "收集",
+          "confidence": 0.99944,
+          "bbox": [
+            212,
+            249,
+            243,
+            270
+          ]
+        },
+        {
+          "text": "8天13小时",
+          "confidence": 0.9611,
+          "bbox": [
+            950,
+            250,
+            985,
+            262
+          ]
+        },
+        {
+          "text": "商店",
+          "confidence": 0.99999,
+          "bbox": [
+            1190,
+            376,
+            1233,
+            404
+          ]
+        },
+        {
+          "text": "2天B小时",
+          "confidence": 0.96451,
+          "bbox": [
+            960,
+            413,
+            996,
+            426
+          ]
+        },
+        {
+          "text": "2小时12分钟",
+          "confidence": 0.99991,
+          "bbox": [
+            18,
+            480,
+            118,
+            505
+          ]
+        },
+        {
+          "text": "1/5",
+          "confidence": 0.99291,
+          "bbox": [
+            1143,
+            541,
+            1205,
+            566
+          ]
+        },
+        {
+          "text": "0/2",
+          "confidence": 0.99636,
+          "bbox": [
+            1195,
+            541,
+            1252,
+            566
+          ]
+        },
+        {
+          "text": "建造",
+          "confidence": 0.99998,
+          "bbox": [
+            1174,
+            674,
+            1217,
+            700
+          ]
+        }
+      ],
+      "human_ground_truth": false
+    }
+  }
+}

@@ -120,6 +120,10 @@ def _picker_row(image: np.ndarray) -> tuple[str | None, list[tuple[int, int, int
             if _red_minus(image, left + 78, top + 16):
                 boxes.append((left, top, left + 98, top + 98))
         found[kind] = boxes
+    # The current siege tray shares the shifted spell row but starts at the
+    # right of the army. Only fully visible cards anchor this navigation view.
+    found["siege"] = [(left, 287, left + 98, 385) for left in (1015, 1119)
+                       if _red_minus(image, left + 78, 303)]
     active = [kind for kind, boxes in found.items() if boxes]
     return (active[0], found[active[0]]) if len(active) == 1 else (None, [])
 
@@ -154,6 +158,26 @@ def _picker_count(provider: OCRProvider | None, path: Path, texts: Sequence[OCRT
             variants = {"gray": gray, "inverted": 255 - gray,
                         "threshold": cv2.threshold(gray, 170, 255,
                                                    cv2.THRESH_BINARY)[1]}
+            # On 18.647.2 the selected balloon's x1 can collapse to "xi"
+            # when the 2560x1440 capture is reduced to the canonical frame.
+            # Re-read only its quantity glyph from this same capture. The
+            # ordinary two independent contrast-variant votes still apply.
+            if (client_version == "18.647.2" and unit_id == "balloon"
+                    and box == (870, 194, 968, 292)
+                    and native_resolution == (2560, 1440)):
+                native = (cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+                          if path.is_file() else None)
+                if native is not None and native.shape[:2] == (1440, 2560):
+                    nl, nt, nr, nb = scale_box((870, 195, 910, 221),
+                                               from_resolution=_BASE,
+                                               to_resolution=native_resolution)
+                    native_gray = cv2.cvtColor(native[nt:nb, nl:nr], cv2.COLOR_BGR2GRAY)
+                    variants.update({
+                        "native_gray": native_gray,
+                        "native_inverted": 255 - native_gray,
+                        "native_threshold": cv2.threshold(native_gray, 170, 255,
+                                                          cv2.THRESH_BINARY)[1],
+                    })
             observed: list[dict[str, object]] = []
             for name, crop in variants.items():
                 reads = image_reader(crop)
@@ -220,26 +244,39 @@ def _bottom_picker_controls(image: np.ndarray, kind: str,
     """Only independently sampled portraits can produce a bottom-card control."""
     controls: list[dict[str, object]] = []
     availability: dict[str, dict[str, object]] = {}
-    if client_version != template_manifest().get("client"):
+    if client_version is None or client_version != template_manifest(
+            client_version=client_version).get("client"):
         return controls, availability
     matches: dict[str, list[dict[str, object]]] = {}
-    for top in (431, 568):
-        for index in range(9):
-            left = round(33 + index * 130.25)
-            box = (left, top, left + 124, top + 124)
-            identity = recognize_card_identity(image, box, kind,
-                                               surface="current_picker",
-                                               client_version=client_version)
-            unit_id = identity["unit_id"]
-            if unit_id is None or not identity["evidence"]:
-                continue
-            matched = identity["evidence"][0]["template"]
-            state = ("capacity_gray" if "_capacity_gray_" in matched else
-                     "active" if "_active_" in matched else None)
-            if state is None:
-                continue
-            matches.setdefault(unit_id, []).append({"box": box, "identity": identity,
-                                                     "state": state})
+    boxes = [(round(33 + index * 130.25), top,
+              round(33 + index * 130.25) + 124, top + 124)
+             for top in (431, 568) for index in range(9)]
+    # The last visible troop card shifts with the picker page. A portrait can
+    # match inside an adjacent, incomplete slot; derive this one card's box
+    # from its own blue information glyph and require all four frame edges.
+    furnace_box = None
+    if (kind == "troop" and client_version == "18.647.2"
+            and isinstance(capacity, dict)
+            and capacity.get("used") == capacity.get("total")):
+        furnace_box = _furnace_picker_box(image, client_version)
+        if furnace_box is not None and furnace_box not in boxes:
+            boxes.append(furnace_box)
+    for box in boxes:
+        identity = recognize_card_identity(image, box, kind,
+                                           surface="current_picker",
+                                           client_version=client_version)
+        unit_id = identity["unit_id"]
+        if unit_id is None or not identity["evidence"]:
+            continue
+        if unit_id == "furnace" and box != furnace_box:
+            continue
+        matched = identity["evidence"][0]["template"]
+        state = ("capacity_gray" if "_capacity_gray_" in matched else
+                 "active" if "_active_" in matched else None)
+        if state is None:
+            continue
+        matches.setdefault(unit_id, []).append({"box": box, "identity": identity,
+                                                 "state": state})
     for unit_id, hits in matches.items():
         if len(hits) != 1:
             continue
@@ -268,12 +305,136 @@ def _bottom_picker_controls(image: np.ndarray, kind: str,
     return controls, availability
 
 
+def _closed_furnace_picker_frame(image: np.ndarray,
+                                 box: tuple[int, int, int, int]) -> bool:
+    """Check the observed complete second-row frame, not a clipped portrait."""
+    left, top, right, bottom = box
+    if top != 568 or right - left != 124 or bottom - top != 124 or not (0 <= left and right <= 1280):
+        return False
+    gray = cv2.cvtColor(image[top:bottom, left:right], cv2.COLOR_BGR2GRAY)
+    frame = (gray[2:7, 10:114], gray[10:114, 2:7],
+             gray[10:114, 117:122], gray[117:122, 10:114])
+    return all(float(np.mean(edge > 140)) >= minimum
+               for edge, minimum in zip(frame, (.55, .70, .68, .40)))
+
+
+def _furnace_picker_box(image: np.ndarray, client_version: str) -> tuple[int, int, int, int] | None:
+    """Locate the sampled Furnace card from its own icon and closed frame."""
+    icon_path = CATALOG_ROOT / "current_picker_blue_info_18_647_2.png"
+    icon = (cv2.imdecode(np.fromfile(icon_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if icon_path.is_file() else None)
+    if icon is None or icon.shape[:2] != (28, 28):
+        return None
+    scores = cv2.matchTemplate(image[568:600, 25:1245], icon, cv2.TM_CCOEFF_NORMED)
+    candidates: list[tuple[int, int, int, int]] = []
+    for y, x in zip(*np.where(scores >= .95)):
+        # In the sampled UI the icon's top-left is 90 px right and 3 px
+        # below its card's top-left. Offset alone does not authorize a card.
+        if int(y) != 3:
+            continue
+        left = int(x) + 25 - 90
+        box = (left, 568, left + 124, 692)
+        if not _closed_furnace_picker_frame(image, box):
+            continue
+        identity = recognize_card_identity(image, box, "troop",
+                                           surface="current_picker",
+                                           client_version=client_version)
+        if identity["unit_id"] == "furnace" and box not in candidates:
+            candidates.append(box)
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _lightning_info_control(image: np.ndarray, controls: list[dict[str, object]],
+                            capacity: dict[str, int] | None,
+                            baseline_resolution: tuple[int, int]) -> dict[str, object] | None:
+    """Bind the observed blue i to a separately identified gray lightning card."""
+    box = (33, 431, 157, 555)
+    card_box = list(scale_box(box, from_resolution=_BASE,
+                              to_resolution=baseline_resolution))
+    hits = [control for control in controls if control.get("action") == "increment"
+            and control.get("unit_id") == "lightning_spell"
+            and control.get("evidence", {}).get("card_bbox") == card_box
+            and control.get("evidence", {}).get("state") == "capacity_gray"
+            and control.get("identity_verified") is True
+            and control.get("enabled") is False]
+    if (len(hits) != 1 or not isinstance(capacity, dict)
+            or capacity.get("used") != capacity.get("total")):
+        return None
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    border = {"top": float(np.mean(gray[432:438, 65:116] > 140)),
+              "left": float(np.mean(gray[459:525, 33:40] > 140)),
+              "right": float(np.mean(gray[465:525, 150:157] > 140))}
+    if border["top"] < .35 or border["left"] < .35 or border["right"] < .30:
+        return None
+    icon_path = CATALOG_ROOT / "current_picker_blue_info_18_647_2.png"
+    icon = cv2.imdecode(np.fromfile(icon_path, dtype=np.uint8), cv2.IMREAD_COLOR) if icon_path.is_file() else None
+    if icon is None or icon.shape[:2] != (28, 28):
+        return None
+    score = float(cv2.matchTemplate(image[436:464, 123:151], icon,
+                                    cv2.TM_CCOEFF_NORMED)[0, 0])
+    if not np.isfinite(score) or score < .94:
+        return None
+    return {"action": "open_info", "unit_id": "lightning_spell",
+            "point": _scale_point(138, 450, baseline_resolution),
+            "confidence": round(min(float(hits[0]["confidence"]), score), 5),
+            "enabled": True, "cost_free": True, "identity_verified": True,
+            "evidence": {"identity": hits[0]["evidence"]["identity"],
+                         "card_bbox": card_box, "card_border": border,
+                         "blue_info_score": round(score, 5),
+                         "blue_info_template": str(icon_path)}}
+
+
+def _totem_info_control(image: np.ndarray, controls: list[dict[str, object]],
+                        capacity: dict[str, int] | None,
+                        baseline_resolution: tuple[int, int]) -> dict[str, object] | None:
+    """Only the sampled gray second-row card's blue i opens Totem details."""
+    box = (554, 568, 678, 692)
+    card_box = list(scale_box(box, from_resolution=_BASE,
+                              to_resolution=baseline_resolution))
+    hits = [control for control in controls if control.get("action") == "increment"
+            and control.get("unit_id") == "totem_spell"
+            and control.get("evidence", {}).get("card_bbox") == card_box
+            and control.get("evidence", {}).get("state") == "capacity_gray"
+            and control.get("identity_verified") is True
+            and control.get("enabled") is False]
+    if (len(hits) != 1 or not isinstance(capacity, dict)
+            or capacity.get("used") != capacity.get("total")):
+        return None
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    # The second row's bright outline is inset by two pixels. Require its
+    # independent top and both side borders before exposing an information tap.
+    border = {"top": float(np.mean(gray[569:575, 586:637] > 140)),
+              "left": float(np.mean(gray[596:662, 556:560] > 140)),
+              "right": float(np.mean(gray[602:662, 674:678] > 140))}
+    if border["top"] < .35 or border["left"] < .35 or border["right"] < .35:
+        return None
+    icon_path = CATALOG_ROOT / "current_picker_totem_blue_info_18_647_2.png"
+    icon = (cv2.imdecode(np.fromfile(icon_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if icon_path.is_file() else None)
+    if icon is None or icon.shape[:2] != (28, 28):
+        return None
+    score = float(cv2.matchTemplate(image[571:599, 645:673], icon,
+                                    cv2.TM_CCOEFF_NORMED)[0, 0])
+    if not np.isfinite(score) or score < .94:
+        return None
+    return {"action": "open_info", "unit_id": "totem_spell",
+            "point": _scale_point(659, 587, baseline_resolution),
+            "confidence": round(min(float(hits[0]["confidence"]), score), 5),
+            "enabled": True, "cost_free": True, "identity_verified": True,
+            "evidence": {"identity": hits[0]["evidence"]["identity"],
+                         "card_bbox": card_box, "card_border": border,
+                         "blue_info_score": round(score, 5),
+                         "blue_info_template": str(icon_path),
+                         "identity_provenance": "2级图腾法术 detail in 20261016-earthquake-info-v2"}}
+
+
 def _current_picker(path: Path, image: np.ndarray, provider: OCRProvider | None,
                     texts: Sequence[OCRText], native_resolution: tuple[int, int],
                     client_version: str | None,
                     baseline_resolution: tuple[int, int]) -> dict[str, object]:
     kind, boxes = _picker_row(image)
     capacities = _capacities(texts, edit=False)
+    spell_capacity_conflict = False
     if kind == "spell":
         shifted_troop = [item for item in texts if item.confidence >= .88 and item.bbox is not None
                          and _inside(item, (550, 55, 710, 110))
@@ -286,16 +447,22 @@ def _current_picker(path: Path, image: np.ndarray, provider: OCRProvider | None,
         shifted = [item for item in texts if item.confidence >= .88 and item.bbox is not None
                    and _inside(item, (560, 235, 675, 275))
                    and _CAPACITY.fullmatch(item.text.strip())]
-        if len(shifted) == 1:
-            match = _CAPACITY.fullmatch(shifted[0].text.strip())
-            used, total = int(match.group(1)), int(match.group(2))
+        spell_values = {(int(match.group(1)), int(match.group(2))) for item in shifted
+                        if (match := _CAPACITY.fullmatch(item.text.strip())) is not None}
+        spell_capacity_conflict = len(spell_values) > 1
+        if spell_capacity_conflict:
+            capacities.pop("spell", None)
+        elif len(spell_values) == 1:
+            used, total = next(iter(spell_values))
             if 0 <= used <= total <= 20:
                 capacities["spell"] = {"used": used, "total": total}
     rows = ({"troop": ((560, 145, 680, 185), 500),
              "spell": ((560, 325, 670, 365), 20)} if kind == "troop" else
             {"troop": ((560, 55, 680, 100), 500),
-             "spell": ((560, 235, 670, 275), 20)})
+            "spell": ((560, 235, 680, 275), 20)})
     for name, (roi, maximum) in rows.items():
+        if name == "spell" and spell_capacity_conflict:
+            continue  # A narrow OCR read cannot erase strong full-frame disagreement.
         if name not in capacities:
             observed = _local_capacity(path, provider, native_resolution, roi, maximum)
             if observed is not None:
@@ -307,6 +474,8 @@ def _current_picker(path: Path, image: np.ndarray, provider: OCRProvider | None,
                                  "complete_kinds": {"troop": False, "spell": False},
                                  "unit_availability": {}, "unit_housing_space": {},
                                  "unknowns": [], "complete": False}
+    if spell_capacity_conflict:
+        result["unknowns"].append("picker_spell_capacity_conflict")
     if kind is None:
         result["unknowns"].append("picker_editing_kind_unverified")
         return result
@@ -316,6 +485,11 @@ def _current_picker(path: Path, image: np.ndarray, provider: OCRProvider | None,
                                "confidence": .95, "enabled": True, "cost_free": True,
                                "evidence": {"visual": "observed_dimmed_background_dismissal",
                                             "editing_kind": kind}})
+    if kind == "siege":
+        # Detail inspection and paging do not need to change this lineup.
+        # Do not infer hidden counts or expose add/remove actions from this view.
+        result["unknowns"].append("siege_picker_mutation_not_calibrated")
+        return result
     if boxes != [(558 + i * 104, boxes[0][1], 656 + i * 104, boxes[0][1] + 98)
                  for i in range(len(boxes))]:
         result["unknowns"].append("picker_selected_cards_not_contiguous")
@@ -362,7 +536,17 @@ def _current_picker(path: Path, image: np.ndarray, provider: OCRProvider | None,
         image, kind, client_version, baseline_resolution, seen,
         result["capacities"].get(kind))
     result["controls"].extend(bottom_controls)
+    if kind == "spell" and client_version == "18.647.2":
+        for locate_info in (_lightning_info_control, _totem_info_control):
+            info = locate_info(image, bottom_controls,
+                               result["capacities"].get("spell"), baseline_resolution)
+            if info is not None:
+                result["controls"].append(info)
     result["unit_availability"].update(availability)
+    for control in bottom_controls:
+        unit = get_unit(control["unit_id"])
+        if type(unit.housing_space) is int and unit.housing_space > 0:
+            result["unit_housing_space"][unit.unit_id] = unit.housing_space
     return result
 
 
@@ -372,6 +556,29 @@ def _save_current_icon_visible(image: np.ndarray) -> bool:
     white = float(np.mean((hsv[:, :, 1] < 65) & (hsv[:, :, 2] > 170)))
     outline = float(np.mean(hsv[:, :, 2] < 65))
     return white >= .07 and outline >= .1
+
+
+def _hero_picker_visual_anchors(image: np.ndarray) -> list[int]:
+    """Find the light selector header against its dimmed army background."""
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    anchors = []
+    # The sampled 18.647.2 selector follows the selected hero column. Search
+    # for its panel, not a single fixed column or a portrait's identity.
+    for left in range(300, 801, 5):
+        header = gray[125:155, left + 82:left + 217]
+        outside = gray[125:155, left + 262:left + 397]
+        border = gray[112:121, left - 173:left + 217]
+        if (112 <= float(header.mean()) <= 145 and float(header.std()) <= 8
+                and float(header.mean() - outside.mean()) >= 45
+                and float(border.mean()) <= 75):
+            anchors.append(left)
+    return anchors
+
+
+def _hero_picker_close_backdrop_visible(image: np.ndarray) -> bool:
+    """Only offer the observed outside-panel dismissal on an empty dim backdrop."""
+    gray = cv2.cvtColor(image[240:300, 1070:1130], cv2.COLOR_BGR2GRAY)
+    return 25 <= float(gray.mean()) <= 50 and float(gray.std()) <= 10
 
 
 def _save_current_dialog(image: np.ndarray, texts: Sequence[OCRText]) -> dict[str, object] | None:
@@ -458,6 +665,33 @@ def recognize_army_editor(
         return save_dialog
     saved_title = _one(canonical, "已保存的配置", (545, 40, 735, 105))
     army_title = _one(canonical, "我的军队", (185, 40, 340, 105))
+    hero_titles = [item for item in canonical if item.text.strip() == "选择英雄"
+                   and item.confidence >= .9]
+    hero_panel = _hero_picker_visual_anchors(image)
+    if hero_titles or hero_panel:
+        # The selector leaves the My Army tabs and capacities visible. Never
+        # expose their underlying open/edit controls while the modal is present
+        # or one of its two independent anchors is obscured.
+        titles = [item for item in hero_titles
+                  if _inside(item, (300, 110, 850, 170))]
+        if (client_version != "18.647.2" or army_title is None or saved_title is None
+                or len(titles) != 1 or
+                not any(abs(left - titles[0].bbox[0]) <= 15 for left in hero_panel)):
+            result["unknowns"].append("hero_picker_unverified")
+            return result
+        result["surface"] = "hero_picker"
+        result["ready"] = True
+        if _hero_picker_close_backdrop_visible(image):
+            result["controls"].append({
+                "action": "close_hero_picker",
+                "point": _scale_point(1100, 270, baseline_resolution),
+                "confidence": .95, "enabled": True, "cost_free": True,
+                "evidence": {"title": asdict(titles[0]),
+                             "visual": "light_selector_header_dark_border_and_dim_backdrop",
+                             "dismissal": "observed_empty_background"}})
+        else:
+            result["unknowns"].append("hero_picker_close_backdrop_unverified")
+        return result
     edit_titles = [item for item in canonical if item.bbox is not None and
                    _TITLE.search(item.text.replace(" ", "")) and item.confidence >= .88 and
                    _inside(item, (460, 25, 780, 110))]
@@ -467,11 +701,14 @@ def recognize_army_editor(
         # clipping both tabs. The fully occupied hero header at its observed
         # shifted location distinguishes this sampled current layout from the
         # saved-plan editor's partially filled hero row.
-        shifted_current = (picker_kind == "spell" and army_title is None and
+        shifted_current = (picker_kind in {"spell", "siege"} and army_title is None and
                            _one(canonical, "4/4", (40, 55, 105, 100)) is not None and
                            _one(canonical, "强化军队", (850, 15, 1050, 100)) is not None and
                            _one(canonical, "强化英雄", (1020, 15, 1220, 100)) is not None and
                            not edit_titles)
+        if picker_kind == "siege" and client_version != "18.647.2":
+            result["unknowns"].append("siege_picker_client_unverified")
+            return result
         if (saved_title is not None and army_title is not None) or shifted_current:
             return _current_picker(path, image, provider, canonical, (width, height),
                                    client_version, baseline_resolution)
@@ -558,14 +795,48 @@ def recognize_army_editor(
     return result
 
 
-def _visual_fingerprint(crop: np.ndarray, box: tuple[int, int, int, int]) -> dict[str, object]:
+def _visual_fingerprint(crop: np.ndarray, box: tuple[int, int, int, int], *,
+                        animation_hero_id: str | None = None) -> dict[str, object]:
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     resized = cv2.resize(gray, (32, 32), interpolation=cv2.INTER_AREA).astype(np.float32)
     coefficients = cv2.dct(resized)[:8, :8]
     bits = coefficients > np.median(coefficients.flat[1:])
     value = sum(int(bit) << index for index, bit in enumerate(bits.flat))
-    return {"phash": f"{value:016x}", "mean_bgr": [round(float(x), 2) for x in crop.mean((0, 1))],
-            "std_bgr": [round(float(x), 2) for x in crop.std((0, 1))], "bbox": list(box)}
+    result = {"phash": f"{value:016x}", "mean_bgr": [round(float(x), 2) for x in crop.mean((0, 1))],
+              "std_bgr": [round(float(x), 2) for x in crop.std((0, 1))], "bbox": list(box)}
+    if animation_hero_id is not None:
+        result["animation"] = {"schema": "pet_gray16_v1", "client_version": "18.647.2",
+                               "hero_id": animation_hero_id,
+                               "gray16": cv2.resize(gray, (16, 16),
+                                                    interpolation=cv2.INTER_AREA).tobytes().hex()}
+    return result
+
+
+def _pet_animation_matches(first: dict, second: dict, hamming: int,
+                           mean_delta: float, std_delta: float) -> bool:
+    """Prove near-identical pet structure when animation perturbs the hash."""
+    if not 8 < hamming <= 12 or mean_delta > 3 or std_delta > 3:
+        return False
+    a, b = first.get("animation"), second.get("animation")
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return False
+    if (a.get("schema") != "pet_gray16_v1" or b.get("schema") != "pet_gray16_v1"
+            or a.get("client_version") != "18.647.2" or b.get("client_version") != "18.647.2"
+            or not isinstance(a.get("hero_id"), str) or a["hero_id"] != b.get("hero_id")):
+        return False
+    hero = get_unit(a["hero_id"])
+    if hero is None or hero.kind != "hero":
+        return False
+    arrays = []
+    for item in (a, b):
+        encoded = item.get("gray16")
+        if not isinstance(encoded, str) or re.fullmatch(r"[0-9a-f]{512}", encoded) is None:
+            return False
+        pixels = np.frombuffer(bytes.fromhex(encoded), dtype=np.uint8).reshape(16, 16)
+        if float(pixels.std()) < 15:
+            return False
+        arrays.append(pixels)
+    return float(cv2.matchTemplate(arrays[0], arrays[1], cv2.TM_CCOEFF_NORMED)[0, 0]) >= .98
 
 
 def visual_fingerprint_matches(first: dict, second: dict) -> bool:
@@ -574,10 +845,17 @@ def visual_fingerprint_matches(first: dict, second: dict) -> bool:
         a, b = int(first["phash"], 16), int(second["phash"], 16)
         means_a, means_b = first["mean_bgr"], second["mean_bgr"]
         deviations_a, deviations_b = first["std_bgr"], second["std_bgr"]
-        return ((a ^ b).bit_count() <= 8 and len(means_a) == len(means_b) == 3
-                and len(deviations_a) == len(deviations_b) == 3
-                and max(abs(float(x) - float(y)) for x, y in zip(means_a, means_b)) <= 12
-                and max(abs(float(x) - float(y)) for x, y in zip(deviations_a, deviations_b)) <= 12)
+        if not len(means_a) == len(means_b) == len(deviations_a) == len(deviations_b) == 3:
+            return False
+        numbers = [float(x) for group in (means_a, means_b, deviations_a, deviations_b) for x in group]
+        if not all(np.isfinite(value) for value in numbers):
+            return False
+        mean_delta = max(abs(float(x) - float(y)) for x, y in zip(means_a, means_b))
+        std_delta = max(abs(float(x) - float(y)) for x, y in zip(deviations_a, deviations_b))
+        if mean_delta > 12 or std_delta > 12:
+            return False
+        hamming = (a ^ b).bit_count()
+        return hamming <= 8 or _pet_animation_matches(first, second, hamming, mean_delta, std_delta)
     except (KeyError, TypeError, ValueError):
         return False
 
@@ -666,7 +944,13 @@ def recognize_hero_loadout(
             if float(crop.std()) < 15:
                 result["unknowns"].append("hero_loadout_icon_obscured")
                 return result
-            state[name] = _visual_fingerprint(crop, box)
+            evidence = card.get("evidence")
+            identity = evidence.get("identity") if isinstance(evidence, dict) else None
+            animation_hero = (unit_id if name == "pet_visual" and isinstance(identity, dict)
+                              and identity.get("unit_id") == unit_id
+                              and identity.get("version_verified") is True
+                              and identity.get("template_client_version") == "18.647.2" else None)
+            state[name] = _visual_fingerprint(crop, box, animation_hero_id=animation_hero)
         result["hero_loadout"][unit_id] = state
     result["complete"] = True
     return result

@@ -1,0 +1,600 @@
+{
+  "client_version": "18.647.2",
+  "fixtures": {
+    "settlement_claim": {
+      "source_relative_to_reports": "live/20261016-092326-164096-a62d874d/frames/00070-battle-settlement.png",
+      "source_sha256": "15f3bb84c03562131afdf05008d4d01a59158b0f7c355305ed7d54c79db3977c",
+      "fixture_sha256": "a1595e7c72a31c35ec12eff08a8c2241116da7d1b077f624f3699ec5e4535efa",
+      "transformation": "resize_INTER_AREA_1280x720_and_blackout_boxes",
+      "blackout_boxes_1280x720": [
+        [
+          0,
+          0,
+          290,
+          75
+        ],
+        [
+          600,
+          450,
+          680,
+          468
+        ]
+      ],
+      "ocr_from_saved_event_or_summary": [
+        {
+          "text": "47%",
+          "confidence": 0.99944,
+          "bbox": [
+            610,
+            102,
+            672,
+            132
+          ]
+        },
+        {
+          "text": "胜利",
+          "confidence": 0.99987,
+          "bbox": [
+            607,
+            192,
+            672,
+            238
+          ]
+        },
+        {
+          "text": "您得到了",
+          "confidence": 0.99991,
+          "bbox": [
+            597,
+            286,
+            670,
+            312
+          ]
+        },
+        {
+          "text": "77944",
+          "confidence": 0.99998,
+          "bbox": [
+            560,
+            314,
+            670,
+            348
+          ]
+        },
+        {
+          "text": "75%奖励：",
+          "confidence": 0.98896,
+          "bbox": [
+            914,
+            318,
+            1008,
+            344
+          ]
+        },
+        {
+          "text": "+281250",
+          "confidence": 0.99904,
+          "bbox": [
+            920,
+            350,
+            1006,
+            376
+          ]
+        },
+        {
+          "text": "1000109",
+          "confidence": 0.99986,
+          "bbox": [
+            516,
+            357,
+            671,
+            399
+          ]
+        },
+        {
+          "text": "+281250",
+          "confidence": 0.99933,
+          "bbox": [
+            920,
+            387,
+            1004,
+            412
+          ]
+        },
+        {
+          "text": "1770",
+          "confidence": 0.99993,
+          "bbox": [
+            578,
+            408,
+            668,
+            443
+          ]
+        },
+        {
+          "text": "+2081",
+          "confidence": 0.99962,
+          "bbox": [
+            942,
+            424,
+            1006,
+            449
+          ]
+        },
+        {
+          "text": "损耗的部队",
+          "confidence": 0.99949,
+          "bbox": [
+            592,
+            464,
+            674,
+            484
+          ]
+        },
+        {
+          "text": "领取奖励",
+          "confidence": 0.9998,
+          "bbox": [
+            579,
+            608,
+            648,
+            634
+          ]
+        }
+      ],
+      "human_review": false,
+      "formal_acceptance": false
+    },
+    "chest_ordinary_4": {
+      "source_relative_to_reports": "probes/20261016-093242-575639-claim-battle-reward-v1/frames/00003-after-claim-reread.png",
+      "source_sha256": "dd23d2d760379a4874059484d9be12d4b0c4d0ca92973be79851f74a9b5ea385",
+      "fixture_sha256": "527366cb08b15d024fcfb47e44158f72d3e1cc50c22b43323d9e2b440cca6dd1",
+      "transformation": "resize_INTER_AREA_1280x720_and_blackout_boxes",
+      "blackout_boxes_1280x720": [],
+      "ocr_from_saved_event_or_summary": [
+        {
+          "text": "0",
+          "confidence": 0.81354,
+          "bbox": [
+            594,
+            352,
+            697,
+            445
+          ]
+        },
+        {
+          "text": "普通",
+          "confidence": 0.99999,
+          "bbox": [
+            602,
+            512,
+            656,
+            546
+          ]
+        },
+        {
+          "text": "口",
+          "confidence": 0.83901,
+          "bbox": [
+            698,
+            574,
+            742,
+            615
+          ]
+        },
+        {
+          "text": "1",
+          "confidence": 0.84919,
+          "bbox": [
+            639,
+            598,
+            666,
+            628
+          ]
+        }
+      ],
+      "human_review": false,
+      "formal_acceptance": false
+    },
+    "chest_rare_3": {
+      "source_relative_to_reports": "probes/20261016-093517-654374-chest-step/frames/00003-after-inspected-step-reread.png",
+      "source_sha256": "87de957aa49374f8a1e4d97161b55977cd6695e41f368601d956d4e53d2ca304",
+      "fixture_sha256": "9e25f649f9b856037031cf158c8adfcaa3eccd9d2dd8dc4a8cb9e092becf9ba0",
+      "transformation": "resize_INTER_AREA_1280x720_and_blackout_boxes",
+      "blackout_boxes_1280x720": [],
+      "ocr_from_saved_event_or_summary": [
+        {
+          "text": "点击！",
+          "confidence": 0.99939,
+          "bbox": [
+            596,
+            166,
+            661,
+            200
+          ]
+        },
+        {
+          "text": "稀有",
+          "confidence": 0.99578,
+          "bbox": [
+            603,
+            513,
+            657,
+            548
+          ]
+        }
+      ],
+      "human_review": false,
+      "formal_acceptance": false
+    },
+    "chest_rare_2": {
+      "source_relative_to_reports": "probes/20261016-093617-121390-chest-step/frames/00003-after-inspected-step-reread.png",
+      "source_sha256": "634b4557e6884bafd5b24c0f938ea56ad7b2678e68f09cc24966c7bd1f5fdd5f",
+      "fixture_sha256": "57f984758031ba2999d3264140ab9baf1d999b05c73f08901749e1a3d053d375",
+      "transformation": "resize_INTER_AREA_1280x720_and_blackout_boxes",
+      "blackout_boxes_1280x720": [],
+      "ocr_from_saved_event_or_summary": [
+        {
+          "text": "点击！",
+          "confidence": 0.99958,
+          "bbox": [
+            596,
+            166,
+            661,
+            200
+          ]
+        },
+        {
+          "text": "稀有",
+          "confidence": 0.99578,
+          "bbox": [
+            603,
+            513,
+            657,
+            548
+          ]
+        }
+      ],
+      "human_review": false,
+      "formal_acceptance": false
+    },
+    "chest_rare_1": {
+      "source_relative_to_reports": "probes/20261016-093740-121552-chest-step/frames/00003-after-inspected-step-reread.png",
+      "source_sha256": "11d5a581cfcb2f8b10c701f54865e3a54d9ea37ecfe340d4414d5d17d31384f1",
+      "fixture_sha256": "140633ad96fff2f9e250328d6a1dbfba15a1664e2fb92d1010f163bd3777fc01",
+      "transformation": "resize_INTER_AREA_1280x720_and_blackout_boxes",
+      "blackout_boxes_1280x720": [],
+      "ocr_from_saved_event_or_summary": [
+        {
+          "text": "点击！",
+          "confidence": 0.99947,
+          "bbox": [
+            595,
+            166,
+            661,
+            200
+          ]
+        },
+        {
+          "text": "稀有",
+          "confidence": 0.99578,
+          "bbox": [
+            603,
+            513,
+            657,
+            548
+          ]
+        }
+      ],
+      "human_review": false,
+      "formal_acceptance": false
+    },
+    "hero_potion_temporary_storage": {
+      "source_relative_to_reports": "probes/20261016-093903-836291-chest-step/frames/00003-after-inspected-step-reread.png",
+      "source_sha256": "2bdef6745586621a32e07e53e7542242e6e9943eaae2db4ccdff52ad7f149d82",
+      "fixture_sha256": "4b1fe79ee92232529854b19399a20dbce572e90b4dc660d73fe903d4bb0ee7ad",
+      "transformation": "resize_INTER_AREA_1280x720_and_blackout_boxes",
+      "blackout_boxes_1280x720": [],
+      "ocr_from_saved_event_or_summary": [
+        {
+          "text": "英雄药水",
+          "confidence": 0.99995,
+          "bbox": [
+            605,
+            200,
+            696,
+            231
+          ]
+        },
+        {
+          "text": "仓库已满！存放不下的部分已运送到临时仓库。",
+          "confidence": 0.99986,
+          "bbox": [
+            458,
+            516,
+            826,
+            542
+          ]
+        },
+        {
+          "text": "继续",
+          "confidence": 0.99996,
+          "bbox": [
+            628,
+            640,
+            672,
+            667
+          ]
+        }
+      ],
+      "human_review": false,
+      "formal_acceptance": false
+    },
+    "home_after": {
+      "source_relative_to_reports": "probes/20261016-094007-973593-chest-step/frames/00003-after-inspected-step-reread.png",
+      "source_sha256": "25de0cde1cfa3153c85a202f4aacac3284af28b969963271dcfde752e5ace11f",
+      "fixture_sha256": "6a7a1d002cfb87c62d1f26a18c6d84edffe626d96bc97665ac5331459e82b3e5",
+      "transformation": "resize_INTER_AREA_1280x720_and_blackout_boxes",
+      "blackout_boxes_1280x720": [
+        [
+          95,
+          0,
+          270,
+          120
+        ],
+        [
+          535,
+          258,
+          600,
+          284
+        ]
+      ],
+      "ocr_from_saved_event_or_summary": [
+        {
+          "text": "19244661",
+          "confidence": 0.99991,
+          "bbox": [
+            1100,
+            24,
+            1220,
+            52
+          ]
+        },
+        {
+          "text": "5316226",
+          "confidence": 0.9998,
+          "bbox": [
+            1112,
+            73,
+            1220,
+            100
+          ]
+        },
+        {
+          "text": "387 254",
+          "confidence": 0.96587,
+          "bbox": [
+            1126,
+            124,
+            1218,
+            148
+          ]
+        },
+        {
+          "text": "升级",
+          "confidence": 0.99998,
+          "bbox": [
+            745,
+            150,
+            775,
+            168
+          ]
+        },
+        {
+          "text": "强化",
+          "confidence": 0.97916,
+          "bbox": [
+            286,
+            163,
+            318,
+            184
+          ]
+        },
+        {
+          "text": "217",
+          "confidence": 0.99999,
+          "bbox": [
+            1177,
+            174,
+            1220,
+            200
+          ]
+        },
+        {
+          "text": "9关22小时",
+          "confidence": 0.90636,
+          "bbox": [
+            894,
+            200,
+            930,
+            211
+          ]
+        },
+        {
+          "text": "请求增援",
+          "confidence": 0.99969,
+          "bbox": [
+            542,
+            212,
+            596,
+            232
+          ]
+        },
+        {
+          "text": "+",
+          "confidence": 0.83296,
+          "bbox": [
+            1067,
+            226,
+            1088,
+            248
+          ]
+        },
+        {
+          "text": "14分钟9秒",
+          "confidence": 0.99949,
+          "bbox": [
+            1120,
+            225,
+            1219,
+            252
+          ]
+        },
+        {
+          "text": "收集",
+          "confidence": 0.99986,
+          "bbox": [
+            202,
+            246,
+            231,
+            267
+          ]
+        },
+        {
+          "text": "9天12小",
+          "confidence": 0.98417,
+          "bbox": [
+            958,
+            248,
+            996,
+            260
+          ]
+        },
+        {
+          "text": "14小时41分年",
+          "confidence": 0.91845,
+          "bbox": [
+            419,
+            315,
+            461,
+            328
+          ]
+        },
+        {
+          "text": "商店",
+          "confidence": 0.99999,
+          "bbox": [
+            1190,
+            376,
+            1233,
+            404
+          ]
+        },
+        {
+          "text": "3天助时",
+          "confidence": 0.81119,
+          "bbox": [
+            969,
+            415,
+            1004,
+            428
+          ]
+        },
+        {
+          "text": "1小时26分钟",
+          "confidence": 0.99764,
+          "bbox": [
+            18,
+            482,
+            118,
+            504
+          ]
+        },
+        {
+          "text": "0/50/2",
+          "confidence": 0.98618,
+          "bbox": [
+            1136,
+            539,
+            1254,
+            568
+          ]
+        },
+        {
+          "text": "建造",
+          "confidence": 0.99998,
+          "bbox": [
+            1174,
+            674,
+            1217,
+            700
+          ]
+        }
+      ],
+      "human_review": false,
+      "formal_acceptance": false
+    }
+  },
+  "templates": {
+    "battle_reward_claim_button_18_647_2": {
+      "fixture": "settlement_claim",
+      "box_1280x720": [
+        530,
+        585,
+        755,
+        655
+      ],
+      "sha256": "3ae06744debb469bd96f54e71db18f53a55bc01b175b4557fb38ae8cc76a04bd"
+    },
+    "battle_chest_background_18_647_2": {
+      "fixture": "chest_ordinary_4",
+      "box_1280x720": [
+        30,
+        220,
+        180,
+        360
+      ],
+      "sha256": "96093edcac9593874e26ed58305542913aafe36a07e2d7b7fd9f4a823d994962"
+    },
+    "battle_chest_ordinary_18_647_2": {
+      "fixture": "chest_ordinary_4",
+      "box_1280x720": [
+        520,
+        260,
+        760,
+        490
+      ],
+      "sha256": "a9cb17ba0c774ad7dfa8582a1e360f0f9e9787f55ebf3c2662cc834f22e74e3e"
+    },
+    "battle_chest_rare_18_647_2": {
+      "fixture": "chest_rare_3",
+      "box_1280x720": [
+        520,
+        260,
+        760,
+        490
+      ],
+      "sha256": "5ab2f8063b6bc6755055525cd43b50e5d453c90d086635ac4eb456cbbad5edac"
+    },
+    "battle_chest_hero_potion_18_647_2": {
+      "fixture": "hero_potion_temporary_storage",
+      "box_1280x720": [
+        515,
+        260,
+        745,
+        485
+      ],
+      "sha256": "46c2b40486e1886a7432b45c00f27d8d189eadfdfa1def77132af4978ca2d082"
+    },
+    "battle_chest_continue_18_647_2": {
+      "fixture": "hero_potion_temporary_storage",
+      "box_1280x720": [
+        555,
+        620,
+        745,
+        685
+      ],
+      "sha256": "62352bb35ce410dcc5dd5680af46994d74454f91421dce5102542c8746e33cad"
+    }
+  }
+}

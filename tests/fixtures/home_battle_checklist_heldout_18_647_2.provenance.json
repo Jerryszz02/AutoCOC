@@ -1,0 +1,8 @@
+{
+  "client_version": "18.647.2",
+  "source": "reports/completion-20261015/live/20261015-190703-632544-0fe8f840/frames/00015-recovery-after.png",
+  "source_sha256": "117f05c99a3bd0a83a0830a33476d772a476915a8fe39b1ff4d7e310f2fdfb4e",
+  "crop_at_1280x720": [25, 570, 145, 700],
+  "fixture_sha256": "106ba1a0c23ffcd95671996d2003801142cc1b32257e6fc64f590c485209baab",
+  "purpose": "Independent current home battle icon variant regression"
+}

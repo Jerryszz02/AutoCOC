@@ -1,0 +1,432 @@
+{
+  "client_version": "18.647.2",
+  "purpose": "agent_visual_selected_balloon_fast_count_roi_regression_not_training_ground_truth",
+  "human_reviewed": false,
+  "counts_toward_acceptance": false,
+  "source_commit": "6cb8bc3",
+  "evidence_limits": "Same live preview session. Native-resolution derived images retain only timer and toolbar pixels; source OCR is cached, not reinterpreted as human ground truth. No troop was deployed and no battle win was shown.",
+  "cached_ocr_filter": "Retain only OCR items whose entire baseline xyxy bbox lies inside one of the frame's retained_baseline_rectangles_xyxy; preserve original order and values.",
+  "frames": [
+    {
+      "path": "tests/fixtures/mixed_balloon_fast_roi_00023_18_647_2.png",
+      "sha256": "43a71590a984dbc178105e81806b3b69691bfc9c7f448e923866c6fd1eb418de",
+      "source_frame": "reports/completion-20261015/live/20261016-171240-252599-681589a5/frames/00023-mixed-balloon-selected-0.png",
+      "source_sha256": "8e192db7905556aa7d21c9f6d2a283d5993ffec870d38f7cf39f82622d11a235",
+      "source_events": "reports/completion-20261015/live/20261016-171240-252599-681589a5/events.jsonl",
+      "source_events_sha256": "cc5144fc01bf9bea772a8dd15fcaa21300ba5848a88fb6ec9ea8062d70af4255",
+      "scene": "enemy_village",
+      "cached_ocr": [
+        {
+          "text": "x1",
+          "confidence": 0.95466,
+          "bbox": [
+            386,
+            593,
+            470,
+            628
+          ],
+          "source": "fast_header_line"
+        }
+      ],
+      "retained_native_rectangles_xyxy": [
+        [
+          0,
+          1160,
+          2560,
+          1440
+        ],
+        [
+          1060,
+          0,
+          1500,
+          190
+        ]
+      ],
+      "retained_baseline_rectangles_xyxy": [
+        [
+          0,
+          580,
+          1280,
+          720
+        ],
+        [
+          530,
+          0,
+          750,
+          95
+        ]
+      ],
+      "recognition_scope": "troop_count",
+      "fast_fallback": false,
+      "captured_at_utc": null,
+      "cached_fast_count": [
+        {
+          "count": 1,
+          "confidence": 0.95466,
+          "slot_bbox": [
+            383,
+            595,
+            472,
+            711
+          ],
+          "roi": [
+            386,
+            593,
+            470,
+            628
+          ],
+          "readings": [
+            {
+              "text": "x1",
+              "confidence": 0.95466,
+              "bbox": [
+                386,
+                593,
+                470,
+                628
+              ],
+              "source": "fast_header_line"
+            }
+          ],
+          "portrait_score": 0.9999992251396179,
+          "portrait_scale": 1.0,
+          "portrait_source": "current_frame_saved_battle_portrait"
+        }
+      ]
+    },
+    {
+      "path": "tests/fixtures/mixed_balloon_fast_roi_00024_18_647_2.png",
+      "sha256": "2793c47d4b61dc51829bdc26e611aa483f5c968b3dcafa758c1698e111214fe5",
+      "source_frame": "reports/completion-20261015/live/20261016-171240-252599-681589a5/frames/00024-mixed-balloon-selected-1.png",
+      "source_sha256": "f6aa43717568f0f462db44d4ec921efa901b3c4548710e2104252377d5846978",
+      "source_events": "reports/completion-20261015/live/20261016-171240-252599-681589a5/events.jsonl",
+      "source_events_sha256": "cc5144fc01bf9bea772a8dd15fcaa21300ba5848a88fb6ec9ea8062d70af4255",
+      "scene": "enemy_village",
+      "cached_ocr": [
+        {
+          "text": "开战倒计时",
+          "confidence": 0.97044,
+          "bbox": [
+            582,
+            10,
+            680,
+            40
+          ]
+        },
+        {
+          "text": "10秒",
+          "confidence": 0.99993,
+          "bbox": [
+            603,
+            38,
+            690,
+            78
+          ]
+        },
+        {
+          "text": "x10",
+          "confidence": 0.99602,
+          "bbox": [
+            130,
+            592,
+            179,
+            621
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.9958,
+          "bbox": [
+            245,
+            595,
+            276,
+            620
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.9959,
+          "bbox": [
+            342,
+            595,
+            372,
+            620
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.97667,
+          "bbox": [
+            440,
+            590,
+            470,
+            614
+          ]
+        },
+        {
+          "text": "x6",
+          "confidence": 0.9915,
+          "bbox": [
+            1044,
+            592,
+            1086,
+            622
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.99484,
+          "bbox": [
+            1142,
+            592,
+            1183,
+            622
+          ]
+        },
+        {
+          "text": "29",
+          "confidence": 1.0,
+          "bbox": [
+            604,
+            680,
+            630,
+            698
+          ]
+        },
+        {
+          "text": "16",
+          "confidence": 0.99992,
+          "bbox": [
+            706,
+            680,
+            724,
+            697
+          ]
+        },
+        {
+          "text": "80",
+          "confidence": 0.99999,
+          "bbox": [
+            894,
+            680,
+            920,
+            698
+          ]
+        },
+        {
+          "text": "12",
+          "confidence": 1.0,
+          "bbox": [
+            1008,
+            680,
+            1026,
+            698
+          ]
+        }
+      ],
+      "retained_native_rectangles_xyxy": [
+        [
+          0,
+          1160,
+          2560,
+          1440
+        ],
+        [
+          1060,
+          0,
+          1500,
+          190
+        ]
+      ],
+      "retained_baseline_rectangles_xyxy": [
+        [
+          0,
+          580,
+          1280,
+          720
+        ],
+        [
+          530,
+          0,
+          750,
+          95
+        ]
+      ],
+      "recognition_scope": "full",
+      "fast_fallback": true,
+      "captured_at_utc": null
+    },
+    {
+      "path": "tests/fixtures/mixed_balloon_fast_roi_00025_18_647_2.png",
+      "sha256": "361a2c42578b48b366cb88c7c981ccf8091b84be4503e7e46866357ae5960002",
+      "source_frame": "reports/completion-20261015/live/20261016-171240-252599-681589a5/frames/00025-continuous-line-failure-check.png",
+      "source_sha256": "950ad5e947e46fdab4f8bf87052944a4b30be6368ac9b28e5393f36134785a56",
+      "source_events": "reports/completion-20261015/live/20261016-171240-252599-681589a5/events.jsonl",
+      "source_events_sha256": "cc5144fc01bf9bea772a8dd15fcaa21300ba5848a88fb6ec9ea8062d70af4255",
+      "scene": "enemy_village",
+      "cached_ocr": [
+        {
+          "text": "开战倒计时",
+          "confidence": 0.97311,
+          "bbox": [
+            582,
+            10,
+            680,
+            40
+          ]
+        },
+        {
+          "text": "7秒",
+          "confidence": 0.99868,
+          "bbox": [
+            607,
+            34,
+            673,
+            80
+          ]
+        },
+        {
+          "text": "x10",
+          "confidence": 0.99602,
+          "bbox": [
+            130,
+            592,
+            179,
+            621
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.9958,
+          "bbox": [
+            245,
+            595,
+            276,
+            620
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99775,
+          "bbox": [
+            340,
+            593,
+            373,
+            620
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.97667,
+          "bbox": [
+            440,
+            590,
+            470,
+            614
+          ]
+        },
+        {
+          "text": "x6",
+          "confidence": 0.9915,
+          "bbox": [
+            1044,
+            592,
+            1086,
+            622
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.99484,
+          "bbox": [
+            1142,
+            592,
+            1183,
+            622
+          ]
+        },
+        {
+          "text": "12",
+          "confidence": 0.99999,
+          "bbox": [
+            200,
+            680,
+            217,
+            697
+          ]
+        },
+        {
+          "text": "29",
+          "confidence": 1.0,
+          "bbox": [
+            604,
+            680,
+            630,
+            698
+          ]
+        },
+        {
+          "text": "16",
+          "confidence": 0.99992,
+          "bbox": [
+            706,
+            680,
+            724,
+            697
+          ]
+        },
+        {
+          "text": "80",
+          "confidence": 0.99999,
+          "bbox": [
+            894,
+            680,
+            920,
+            698
+          ]
+        },
+        {
+          "text": "12",
+          "confidence": 1.0,
+          "bbox": [
+            1008,
+            680,
+            1026,
+            698
+          ]
+        }
+      ],
+      "retained_native_rectangles_xyxy": [
+        [
+          0,
+          1160,
+          2560,
+          1440
+        ],
+        [
+          1060,
+          0,
+          1500,
+          190
+        ]
+      ],
+      "retained_baseline_rectangles_xyxy": [
+        [
+          0,
+          580,
+          1280,
+          720
+        ],
+        [
+          530,
+          0,
+          750,
+          95
+        ]
+      ],
+      "recognition_scope": null,
+      "fast_fallback": null,
+      "captured_at_utc": null
+    }
+  ]
+}

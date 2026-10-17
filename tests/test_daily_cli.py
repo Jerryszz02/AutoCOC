@@ -38,6 +38,40 @@ class DailyCLITests(unittest.TestCase):
             code = main(["run", "--config", str(self.config_path), *args])
         return code, output.getvalue(), error.getvalue()
 
+    def test_event_reward_target_is_required_before_device_contact(self):
+        routine_path = self.routine_dir / "reward.toml"
+        routine_path.write_text('[routine]\n[[routine.tasks]]\nid = "reward"\nkind = "event_reward"\n',
+                                encoding="utf-8")
+        with patch("autococ.cli.DeviceManager") as manager:
+            code, _, error = self.invoke("--routine", str(routine_path), "--dry-run")
+        self.assertNotEqual(code, 0)
+        self.assertIn("free_reward_target", error)
+        manager.assert_not_called()
+
+    def test_event_reward_target_survives_offline_cli_routine(self):
+        routine_path = self.routine_dir / "reward.toml"
+        routine_path.write_text('[routine]\n[[routine.tasks]]\nid = "reward"\nkind = "event_reward"\n'
+                                'free_reward_target = "glowy"\n', encoding="utf-8")
+        with patch("autococ.cli.setup_logging", return_value=logging.getLogger("test.daily.cli")):
+            code, output, error = self.invoke("--routine", str(routine_path), "--dry-run")
+        self.assertEqual(code, 0, error)
+        self.assertIn("mode: dry-run", output)
+        report = json.loads(next((self.root / "reports").glob("run-*.json")).read_text(encoding="utf-8"))
+        self.assertEqual([(item["task"], item["status"]) for item in report["task_results"]],
+                         [("reward", "simulated")])
+
+    def test_ore_inventory_is_a_separate_offline_cli_routine_task(self):
+        routine_path = self.routine_dir / "ore-read.toml"
+        routine_path.write_text('[routine]\n[[routine.tasks]]\nid = "ores"\n'
+                                'kind = "ore_inventory"\n', encoding="utf-8")
+        with patch("autococ.cli.setup_logging", return_value=logging.getLogger("test.daily.cli")):
+            code, output, error = self.invoke("--routine", str(routine_path), "--dry-run")
+        self.assertEqual(code, 0, error)
+        self.assertIn("mode: dry-run", output)
+        report = json.loads(next((self.root / "reports").glob("run-*.json")).read_text(encoding="utf-8"))
+        self.assertEqual([(item["task"], item["status"]) for item in report["task_results"]],
+                         [("ores", "simulated")])
+
     def test_toml_routine_resolves_its_own_files_and_runs_offline_once(self):
         routine_path = self.routine_dir / "routine.toml"
         routine_path.write_text(

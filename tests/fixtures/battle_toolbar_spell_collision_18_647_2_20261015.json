@@ -1,0 +1,96 @@
+{
+  "client_version": "18.647.2",
+  "derivation": "cv2.resize(source, (1280,720), INTER_AREA)[585:720,970:1190]; only bottom spell toolbar pixels retained",
+  "crop_bbox_at_1280x720": [
+    970,
+    585,
+    1190,
+    720
+  ],
+  "frames": [
+    {
+      "fixture": "battle_toolbar_spell_collision_00016_18_647_2_20261015.png",
+      "fixture_sha256": "e832dc5377416dcb5b1fb3d40c90cbb8db4643bb2a82001621f6c01eab24c71d",
+      "source_frame": "reports/completion-20261015/live/20261015-225031-213561-45e835f9/frames/00016-line-zoom-verified.png",
+      "source_sha256": "09263f5c0ccd7dc1f700163729ce3b9443b22e8eed229a094d407abc9a519af1",
+      "ocr": [
+        {
+          "text": "x6",
+          "confidence": 0.99471,
+          "bbox": [
+            1044,
+            592,
+            1086,
+            622
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.99718,
+          "bbox": [
+            1142,
+            592,
+            1182,
+            622
+          ]
+        }
+      ]
+    },
+    {
+      "fixture": "battle_toolbar_spell_collision_00017_18_647_2_20261015.png",
+      "fixture_sha256": "f1ec9daa811e7dd08ece5c95efac5aff0da56eb8938e36f8db1a6cc4eb41b372",
+      "source_frame": "reports/completion-20261015/live/20261015-225031-213561-45e835f9/frames/00017-line-boundary.png",
+      "source_sha256": "cedcb882f23234bc840d00b856d20d2b428cbe9295b521f33341c15562db2ed8",
+      "ocr": [
+        {
+          "text": "x6",
+          "confidence": 0.9947,
+          "bbox": [
+            1044,
+            592,
+            1086,
+            622
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.99717,
+          "bbox": [
+            1142,
+            592,
+            1182,
+            622
+          ]
+        }
+      ]
+    },
+    {
+      "fixture": "battle_toolbar_spell_collision_00018_18_647_2_20261015.png",
+      "fixture_sha256": "8eef2385d27e9274bb60b2d599fd599d98609198809fa18143cac25caab55521",
+      "source_frame": "reports/completion-20261015/live/20261015-225031-213561-45e835f9/frames/00018-line-boundary.png",
+      "source_sha256": "094818e87d12b06e4e68c8ba677bfc6e3133f5691544382a7776e3f2fa6330f8",
+      "ocr": [
+        {
+          "text": "x6",
+          "confidence": 0.9947,
+          "bbox": [
+            1044,
+            592,
+            1086,
+            622
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.99714,
+          "bbox": [
+            1142,
+            592,
+            1183,
+            622
+          ]
+        }
+      ]
+    }
+  ]
+}

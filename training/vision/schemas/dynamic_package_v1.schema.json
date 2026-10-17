@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AutoCOC independent R/U ONNX package v1",
+  "type": "object",
+  "required": ["schema_version", "kind", "classes", "client_versions", "model_file", "sha256", "max_frame_age_seconds", "event_rules", "applicability", "preprocess", "output", "validation"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "kind": {"enum": ["r_building", "r_card", "u_position"]},
+    "classes": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "client_versions": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "model_file": {"type": "string", "minLength": 1},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "max_frame_age_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 10},
+    "event_rules": {
+      "type": "object",
+      "required": ["consecutive_frames", "min_iou", "max_gap_seconds", "max_missed_frames", "event_min_confidence", "max_frame_age_seconds"],
+      "properties": {
+        "consecutive_frames": {"const": 2},
+        "min_iou": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "max_gap_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 5},
+        "max_missed_frames": {"type": "integer", "minimum": 0, "maximum": 2},
+        "event_min_confidence": {"type": "number", "minimum": 0.5, "maximum": 1},
+        "max_frame_age_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 2}
+      }
+    },
+    "applicability": {
+      "type": "object",
+      "required": ["roi_kind", "source_width_range", "source_height_range", "requires_stable_camera", "requires_verified_zoom"],
+      "properties": {
+        "roi_kind": {"enum": ["r_building", "r_card", "u_position"]},
+        "source_width_range": {"$ref": "#/$defs/range"},
+        "source_height_range": {"$ref": "#/$defs/range"},
+        "requires_stable_camera": {"type": "boolean"},
+        "requires_verified_zoom": {"type": "boolean"}
+      }
+    },
+    "preprocess": {
+      "type": "object",
+      "required": ["width", "height", "color", "resize", "scale", "mean", "std"],
+      "properties": {
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1},
+        "color": {"enum": ["RGB", "BGR"]},
+        "resize": {"const": "stretch"},
+        "scale": {"type": "number", "exclusiveMinimum": 0},
+        "mean": {"$ref": "#/$defs/triplet"},
+        "std": {"$ref": "#/$defs/triplet"}
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": ["format", "min_confidence"],
+      "properties": {
+        "format": {"enum": ["logits", "probabilities", "xyxy_score_class"]},
+        "min_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "max_detections": {"type": "integer", "minimum": 1, "maximum": 300}
+      }
+    },
+    "validation": {
+      "type": "object",
+      "required": ["status", "prototype_only", "snapshot_sha256", "split_sha256"],
+      "properties": {
+        "status": {"enum": ["unvalidated", "evaluated"]},
+        "prototype_only": {"type": "boolean"},
+        "snapshot_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "split_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "report_id": {"type": "string"}
+      }
+    }
+  },
+  "$defs": {
+    "range": {"type": "array", "prefixItems": [{"type": "integer", "minimum": 1}, {"type": "integer", "minimum": 1}], "minItems": 2, "maxItems": 2},
+    "triplet": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}
+  }
+}

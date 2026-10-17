@@ -1,0 +1,50 @@
+# Current-client single-run queue. `train` only inspects the displayed army;
+# actual army preparation is checked by each battle's preflight and receipts.
+# Donation may be skipped or not_supported when there is no verified request.
+# This file does not itself satisfy the 60-minute / 10-battle acceptance gate.
+[routine]
+version = 1
+maintenance_interval_sec = 0
+
+[[routine.tasks]]
+id = "collect"
+kind = "collect"
+
+[[routine.tasks]]
+id = "request"
+kind = "request"
+
+[[routine.tasks]]
+id = "donate"
+kind = "donate"
+
+[[routine.tasks]]
+id = "train"
+kind = "train"
+
+[[routine.tasks]]
+id = "event_reward"
+kind = "event_reward"
+enabled = false
+free_reward_target = "shiny"
+
+[[routine.tasks]]
+id = "rift_event"
+kind = "event"
+strategy = "edrag_line"
+max_battles = 1
+max_duration_sec = 3600
+max_searches = 30
+[routine.tasks.goal]
+adapter_path = "assets/catalogs/rift_event_18_647_2.adapter.toml"
+
+[[routine.tasks]]
+id = "resources"
+kind = "resources"
+strategy = "edrag_line"
+max_battles = 10
+max_duration_sec = 3600
+max_searches = 30
+[routine.tasks.resource_filter]
+enabled = true
+min_total = 300000

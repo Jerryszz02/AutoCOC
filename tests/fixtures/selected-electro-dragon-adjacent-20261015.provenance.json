@@ -1,0 +1,12 @@
+{
+  "client_version": "18.647.2",
+  "source_run": "20261015-213644-109937-63ba872b",
+  "source_frame": "00016-line-boundary.png",
+  "source_sha256": "2cdbb6e0a6a84f8bf29c50aa282f439c897e0520bddfe1ff324998de27ba76e8",
+  "source_resolution": [2560, 1440],
+  "baseline_resolution": [1280, 720],
+  "retained_baseline_xyxy": [75, 565, 284, 716],
+  "output_sha256": "18d96e1d9f41ad3f3947d38f4dba3a127c15414aa5e10d2c9fdfe755253d08e6",
+  "contents": "Only selected electro-dragon and adjacent dragon cards; all other pixels black, no player or opponent names.",
+  "purpose": "Independent card edges and portrait-bound fallback regression; not live acceptance."
+}

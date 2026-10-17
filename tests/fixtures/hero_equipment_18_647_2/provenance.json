@@ -1,0 +1,208 @@
+{
+  "client_version": "18.647.2",
+  "kind": "anonymous_static_hero_equipment_inventory_development_fixture",
+  "formal_acceptance": false,
+  "reward_before_after": false,
+  "human_review": false,
+  "transformation": {
+    "decode": "cv2.IMREAD_COLOR",
+    "resize": [
+      1280,
+      720
+    ],
+    "interpolation": "cv2.INTER_AREA",
+    "fill_bgr": [
+      24,
+      24,
+      24
+    ],
+    "retained_baseline_rois_xyxy": {
+      "title": [
+        575,
+        55,
+        695,
+        105
+      ],
+      "hint": [
+        1020,
+        370,
+        1220,
+        415
+      ],
+      "close": [
+        1195,
+        55,
+        1250,
+        110
+      ],
+      "inventory_strip": [
+        380,
+        605,
+        900,
+        665
+      ]
+    }
+  },
+  "fixtures": {
+    "first": {
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-212123-tap\\frames\\00002-after.png",
+      "source_frame_sha256": "915e6d410ac7255c9933d7e8dfa9a02baa1b8ba3231457c43b32140403a3ee78",
+      "source_summary": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-212123-tap\\summary.json",
+      "source_summary_sha256": "69879852797d87e99a51473db821f85a0cab08673da5da862f2efafaf1405263",
+      "source_events": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-212123-tap\\events.jsonl",
+      "source_events_sha256": "7f47d27c070f8ed9713e1fdd723421750e8b40dfa1ecd49825d3c4c3925fbde6",
+      "derived_path": "tests/fixtures/hero_equipment_18_647_2/first.png",
+      "derived_sha256": "8cb2bfa22afcf25d60c8c5a45899e7009ad48bee62214e26d841db7808ba4a74",
+      "ocr_path": "tests/fixtures/hero_equipment_18_647_2/first.ocr.json",
+      "ocr_sha256": "7e5d9ee3909a7b387e2050c546d7dc3382260b04d11e412bcab3af82619db513",
+      "retained_roi_pixel_sha256": {
+        "title": "ccd9ff08b2df44ea0da0a40ec0e5ab02d6fd0d41b61776198074fcd0f40e0c52",
+        "hint": "0190b6bef5f065440e114f97d4e1735c94a06cc5f45b69913767ec0b964a1e5e",
+        "close": "c62d9f8067d0c84f945ab0f9e7badb7ed938b6e256327ce432f776df7f04ab04",
+        "inventory_strip": "5c0df0b9775f05c0dd1f046a6fd65f850c4d971d9c449231ca8dd89d6c05b9a3"
+      }
+    },
+    "second": {
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-212141-observe\\frames\\00001-before.png",
+      "source_frame_sha256": "0edb6cb36e52a39bd8fc7ba1b7bfbc16be3c4b15897cfa69267d4b3bb0192f40",
+      "source_summary": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-212141-observe\\summary.json",
+      "source_summary_sha256": "cbb342ac8c665fa42d5eef0020f5752ce7c67bfe44485b4a67f16775931c3c34",
+      "source_events": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-212141-observe\\events.jsonl",
+      "source_events_sha256": "c5fd1fc7dd4770ed052d7fdafeb976c01aae3291eb7c00e37dab69d79182ab7e",
+      "derived_path": "tests/fixtures/hero_equipment_18_647_2/second.png",
+      "derived_sha256": "7e0be6c725dac1cb28ab1a85c03587a0a8ca0d643aa039ce8e3a7b78b7d5fc34",
+      "ocr_path": "tests/fixtures/hero_equipment_18_647_2/second.ocr.json",
+      "ocr_sha256": "a5e74cbe17fb1632531a9ebbe3af3d5be01f7154042004b513f47770a2fa661c",
+      "retained_roi_pixel_sha256": {
+        "title": "e87f970ed1eea2d1f9a060b774e9eaeaa562b64a8cbf65e1416f6e120a5678fc",
+        "hint": "0190b6bef5f065440e114f97d4e1735c94a06cc5f45b69913767ec0b964a1e5e",
+        "close": "c62d9f8067d0c84f945ab0f9e7badb7ed938b6e256327ce432f776df7f04ab04",
+        "inventory_strip": "5c0df0b9775f05c0dd1f046a6fd65f850c4d971d9c449231ca8dd89d6c05b9a3"
+      }
+    },
+    "current_first": {
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-215438-ore-read-current\\frames\\00001-before.png",
+      "source_frame_sha256": "481ad4b79bafee02b599aea509133aa027df5bf41b76fcd4476624a439dd37b4",
+      "source_events": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-215438-ore-read-current\\events.jsonl",
+      "source_events_sha256": "446b3132fc555c30f89ddbd91dddb9ed50cedca74c2b80e644b133e46ab60ad1",
+      "line_diagnostic": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\diagnostics\\ore-roi-line-215438-v2.json",
+      "line_diagnostic_sha256": "c4e424ac9d4523ecb460d10ab7e74debe85bb09005fd522f6fd337a65a1d20f2",
+      "derived_path": "tests/fixtures/hero_equipment_18_647_2/current_first.png",
+      "derived_sha256": "9b31ab7d9340bbfc32017ac7f35e7f1f0e1def09b49b215d885ee386e15aee57",
+      "ocr_path": "tests/fixtures/hero_equipment_18_647_2/current_first.ocr.json",
+      "ocr_sha256": "db9ada5ac6453de66b5bb9ab322c5f2bd1d8d5b9af0d3be1e58e770c673ba9be",
+      "retained_roi_pixel_sha256": {
+        "title": "420deca26908be8b090e814517abfec9712ef1cfc6f1e0454457037efc1d047f",
+        "hint": "0190b6bef5f065440e114f97d4e1735c94a06cc5f45b69913767ec0b964a1e5e",
+        "close": "c62d9f8067d0c84f945ab0f9e7badb7ed938b6e256327ce432f776df7f04ab04",
+        "inventory_strip": "5c0df0b9775f05c0dd1f046a6fd65f850c4d971d9c449231ca8dd89d6c05b9a3"
+      },
+      "full_ocr_starry": {
+        "text": "000L/LL",
+        "confidence": 0.88543,
+        "bbox": [
+          766,
+          624,
+          852,
+          648
+        ]
+      },
+      "line_roi_xyxy": [
+        764,
+        621,
+        856,
+        652
+      ],
+      "line_text": "77/1000",
+      "line_confidence": 0.99994,
+      "line_reader_is_same_frame": true
+    },
+    "current_second": {
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-215438-ore-read-current\\frames\\00002-ore-inventory-second-current.png",
+      "source_frame_sha256": "4d177f70e9a5b7dd62823f3db75e0e04b1a5a78131ab1e45e6a3406a1c03f445",
+      "source_events": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-215438-ore-read-current\\events.jsonl",
+      "source_events_sha256": "446b3132fc555c30f89ddbd91dddb9ed50cedca74c2b80e644b133e46ab60ad1",
+      "line_diagnostic": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\diagnostics\\ore-roi-line-215438-v2.json",
+      "line_diagnostic_sha256": "c4e424ac9d4523ecb460d10ab7e74debe85bb09005fd522f6fd337a65a1d20f2",
+      "derived_path": "tests/fixtures/hero_equipment_18_647_2/current_second.png",
+      "derived_sha256": "1625ab83cbd30e8325e0fc6171939d6eae80dd9e8c2db793955fd007d5d30642",
+      "ocr_path": "tests/fixtures/hero_equipment_18_647_2/current_second.ocr.json",
+      "ocr_sha256": "fc460af7a6f06dddcca47c3173f69a94cc66dfec33e96a5c69d8c261314d5bf6",
+      "retained_roi_pixel_sha256": {
+        "title": "3f0c8aa1f928a9e110db845c6f2edb985a0dc71c00936a2ba86adb03c9b4c5e9",
+        "hint": "0190b6bef5f065440e114f97d4e1735c94a06cc5f45b69913767ec0b964a1e5e",
+        "close": "c62d9f8067d0c84f945ab0f9e7badb7ed938b6e256327ce432f776df7f04ab04",
+        "inventory_strip": "5c0df0b9775f05c0dd1f046a6fd65f850c4d971d9c449231ca8dd89d6c05b9a3"
+      },
+      "full_ocr_starry": {
+        "text": "000L/LL",
+        "confidence": 0.88408,
+        "bbox": [
+          766,
+          624,
+          852,
+          648
+        ]
+      },
+      "line_roi_xyxy": [
+        764,
+        621,
+        856,
+        652
+      ],
+      "line_text": "77/1000",
+      "line_confidence": 0.99994,
+      "line_reader_is_same_frame": true
+    }
+  },
+  "assets": {
+    "shiny": {
+      "path": "assets/templates/ore_inventory_shiny_18_647_2.png",
+      "sha256": "4b4a2d7a9844d984358c8488b6743e3dacd0d171a62e5178f1a6c0d8d6aff38f",
+      "source_fixture": "first",
+      "baseline_roi_xyxy": [
+        399,
+        620,
+        430,
+        654
+      ],
+      "source_pixel_sha256": "305dd50da951e9b648fea7da3553ce2d9ee2d030177488febc073f98df1b5d7a"
+    },
+    "glowy": {
+      "path": "assets/templates/ore_inventory_glowy_18_647_2.png",
+      "sha256": "9e4d7778d26852d0497229944b11c3220790d643c8099fd0818e3a05a26b9f96",
+      "source_fixture": "first",
+      "baseline_roi_xyxy": [
+        565,
+        620,
+        597,
+        654
+      ],
+      "source_pixel_sha256": "f11f2e634d15bad9702b5d2cede15caac39e0ad0547d730e4734d1bd7022bae1"
+    },
+    "starry": {
+      "path": "assets/templates/ore_inventory_starry_18_647_2.png",
+      "sha256": "1944de7677321368eeb67b3048f6cb8b7eb1637d485e56c32a002b5fe7da2439",
+      "source_fixture": "first",
+      "baseline_roi_xyxy": [
+        734,
+        620,
+        767,
+        654
+      ],
+      "source_pixel_sha256": "987b328d402df42fdf6acff6c0d82466d10e4f9cec8168d05884208763ac1b41"
+    },
+    "close": {
+      "path": "assets/templates/ore_inventory_close_18_647_2.png",
+      "sha256": "74c0cd6ba54a8cf4fbdc5070294a0f5e7da398243bb9f167c8a9cffa9dbf8d6b",
+      "source_fixture": "first",
+      "baseline_roi_xyxy": [
+        1200,
+        58,
+        1247,
+        105
+      ],
+      "source_pixel_sha256": "018da7e4f135a5fcd820b3e5f909e214b0aee30d5fcf085ae09bb0c47d3cda77"
+    }
+  }
+}

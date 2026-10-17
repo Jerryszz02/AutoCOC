@@ -8,10 +8,15 @@ all four kinds and editor coverage for every unit it would need to touch.
 
 from __future__ import annotations
 
+import hashlib
+import math
 from pathlib import Path
+import re
 import time
+from typing import Callable
 
 from .army_editor import visual_fingerprint_matches
+from .errors import FlowError
 from .reporting import TaskResult
 from .unit_catalog import ArmyRecipe, ArmyRequirement, get_unit
 
@@ -199,6 +204,49 @@ def _hero_loadout(army: dict, hero_ids: set[str]) -> dict | None:
     return loadout
 
 
+def _army_capacity_counts(army: dict) -> dict[str, tuple[int, int]] | None:
+    """Compare displayed capacities without volatile OCR confidence or boxes."""
+    counts = {}
+    for kind in ("troops", "spells", "heroes", "siege"):
+        entry = army.get(kind)
+        if (not isinstance(entry, dict) or type(entry.get("used")) is not int
+                or type(entry.get("capacity")) is not int):
+            return None
+        counts[kind] = (entry["used"], entry["capacity"])
+    return counts
+
+
+def _reobserve_missing_loadout(session, snapshot, observed: dict[str, dict[str, int]],
+                               evidence: list[Path]):
+    """Recover a transient portrait frame without borrowing identity or icons."""
+    original_army = snapshot.observations["army"]
+    initial_capacities = _army_capacity_counts(original_army)
+    if initial_capacities is None:
+        return snapshot, observed, None, "army_capacity_unverified_during_loadout_recheck"
+    last_path = snapshot.screenshot_path
+    for attempt in range(1, 3):
+        session.check_deadline()
+        candidate = session.observe(f"army-loadout-recheck-{attempt}")
+        evidence.append(candidate.screenshot_path)
+        if candidate.screenshot_path == last_path:
+            return snapshot, observed, None, "army_frame_not_fresh_during_loadout_recheck"
+        last_path = candidate.screenshot_path
+        editor = candidate.observations.get("army_editor")
+        if (candidate.scene != "training" or not isinstance(editor, dict)
+                or editor.get("surface") != "current" or editor.get("ready") is not True):
+            return snapshot, observed, None, "army_page_unverified_during_loadout_recheck"
+        counts, issue = _read_current(candidate, full=True)
+        if issue is not None:
+            return snapshot, observed, None, issue
+        army = candidate.observations["army"]
+        if counts != observed or _army_capacity_counts(army) != initial_capacities:
+            return snapshot, observed, None, "army_changed_during_loadout_recheck"
+        loadout = _hero_loadout(army, set(counts["hero"]))
+        if loadout is not None:
+            return candidate, counts, loadout, None
+    return snapshot, observed, None, "hero_equipment_or_pet_observation_missing"
+
+
 def _same_loadout(first: dict | None, second: dict | None) -> bool:
     if first is None or second is None or set(first) != set(second):
         return False
@@ -381,7 +429,8 @@ def _observe_direct_edit(session, kind: str, before: dict[str, int],
 
 def _apply_direct(session, snapshot, observed: dict[str, dict[str, int]],
                   desired: dict[str, dict[str, int]], original_loadout: dict,
-                  evidence: list[Path]) -> TaskResult:
+                  evidence: list[Path], *,
+                  before_mutation_guard: Callable[[object], str | None] | None = None) -> TaskResult:
     """Preflight every changed picker, then mutate one observed count per tap."""
     changed = [kind for kind in ("troop", "spell")
                if not _matches(observed, desired, kinds={kind})]
@@ -474,6 +523,11 @@ def _apply_direct(session, snapshot, observed: dict[str, dict[str, int]],
             return outcome("failed", "direct_preflight_return_unverified",
                            return_state=return_state, return_counts=actual)
 
+    if before_mutation_guard is not None:
+        issue = before_mutation_guard(snapshot)
+        if issue is not None:
+            return outcome("failed", f"direct_pre_mutation_guard_failed:{issue}")
+
     for kind in changed:
         opener = _control(snapshot.observations["army_editor"], "open_picker", kind=kind)
         if opener is None:
@@ -534,6 +588,437 @@ def _apply_direct(session, snapshot, observed: dict[str, dict[str, int]],
                    observed=final)
 
 
+def _mixed_troop_capacity_evidence(snapshot, used: int, total: int) -> bool:
+    """Bind the numeric ratio to this sampled current army observation."""
+    if snapshot.observations.get("baseline_resolution") != [1280, 720]:
+        return False
+    army = snapshot.observations.get("army")
+    capacity = army.get("troops") if isinstance(army, dict) else None
+    if not isinstance(capacity, dict) or capacity.get("meaning") != "displayed_capacity_ratio":
+        return False
+    evidence = capacity.get("evidence")
+    if not isinstance(evidence, dict) or evidence.get("source") != "full_ocr":
+        return False
+    text = evidence.get("text")
+    match = re.fullmatch(r"\s*(\d+)\s*/\s*(\d+)\s*", text) if isinstance(text, str) else None
+    confidence, bbox = evidence.get("confidence"), evidence.get("bbox")
+    if (match is None or (int(match[1]), int(match[2])) != (used, total)
+            or type(confidence) not in (int, float) or not math.isfinite(confidence)
+            or not .9 <= confidence <= 1
+            or not isinstance(bbox, (list, tuple)) or len(bbox) != 4
+            or any(type(n) is not int for n in bbox)
+            or not 577 <= (bbox[0] + bbox[2]) / 2 <= 667
+            or not 152 <= (bbox[1] + bbox[3]) / 2 <= 182):
+        return False
+    ocr = snapshot.observations.get("ocr")
+    if not isinstance(ocr, list):
+        return False
+    strong = [item for item in ocr if isinstance(item, dict)
+              and type(item.get("confidence")) in (int, float)
+              and math.isfinite(item["confidence"]) and item["confidence"] >= .9
+              and isinstance(item.get("bbox"), (list, tuple)) and len(item["bbox"]) == 4
+              and all(type(n) is int for n in item["bbox"])
+              and 577 <= (item["bbox"][0] + item["bbox"][2]) / 2 <= 667
+              and 152 <= (item["bbox"][1] + item["bbox"][3]) / 2 <= 182
+              and isinstance(item.get("text"), str)
+              and re.fullmatch(r"\s*\d+\s*/\s*\d+\s*", item["text"])]
+    return (len(strong) == 1 and strong[0]["text"] == text
+            and strong[0]["bbox"] == bbox and strong[0]["confidence"] == confidence)
+
+
+def _inspect_mixed_archer_current(shot, client_version):
+    """Validate the current four-card core, capacity evidence and loadout."""
+    from .combat import _verified_army_identities
+    from .mixed_roster import mixed_archer_count
+
+    if client_version != "18.647.2":
+        return None, "mixed_army_client_version_unverified"
+    if shot.scene != "training":
+        return None, "mixed_army_page_unverified"
+    editor = shot.observations.get("army_editor")
+    if (not isinstance(editor, dict) or editor.get("surface") != "current"
+            or editor.get("ready") is not True):
+        return None, "mixed_army_current_editor_unverified"
+    observed, issue = _read_current(shot, full=True)
+    if issue is not None:
+        return None, issue
+    army = shot.observations["army"]
+    manifest = army.get("manifest")
+    if (not isinstance(manifest, dict) or manifest.get("complete") is not True
+            or manifest.get("supported_layout") is not True
+            or manifest.get("frame") != str(shot.screenshot_path)):
+        return None, "mixed_army_manifest_unverified"
+    rows = manifest.get("troops")
+    if not _verified_army_identities(rows, "troop", client_version):
+        return None, "mixed_army_troop_identity_unverified"
+    try:
+        archer_count = mixed_archer_count(rows)
+    except FlowError as exc:
+        return None, f"mixed_army_roster_invalid:{exc}"
+    capacity = army.get("troops")
+    if (not isinstance(capacity, dict) or type(capacity.get("used")) is not int
+            or type(capacity.get("capacity")) is not int):
+        return None, "mixed_army_capacity_unverified"
+    used, total = capacity["used"], capacity["capacity"]
+    target = total - 343
+    if (not 0 <= archer_count <= 9 or not 0 <= target <= 9
+            or archer_count > target or used != 343 + archer_count
+            or not 0 <= used <= total):
+        return None, "mixed_army_capacity_or_count_mismatch"
+    if not _mixed_troop_capacity_evidence(shot, used, total):
+        return None, "mixed_army_capacity_evidence_unverified"
+    loadout = _hero_loadout(army, set(observed["hero"]))
+    if loadout is None:
+        return None, "mixed_army_hero_loadout_unverified"
+    return (observed, editor, loadout, archer_count, target), None
+
+
+def _mixed_initial_identity_retry_signature(shot, client_version):
+    """Identify a single transient hero gap without using an older hero label."""
+    from .combat import _verified_army_identities
+    from .mixed_roster import mixed_archer_count
+
+    if (client_version != "18.647.2" or shot.scene != "training" or
+            not math.isfinite(shot.confidence) or shot.confidence < .8):
+        return None
+    o = shot.observations
+    editor, army = o.get("army_editor"), o.get("army")
+    source_resolution = o.get("source_resolution")
+    if (not isinstance(source_resolution, list) or len(source_resolution) != 2 or
+            any(type(n) is not int or n <= 0 for n in source_resolution) or
+            not isinstance(editor, dict) or editor.get("surface") != "current" or
+            editor.get("ready") is not True or not isinstance(army, dict) or
+            o.get("baseline_resolution") != [1280, 720] or
+            o.get("account_in_use") not in (None, False)):
+        return None
+    manifest = army.get("manifest")
+    if (not isinstance(manifest, dict) or manifest.get("complete") is not True or
+            manifest.get("supported_layout") is not True or
+            manifest.get("identity_complete") is not True or
+            manifest.get("layout") != "my_army_rows_v1" or
+            manifest.get("unknowns") != [] or
+            manifest.get("frame") != str(shot.screenshot_path) or
+            manifest.get("source_resolution") != source_resolution or
+            manifest.get("baseline_resolution") != [1280, 720]):
+        return None
+    partial, issue = _read_current(shot, full=False, relevant={"troop", "spell"})
+    if (issue is not None or set(partial) != {"troop", "spell"} or
+            not _verified_army_identities(manifest.get("troops"), "troop", client_version) or
+            not _verified_army_identities(manifest.get("spells"), "spell", client_version)):
+        return None
+    try:
+        archers = mixed_archer_count(manifest["troops"])
+    except FlowError:
+        return None
+    capacity = army.get("troops")
+    if not isinstance(capacity, dict):
+        return None
+    used, total = capacity.get("used"), capacity.get("capacity")
+    if (type(used) is not int or type(total) is not int or
+            not 0 <= archers <= 9 or not 0 <= total - 343 <= 9 or
+            archers > total - 343 or used != 343 + archers or
+            not _mixed_troop_capacity_evidence(shot, used, total)):
+        return None
+    cards, coverage = army.get("identity_cards"), army.get("identity_coverage")
+    hero_evidence, siege_evidence = army.get("hero_evidence"), army.get("siege_evidence")
+    if (not isinstance(cards, list) or not isinstance(coverage, dict) or
+            coverage.get("siege") is not True or
+            not isinstance(hero_evidence, dict) or
+            hero_evidence.get("frame") != str(shot.screenshot_path) or
+            hero_evidence.get("layout") != "my_army_large_heroes_v1" or
+            not isinstance(siege_evidence, dict) or
+            siege_evidence.get("frame") != str(shot.screenshot_path) or
+            siege_evidence.get("complete") is not True or
+            siege_evidence.get("unknowns") != []):
+        return None
+    heroes = [card for card in cards if isinstance(card, dict) and card.get("kind") == "hero"]
+    sieges = [card for card in cards if isinstance(card, dict) and card.get("kind") == "siege"]
+    if (len(heroes) != 4 or hero_evidence.get("cards") != heroes or
+            siege_evidence.get("cards") != sieges or
+            not _verified_army_identities(sieges, "siege", client_version)
+            or any(card.get("source") != "army" or card.get("count") != 1 or
+                   not isinstance(card.get("bbox"), list) or len(card["bbox"]) != 4 or
+                   any(type(n) is not int for n in card["bbox"]) for card in heroes)):
+        return None
+    slots = [tuple(card["bbox"]) for card in heroes]
+    if len(set(slots)) != 4:
+        return None
+    known = [card for card in heroes if isinstance(card.get("unit_id"), str)]
+    missing = [card for card in heroes if card.get("unit_id") is None]
+    if (len(known) not in {3, 4} or len(missing) != 4 - len(known) or
+            not _verified_army_identities(known, "hero", client_version)):
+        return None
+    if missing:
+        if (coverage.get("hero") is not False or hero_evidence.get("complete") is not False or
+                hero_evidence.get("unknowns") != ["hero_identity_unavailable"]):
+            return None
+    elif (coverage.get("hero") is not True or hero_evidence.get("complete") is not True or
+          hero_evidence.get("unknowns") != []):
+        return None
+    return {"roster": partial, "sieges": tuple(sorted((card["unit_id"], card["count"])
+                                                      for card in sieges)),
+            "capacity": (used, total), "layout": (manifest["layout"],
+                                                   tuple(o.get("source_resolution") or ())),
+            "slots": tuple(sorted(slots)),
+            "known": {tuple(card["bbox"]): card["unit_id"] for card in known},
+            "missing": tuple(tuple(card["bbox"]) for card in missing)}
+
+
+def mixed_archer_attack_guard(snapshot, prepared: TaskResult, client_version: str) -> str | None:
+    """Require a fresh, unchanged and full army immediately before match input."""
+    if (prepared.status != "succeeded" or
+            str(snapshot.screenshot_path) == prepared.metrics.get("final_frame")):
+        return "mixed_army_attack_frame_not_fresh"
+    state, issue = _inspect_mixed_archer_current(snapshot, client_version)
+    if issue is not None:
+        return issue
+    observed, _, loadout, archers, target = state
+    reference = prepared.metrics
+    if (archers != target or archers != reference.get("archer_target")
+            or observed != reference.get("observed")
+            or not _same_loadout(reference.get("verified_loadout"), loadout)):
+        return "mixed_army_changed_before_attack"
+    return None
+
+
+def reobserve_mixed_archer_missing_loadout(session, snapshot, prepared: TaskResult,
+                                            evidence: list[Path]):
+    """Retry only a missing after-fill loadout with new, independently verified frames."""
+    from .combat import _read_army, _verified_army_identities
+    from .device import foreground_package, resolve_game_display
+
+    issue = mixed_archer_attack_guard(snapshot, prepared, session.client_version)
+    if issue != "mixed_army_hero_loadout_unverified" or prepared.metrics.get("recipe_mutations") != 0:
+        return snapshot, issue
+    observed, roster_issue = _read_current(snapshot, full=True)
+    if roster_issue is not None or observed != prepared.metrics.get("observed"):
+        return snapshot, "mixed_army_changed_before_attack"
+    capacities = _army_capacity_counts(snapshot.observations["army"])
+    if capacities is None:
+        return snapshot, "mixed_army_loadout_retry_capacity_unverified"
+    actions = getattr(session, "action_count", None)
+    inputs = getattr(session, "_input_attempt_generation", None)
+    captured = snapshot.observations.get("observed_at_monotonic")
+    frame_id = snapshot.observations.get("frame_id")
+    if (type(actions) is not int or type(inputs) is not int or
+            type(captured) not in (int, float) or not math.isfinite(captured) or
+            not 0 <= time.monotonic() - captured <= 8 or
+            not isinstance(frame_id, str) or not frame_id or
+            snapshot is not session.last_snapshot):
+        return snapshot, "mixed_army_loadout_retry_initial_frame_unverified"
+    try:
+        with Path(snapshot.screenshot_path).open("rb") as source:
+            original_sha = hashlib.file_digest(source, "sha256").hexdigest()
+    except OSError:
+        return snapshot, "mixed_army_loadout_retry_initial_frame_unverified"
+    paths, ids, hashes = {str(snapshot.screenshot_path)}, {frame_id}, {original_sha}
+    capture = session.capture
+    timeout = min(5, session.config.runtime.step_timeout_sec)
+    source_path = Path(session.config.source_path).resolve()
+    try:
+        with source_path.open("rb") as source:
+            source_sha = hashlib.file_digest(source, "sha256").hexdigest()
+    except OSError:
+        return snapshot, "mixed_army_loadout_retry_source_unverified"
+
+    def environment_ok():
+        try:
+            if Path(session.config.source_path).resolve() != source_path:
+                return False
+            with source_path.open("rb") as source:
+                if hashlib.file_digest(source, "sha256").hexdigest() != source_sha:
+                    return False
+        except OSError:
+            return False
+        if (session.client_version != "18.647.2" or session.action_count != actions or
+                session._input_attempt_generation != inputs or
+                foreground_package(capture.adb, capture.serial, timeout_sec=timeout) !=
+                session.config.game.package_name):
+            return False
+        display = resolve_game_display(capture.adb, capture.serial,
+                                       session.config.game.package_name,
+                                       display_id=session.config.game.display_id,
+                                       timeout_sec=timeout)
+        return (display.logical_id == capture.input_display_id and
+                display.physical_id == capture.screenshot_display_id)
+
+    for attempt in range(2):
+        session.check_deadline()
+        if not environment_ok():
+            return snapshot, "mixed_army_loadout_retry_environment_changed"
+        fresh = session.observe(f"battle-army-loadout-reread-{attempt + 1}")
+        evidence.append(fresh.screenshot_path)
+        session.check_deadline()
+        next_captured = fresh.observations.get("observed_at_monotonic")
+        next_id = fresh.observations.get("frame_id")
+        if (fresh.scene == "account_in_use" or fresh is not session.last_snapshot or
+                str(fresh.screenshot_path) in paths or
+                not isinstance(next_id, str) or not next_id or next_id in ids or
+                type(next_captured) not in (int, float) or not math.isfinite(next_captured) or
+                next_captured <= captured or not 0 <= time.monotonic() - next_captured <= 8):
+            return fresh, "mixed_army_loadout_retry_frame_not_fresh_or_interrupted"
+        try:
+            with Path(fresh.screenshot_path).open("rb") as source:
+                frame_sha = hashlib.file_digest(source, "sha256").hexdigest()
+        except OSError:
+            return fresh, "mixed_army_loadout_retry_frame_not_fresh_or_interrupted"
+        if frame_sha in hashes or not environment_ok():
+            return fresh, "mixed_army_loadout_retry_frame_or_environment_changed"
+        paths.add(str(fresh.screenshot_path))
+        ids.add(next_id)
+        hashes.add(frame_sha)
+        captured = next_captured
+        snapshot = fresh
+        try:
+            full_army = _read_army(fresh)
+        except FlowError:
+            return fresh, "mixed_army_loadout_retry_roster_unverified"
+        manifest = full_army["recipe"]["manifest"]
+        heroes = full_army["recipe"].get("hero_evidence")
+        if (not full_army["troops_full"] or not isinstance(heroes, dict) or
+                heroes.get("complete") is not True or heroes.get("unknowns") != [] or
+                heroes.get("frame") != str(fresh.screenshot_path) or
+                not _verified_army_identities(manifest.get("troops"), "troop", session.client_version) or
+                not _verified_army_identities(heroes.get("cards"), "hero", session.client_version)):
+            return fresh, "mixed_army_loadout_retry_roster_unverified"
+        observed, roster_issue = _read_current(fresh, full=True)
+        if (roster_issue is not None or observed != prepared.metrics.get("observed") or
+                _army_capacity_counts(full_army["recipe"]) != capacities):
+            return fresh, "mixed_army_changed_before_attack"
+        issue = mixed_archer_attack_guard(fresh, prepared, session.client_version)
+        if issue != "mixed_army_hero_loadout_unverified":
+            return fresh, issue
+    return snapshot, issue
+
+
+def ensure_mixed_archer_army(session) -> TaskResult:
+    """Fill only the observed free troop spaces of the sampled Furnace army.
+
+    This route never opens saved plans and cannot replace another troop. The
+    target count is derived from the current capacity, not an old screenshot.
+    """
+    evidence: list[Path] = []
+    if getattr(session, "client_version", None) != "18.647.2":
+        return _result("not_supported", "mixed_army_client_version_unverified", evidence,
+                       recipe_mutations=0)
+    session.check_deadline()
+    snapshot = session.observe("mixed-army-preparation")
+    evidence.append(snapshot.screenshot_path)
+
+    state, issue = _inspect_mixed_archer_current(snapshot, session.client_version)
+    if issue == "hero_or_siege_identity_coverage_missing":
+        from .device import foreground_package
+
+        baseline = _mixed_initial_identity_retry_signature(snapshot, session.client_version)
+        captured = snapshot.observations.get("observed_at_monotonic")
+        frame_id = snapshot.observations.get("frame_id")
+        actions = getattr(session, "action_count", None)
+        input_attempts = getattr(session, "_input_attempt_generation", None)
+        if (baseline is not None and len(baseline["missing"]) == 1 and
+                type(captured) in (int, float) and math.isfinite(captured) and
+                0 <= time.monotonic() - captured <= 8 and
+                isinstance(frame_id, str) and frame_id and type(actions) is int and
+                type(input_attempts) is int and
+                snapshot is session.last_snapshot):
+            seen_paths = {str(snapshot.screenshot_path)}
+            seen_ids = {frame_id}
+            for attempt in range(2):  # Initial observation plus at most two fresh rereads.
+                session.check_deadline()
+                if (session.client_version != "18.647.2" or
+                        session.action_count != actions or
+                        session._input_attempt_generation != input_attempts or
+                        foreground_package(session.capture.adb, session.capture.serial,
+                            timeout_sec=min(5, session.config.runtime.step_timeout_sec)) !=
+                        session.config.game.package_name):
+                    return _result("not_supported", "mixed_army_retry_foreground_or_input_changed",
+                                   evidence, recipe_mutations=0)
+                fresh = session.observe(f"mixed-army-identity-reread-{attempt + 1}")
+                evidence.append(fresh.screenshot_path)
+                session.check_deadline()
+                next_captured = fresh.observations.get("observed_at_monotonic")
+                next_id = fresh.observations.get("frame_id")
+                if (fresh.scene == "account_in_use" or
+                        session.client_version != "18.647.2" or session.action_count != actions or
+                        session._input_attempt_generation != input_attempts or
+                        fresh is not session.last_snapshot or
+                        str(fresh.screenshot_path) in seen_paths or
+                        not isinstance(next_id, str) or not next_id or next_id in seen_ids or
+                        type(next_captured) not in (int, float) or
+                        not math.isfinite(next_captured) or next_captured <= captured or
+                        not 0 <= time.monotonic() - next_captured <= 8):
+                    return _result("not_supported", "mixed_army_retry_frame_not_fresh_or_interrupted",
+                                   evidence, recipe_mutations=0)
+                if foreground_package(session.capture.adb, session.capture.serial,
+                                      timeout_sec=min(5, session.config.runtime.step_timeout_sec)) != \
+                        session.config.game.package_name:
+                    return _result("not_supported", "mixed_army_retry_foreground_changed",
+                                   evidence, recipe_mutations=0)
+                fresh_signature = _mixed_initial_identity_retry_signature(fresh, session.client_version)
+                if (fresh_signature is None or
+                        any(fresh_signature[key] != baseline[key] for key in
+                            ("roster", "sieges", "capacity", "layout", "slots")) or
+                        any(fresh_signature["known"].get(box) != unit_id for box, unit_id in
+                            baseline["known"].items()) or
+                        not set(fresh_signature["missing"]).issubset(baseline["missing"])):
+                    return _result("not_supported", "mixed_army_retry_current_changed",
+                                   evidence, recipe_mutations=0)
+                seen_paths.add(str(fresh.screenshot_path))
+                seen_ids.add(next_id)
+                snapshot, captured, frame_id = fresh, next_captured, next_id
+                state, issue = _inspect_mixed_archer_current(snapshot, session.client_version)
+                if issue is None:
+                    break
+                if issue != "hero_or_siege_identity_coverage_missing":
+                    return _result("not_supported", issue, evidence, recipe_mutations=0)
+    if issue is not None:
+        return _result("not_supported", issue, evidence, recipe_mutations=0)
+    observed, editor, loadout, archer_count, target = state
+    if archer_count == target:
+        return _result("succeeded", "Mixed army already full", evidence,
+                       observed=observed, archer_target=target, recipe_mutations=0,
+                       verified_loadout=loadout, final_frame=str(snapshot.screenshot_path))
+    if _control(editor, "open_picker", kind="troop") is None:
+        return _result("not_supported", "mixed_army_direct_picker_unavailable", evidence,
+                       recipe_mutations=0)
+    desired = {kind: dict(group) for kind, group in observed.items()}
+    desired["troop"]["archer"] = target
+    recipe = ArmyRecipe(tuple(ArmyRequirement(unit_id, count)
+                             for unit_id, count in desired["troop"].items()))
+    built, issue = _desired(observed, recipe)
+    if issue is not None or built != desired:
+        return _result("not_supported", issue or "mixed_army_desired_mismatch", evidence,
+                       recipe_mutations=0)
+    def guard_before_mutation(current):
+        if current.screenshot_path == snapshot.screenshot_path:
+            return "mixed_army_pre_mutation_frame_not_fresh"
+        refreshed, issue = _inspect_mixed_archer_current(current, session.client_version)
+        if issue is not None:
+            return issue
+        if (refreshed[0] != observed or refreshed[3:] != (archer_count, target)
+                or not _same_loadout(loadout, refreshed[2])):
+            return "mixed_army_changed_during_picker_preflight"
+        return None
+
+    result = _apply_direct(session, snapshot, observed, desired, loadout, evidence,
+                           before_mutation_guard=guard_before_mutation)
+    if result.status != "succeeded":
+        return result
+    previous_frame = evidence[-1]
+    session.check_deadline()
+    final = session.observe("mixed-army-final-verification")
+    evidence.append(final.screenshot_path)
+    final_state, issue = _inspect_mixed_archer_current(final, session.client_version)
+    if (final.screenshot_path in {snapshot.screenshot_path, previous_frame} or issue is not None
+            or final_state is None or final_state[0] != desired
+            or final_state[3:] != (target, target)
+            or not _same_loadout(loadout, final_state[2])):
+        return _result("failed", issue or "mixed_army_final_verification_failed", evidence,
+                       **result.metrics)
+    return _result("succeeded", "Mixed army filled and fully verified", evidence,
+                   **result.metrics, archer_target=target, final_frame=str(final.screenshot_path),
+                   verified_loadout=final_state[2])
+
+
 def ensure_army(session, recipe: ArmyRecipe) -> TaskResult:
     """Match, then optionally use or create one fully observed saved plan.
 
@@ -545,7 +1030,12 @@ def ensure_army(session, recipe: ArmyRecipe) -> TaskResult:
     snapshot = session.observe("army-preparation")
     evidence.append(snapshot.screenshot_path)
     if snapshot.scene == "village":
-        session.click_template(snapshot, "hud_army", roi=(0, 460, 230, 720))
+        if getattr(session, "client_version", None) == "18.647.2":
+            from .army_navigation import open_current_army
+            snapshot = open_current_army(session, snapshot, evidence)
+            evidence.append(snapshot.screenshot_path)
+        else:
+            session.click_template(snapshot, "hud_army", roi=(0, 460, 230, 720))
         snapshot = _observe_surface(session, "current", evidence)
         if snapshot is None:
             return _result("failed", "army_page_unverified_after_navigation", evidence)
@@ -588,7 +1078,17 @@ def ensure_army(session, recipe: ArmyRecipe) -> TaskResult:
     army = snapshot.observations["army"]
     original_loadout = _hero_loadout(army, set(observed["hero"]))
     if original_loadout is None:
-        return _result("not_supported", "hero_equipment_or_pet_observation_missing", evidence, actions=0)
+        snapshot, observed, original_loadout, issue = _reobserve_missing_loadout(
+            session, snapshot, observed, evidence)
+        if issue is not None:
+            return _result("not_supported", issue, evidence, actions=0)
+        editor = snapshot.observations["army_editor"]
+        desired, issue = _desired(observed, recipe)
+        if issue is not None:
+            return _result("not_supported", issue, evidence, actions=0)
+        known_issue = _preflight_change(snapshot, editor, observed, desired, known_only=True)
+        if known_issue is not None and _known_no_opportunity(known_issue):
+            return _result("skipped", known_issue, evidence, actions=0, recipe_mutations=0)
     changed_kinds = {kind for kind in _KINDS if not _matches(observed, desired, kinds={kind})}
     if (changed_kinds <= {"troop", "spell"} and all(
             _control(editor, "open_picker", kind=kind) is not None for kind in changed_kinds)):

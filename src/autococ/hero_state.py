@@ -43,11 +43,17 @@ HERO_PHASE_TEMPLATE_IDS = {
     "grand_warden": "warden", "barbarian_king": "barbarian_king",
     "minion_prince": "minion_prince", "archer_queen": "archer_queen",
 }
+CURRENT_WARDEN_SKILL_SOURCE = "reports/completion-20261015/probes/20261016-035742-manual-probed-skill/frames"
+CURRENT_WARDEN_READY_CARD_PHASE_SOURCE = (
+    "reports/completion-20261015/live/20261016-053200-457276-365d1d63/"
+    "frames/00028-post-deployment-skill-before.png"
+)
 
 
 def recognize_siege_state(
     screenshot_path: str | Path, slot_bbox: tuple[int, int, int, int] | list[int], *,
     baseline_resolution: tuple[int, int] = (1280, 720),
+    client_version: str | None = None,
 ) -> dict[str, object]:
     """An observed release control plus independent HP verifies deployment."""
     import cv2
@@ -64,6 +70,9 @@ def recognize_siege_state(
               "evidence": {"coordinate_resolution": [1280, 720], "template_source": SIEGE_TEMPLATE_SOURCE}}
     if not (0 <= left < right <= 1280 and 80 <= right - left <= 110
             and 550 <= top <= 605 and 695 <= bottom <= 720):
+        return result
+    if client_version != "18.600.7":
+        result["evidence"]["reason"] = "current_client_siege_deployment_templates_unavailable"
         return result
     release = _match(image, TEMPLATES / "siege_deployed_release.png",
                      (max(0, left - 10), 645, min(1280, right + 10), 720), mask_kind="release")
@@ -94,6 +103,7 @@ def recognize_hero_state(
     When unit_id is supplied, its portrait must match again in this frame.
     """
     import cv2
+    import math
     import numpy as np
 
     path = Path(screenshot_path)
@@ -113,6 +123,9 @@ def recognize_hero_state(
             and 550 <= top <= 605 and 695 <= bottom <= 720):
         evidence["reason"] = "unrecognized_hero_slot_geometry"
         return result
+    if not isinstance(unit_id, str) or not unit_id or client_version not in {"18.600.7", "18.647.2"}:
+        evidence["reason"] = "current_frame_hero_identity_unverified"
+        return result
     if unit_id is not None:
         from .unit_catalog import recognize_card_identity
 
@@ -124,6 +137,11 @@ def recognize_hero_state(
             evidence["reason"] = "current_frame_hero_identity_unverified"
             return result
         if identity["unit_id"] is None:
+            # Phase portraits were sampled on the older client only. A known
+            # army portrait in another version does not validate a battle card.
+            if client_version != "18.600.7":
+                evidence["reason"] = "current_frame_hero_identity_unverified"
+                return result
             phase_portrait = _hero_phase_portrait(image, box, unit_id)
             evidence["phase_portrait"] = phase_portrait
             if phase_portrait is None:
@@ -154,6 +172,15 @@ def recognize_hero_state(
     result["selected"] = selected is not None
     evidence["selected_border"] = selected
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    if client_version == "18.647.2" and unit_id != "grand_warden":
+        # The public state reader can receive a caller-supplied box. For this
+        # client, a portrait and HP inside a shifted box are insufficient:
+        # independently close both sides and the bottom of that very card.
+        outline = _current_nonwarden_deployed_card_outline(hsv, gray, box)
+        evidence["current_deployed_card_outline"] = outline
+        if not outline["verified"]:
+            evidence["reason"] = "current_nonwarden_card_not_independently_closed"
+            return result
     health = _health_bar(hsv, gray, pet["bbox"]) if pet is not None else None
     if health is None and unit_id is not None:
         # A deployed card's enclosed HP frame is anchored to the card, while
@@ -168,10 +195,115 @@ def recognize_hero_state(
             if health is not None:
                 break
     evidence["health_bar"] = health
-    if health is not None:
+    yellow_health = None
+    if client_version == "18.647.2" and unit_id == "grand_warden" and health is None:
+        # This client's sampled Warden card can show yellow HP after its
+        # initial green phase. Recheck the portrait and closed card in this
+        # exact frame before accepting colour inside the card as live HP.
+        located = locate_current_deployed_hero_card(path, unit_id, client_version=client_version)
+        evidence["closed_card"] = located
+        if located is not None and tuple(located["bbox"]) == box:
+            for py in range(592, 606):
+                for offset, width in ((5, 78), (8, 72)):
+                    if left + offset + 1 + width > right + 2:
+                        continue
+                    yellow_health = _yellow_health_bar(hsv, gray, [left + offset, py], frame_width=width)
+                    if yellow_health is not None:
+                        break
+                if yellow_health is not None:
+                    break
+    evidence["yellow_health_bar"] = yellow_health
+    red_health = None
+    if client_version == "18.647.2" and unit_id == "grand_warden" and health is None and yellow_health is None:
+        located = evidence.get("closed_card")
+        if located is not None and tuple(located["bbox"]) == box:
+            red_health = _current_warden_red_health_bar(hsv, gray, box)
+    evidence["red_health_bar"] = red_health
+    if health is not None or yellow_health is not None or red_health is not None:
         result.update(state="deployed", deployed=True, defeated=False)
     elif selected is not None:
         result["state"] = "selected"
+    if client_version == "18.647.2":
+        # The current equipped book has its own paired ready/used samples.
+        # A gray face by itself is only an identity candidate, never an ability
+        # transition. Require the live HP frame and the independently closed
+        # card located again in this same screenshot.
+        if unit_id != "grand_warden" or (health is None and red_health is None
+                                          and yellow_health is None):
+            evidence["ability_phase_reason"] = "current_warden_equipment_or_live_hp_unverified"
+            return result
+        located = evidence.get("closed_card") or locate_current_deployed_hero_card(
+            path, unit_id, client_version=client_version)
+        evidence["closed_card"] = located
+        if located is None or tuple(located["bbox"]) != box:
+            evidence["ability_phase_reason"] = "current_warden_card_not_independently_closed"
+            return result
+        ready_card_roi = (left + 28, 621, right - 2, 685)
+        ready_cards = [_match(image, TEMPLATES / name, ready_card_roi)
+                       for name in ("hero_warden_18_647_2_ready_card.png",
+                                    "hero_warden_18_647_2_ready_card_phase.png")]
+        anchors = {
+            "ready_book": _match(image, TEMPLATES / "hero_warden_18_647_2_ready_book.png",
+                                 (left + 1, 525, left + 48, 572)),
+            "ready_card": max((match for match in ready_cards if match is not None),
+                              key=lambda match: match["confidence"], default=None),
+            "used_book": _match(image, TEMPLATES / "hero_warden_18_647_2_used_book.png",
+                                (left + 1, 525, left + 48, 572)),
+            "used_card": _match(image, TEMPLATES / "hero_warden_18_647_2_used_card.png",
+                                (left + 28, 621, right - 2, 685)),
+        }
+        evidence["current_equipment_matches"] = anchors
+        ready = anchors["ready_book"] is not None and anchors["ready_card"] is not None
+        used = anchors["used_book"] is not None and anchors["used_card"] is not None
+        mixed = ((anchors["ready_book"] is not None or anchors["ready_card"] is not None)
+                 and (anchors["used_book"] is not None or anchors["used_card"] is not None))
+        # This client has an independently sampled yellow-HP ready layout.
+        # A yellow bar alone is never a ready phase: require this frame's
+        # independently closed Warden card, a >=.95 unique portrait, both
+        # active anchors, and absence of *either* used anchor. The older
+        # green/red ready and yellow used paths retain their original gates.
+        confidence = identity.get("confidence")
+        yellow_ready = (yellow_health is not None and ready
+                        and identity.get("unit_id") == "grand_warden"
+                        and identity.get("version_verified") is True
+                        and anchors["used_book"] is None and anchors["used_card"] is None
+                        and type(confidence) in (int, float) and math.isfinite(confidence)
+                        and confidence >= .95)
+        if (ready and not mixed and (health is not None or red_health is not None)) or yellow_ready:
+            result.update(state="ability_ready", ability_ready=True, ability_used=False)
+            ready_template = Path(anchors["ready_card"]["template"]).name
+            ready_source = (CURRENT_WARDEN_READY_CARD_PHASE_SOURCE
+                            if ready_template == "hero_warden_18_647_2_ready_card_phase.png"
+                            else f"{CURRENT_WARDEN_SKILL_SOURCE}/00025-manual-skill-fresh-action-check.png")
+            evidence["ability_ready"] = {"hero": unit_id, "equipment_layout": "current_gold_book",
+                                         "active_equipment": anchors["ready_book"],
+                                         "ready_card": anchors["ready_card"],
+                                         "ready_book_source": f"{CURRENT_WARDEN_SKILL_SOURCE}/00025-manual-skill-fresh-action-check.png",
+                                         "ready_card_source": ready_source,
+                                         "template_source": ready_source,
+                                         "source_kind": "agent_visual_prototype"}
+            if yellow_ready:
+                evidence["ability_ready"]["yellow_hp_ready_contract"] = {
+                    "health": yellow_health, "closed_card": located,
+                    "portrait_confidence": confidence,
+                    "ready_book": anchors["ready_book"], "ready_card": anchors["ready_card"],
+                    "used_book": None, "used_card": None}
+        elif used and not mixed and "battle_used_035742" in str(identity["evidence"][0]["template"]):
+            result.update(state="ability_used", ability_ready=False, ability_used=True)
+            evidence["ability_used"] = {"hero": unit_id, "equipment_layout": "current_gold_book",
+                                        "gray_equipment": anchors["used_book"],
+                                        "gray_card": anchors["used_card"],
+                                        "template_source": f"{CURRENT_WARDEN_SKILL_SOURCE}/00027-manual-skill-after-2.png",
+                                        "source_kind": "agent_visual_prototype"}
+        else:
+            evidence["ability_phase_reason"] = "current_warden_book_card_or_identity_conflict"
+        return result
+    if client_version != "18.600.7":
+        # The ability portraits and equipment below were sampled only on the
+        # older client. Current-card identity/HP may be known independently,
+        # but neither authorizes a ready or used ability phase on 18.647.2.
+        evidence["ability_phase_reason"] = "current_client_ability_templates_unavailable"
+        return result
     # A pet can be reassigned: the Warden-specific lower-card and book images must
     # both match before interpreting this pet-equipped card as this ready layout.
     if pet is not None and Path(pet["template"]).name == "battle_hero_pet_0.png" and (unit_id is None or unit_id == "grand_warden"):
@@ -242,6 +374,201 @@ def recognize_hero_state(
                 "template_source": f"{HERO_ABILITY_SAMPLE_DIRECTORY}/{used_frame}",
             }
     return result
+
+
+def locate_current_deployed_hero_card(
+    screenshot_path: str | Path, unit_id: str, *, client_version: str | None,
+) -> dict[str, object] | None:
+    """Locate a deployed card from this frame's versioned face and card edges.
+
+    A pre-burst slot is deliberately not an input: post-burst animation may
+    change the card art or outline, so its old coordinates are only history.
+    This locates a card; ``recognize_hero_state`` must still prove HP/deployment.
+    """
+    import cv2
+    import math
+    import numpy as np
+
+    if client_version != "18.647.2":
+        return None
+    from .unit_catalog import CATALOG_ROOT, template_manifest
+
+    image = cv2.resize(read_frame(screenshot_path), (1280, 720), interpolation=cv2.INTER_AREA)
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, np.array([75, 65, 60]), np.array([170, 255, 255]))
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    candidates = []
+    for entry in template_manifest(client_version=client_version)["templates"]:
+        if (entry.get("unit_id") != unit_id or entry.get("surface") != "battle" or
+                entry.get("state") != "deployed" or entry.get("client_version") != client_version):
+            continue
+        portrait_box, card_box = entry.get("source_bbox_1280"), entry.get("source_card_bbox_1280")
+        if (not isinstance(portrait_box, list) or len(portrait_box) != 4 or
+                not isinstance(card_box, list) or len(card_box) != 4 or
+                any(type(v) is not int for v in portrait_box + card_box)):
+            continue
+        template_path = (CATALOG_ROOT / entry["path"]).resolve()
+        if not template_path.is_relative_to(CATALOG_ROOT.resolve()) or not template_path.is_file():
+            continue
+        template = cv2.imdecode(np.fromfile(template_path, np.uint8), cv2.IMREAD_COLOR)
+        search = image[620:690, 550:1010]
+        if template is None or template.shape[0] > search.shape[0] or template.shape[1] > search.shape[1]:
+            continue
+        _, score, _, (x, y) = cv2.minMaxLoc(cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED))
+        if not math.isfinite(score) or score < .94:
+            continue
+        left = 550 + x - (portrait_box[0] - card_box[0])
+        top = 620 + y - (portrait_box[1] - card_box[1])
+        right, bottom = left + card_box[2] - card_box[0], top + card_box[3] - card_box[1]
+        if not (3 <= left < right <= 1277 and 590 <= top <= 605 and 705 <= bottom <= 715):
+            continue
+        # Independent same-frame card sides and closed bottom prevent a face
+        # in battlefield art, a transient fade, or a stale slot from locating it.
+        sides = [max(float((mask[625:695, edge + shift:edge + shift + 3] > 0).mean())
+                     for shift in (-2, -1, 0, 1, 2)) for edge in (left, right - 3)]
+        bottom_contrast = float(gray[709:711, left + 8:right - 8].mean() -
+                                gray[712, left + 8:right - 8].mean())
+        gray_used_border = None
+        gray_used_topology = None
+        nonwarden_outline = None
+        if (unit_id == "grand_warden" and "battle_used_035742" in template_path.name):
+            # The used card loses its purple side colour. Its opposite dark
+            # outline gradients and closed bottom remain visible in 27-29.
+            direction = np.median(cv2.Sobel(gray[625:695], cv2.CV_32F, 1, 0, ksize=3), axis=0)
+            gray_used_border = [float(max(direction[left - 2:left + 3])),
+                                float(min(direction[right - 4:right]))]
+            closed = gray_used_border[0] >= 250 and gray_used_border[1] <= -250
+            if not closed:
+                # A stable gray used-card outline may animate below the
+                # median-gradient gate. Require a separate, paired full-height
+                # topology proof from this same portrait-derived card instead.
+                gray_used_topology = _current_warden_gray_card_topology(gray, left, right)
+                closed = gray_used_topology is not None
+        else:
+            if unit_id == "grand_warden":
+                closed = min(sides) >= .5
+            else:
+                nonwarden_outline = _current_nonwarden_deployed_card_outline(
+                    hsv, gray, (left, top, right, bottom))
+                closed = nonwarden_outline["verified"]
+        if not closed or bottom_contrast < 40:
+            continue
+        candidates.append((score, (left, top, right, bottom), sides, bottom_contrast,
+                           str(template_path), gray_used_border, gray_used_topology,
+                           nonwarden_outline))
+    if not candidates:
+        return None
+    score, box, sides, bottom_contrast, template_path, gray_used_border, gray_used_topology, nonwarden_outline = max(
+        candidates, key=lambda row: row[0])
+    result = {"bbox": list(box), "portrait_score": round(score, 5), "template": template_path,
+              "template_client_version": client_version, "frame": str(screenshot_path),
+              "card_sides": sides, "gray_used_border": gray_used_border,
+              "gray_used_topology": gray_used_topology, "bottom_contrast": bottom_contrast,
+              "method": "current_versioned_deployed_portrait_and_closed_card"}
+    if nonwarden_outline is not None:
+        result["current_nonwarden_card_outline"] = nonwarden_outline
+    return result
+
+
+def _current_nonwarden_deployed_card_outline(hsv, gray, box: tuple[int, int, int, int]) -> dict:
+    """Prove both directed side edges and the bottom of one current card."""
+    import cv2
+    import numpy as np
+
+    left, top, right, bottom = box
+    if not (3 <= left < right <= 1277 and 80 <= right - left <= 110
+            and 590 <= top <= 605 and 705 <= bottom <= 715):
+        return {"verified": False, "reason": "invalid_card_geometry"}
+    mask = cv2.inRange(hsv, np.array([75, 65, 60]), np.array([170, 255, 255]))
+    sides = [max(float((mask[625:695, edge + shift:edge + shift + 3] > 0).mean())
+                 for shift in (-2, -1, 0, 1, 2)) for edge in (left, right - 3)]
+    direction = np.median(cv2.Sobel(gray[625:695], cv2.CV_32F, 1, 0, ksize=3), axis=0)
+    left_edge = float(max(direction[left - 2:left + 3]))
+    right_edge = float(min(direction[right - 4:right]))
+    bottom_contrast = float(gray[709:711, left + 8:right - 8].mean() -
+                            gray[712, left + 8:right - 8].mean())
+    return {"verified": (min(sides) >= .5 and left_edge >= 150 and
+                         right_edge <= -150 and bottom_contrast >= 40),
+            "card_sides": sides, "directed_side_edges": [left_edge, right_edge],
+            "bottom_contrast": bottom_contrast,
+            "method": "current_colored_card_paired_directed_edges_and_bottom"}
+
+
+def _current_warden_gray_card_topology(gray, left: int, right: int) -> dict | None:
+    """Independent paired side-line proof for an animated gray used card.
+
+    This checks a long, aligned left/right outline. Its original broad
+    inside/outside contrast proof is retained; a dark-line proof also accepts
+    a narrow continuous trough with brighter pixels on both flanks. This
+    matters when the neighbouring battlefield brightens independently of the
+    card. The caller still checks its bottom edge.
+    """
+    import cv2
+    import numpy as np
+
+    if left < 6 or right + 4 > gray.shape[1] or right - left != 89:
+        return None
+    rows = gray[625:695]
+    direction = cv2.Sobel(rows, cv2.CV_32F, 1, 0, ksize=3)
+    left_band = direction[:, left - 2:left + 3]
+    right_band = direction[:, right - 4:right]
+    if left_band.shape != (70, 5) or right_band.shape != (70, 4):
+        return None
+    left_strength = left_band.max(axis=1)
+    right_strength = right_band.min(axis=1)
+    left_contrast = (rows[:, left + 3:left + 6].mean(axis=1)
+                     - rows[:, left - 5:left - 2].mean(axis=1))
+    right_contrast = (rows[:, right - 6:right - 3].mean(axis=1)
+                      - rows[:, right + 1:right + 4].mean(axis=1))
+    # Card artwork/ability animation changes the interior brightness by row.
+    # Its outline remains a continuous, oppositely oriented pair of edges;
+    # check the inside/outside separation over the whole side rather than
+    # demanding both contrasts on every individual artwork row.
+    paired = (left_strength >= 160) & (right_strength <= -160)
+    count = int(paired.sum())
+    longest = 0
+    run = 0
+    for value in paired:
+        run = run + 1 if value else 0
+        longest = max(longest, run)
+    if (count < 63 or longest < 50 or int(paired[:8].sum()) < 6
+            or int(paired[-8:].sum()) < 6):
+        return None
+    left_positions = np.argmax(left_band, axis=1)[paired]
+    right_positions = np.argmin(right_band, axis=1)[paired]
+    if (float(np.median(np.abs(left_positions - np.median(left_positions)))) > 1
+            or float(np.median(np.abs(right_positions - np.median(right_positions)))) > 1):
+        return None
+    broad_contrast = (float(np.median(left_contrast)) >= 20
+                      and float(np.median(right_contrast)) >= 20)
+    dark_line = None
+    if not broad_contrast:
+        # Both dark troughs must occupy the current portrait-derived card
+        # edges. Brightness of one neighbouring area is never substituted for
+        # a line: each trough needs independent inner and outer flanks.
+        left_line = rows[:, left - 1:left + 1].min(axis=1).astype(float)
+        right_line = rows[:, right - 1:right + 1].min(axis=1).astype(float)
+        left_outer = rows[:, left - 4:left - 2].mean(axis=1) - left_line
+        left_inner = rows[:, left + 1:left + 3].mean(axis=1) - left_line
+        right_inner = rows[:, right - 4:right - 2].mean(axis=1) - right_line
+        right_outer = rows[:, right + 2:right + 4].mean(axis=1) - right_line
+        trough_rows = (paired & (left_outer >= 12) & (left_inner >= 25)
+                       & (right_inner >= 25) & (right_outer >= 12))
+        if int(trough_rows.sum()) < 45:
+            return None
+        dark_line = {"paired_dark_trough_rows": int(trough_rows.sum()),
+                     "left_line_median": float(np.median(left_line[trough_rows])),
+                     "right_line_median": float(np.median(right_line[trough_rows]))}
+    return {"method": "paired_full_height_gray_used_card_sides",
+            "paired_rows": count, "longest_paired_run": longest,
+            "top_paired_rows": int(paired[:8].sum()),
+            "bottom_paired_rows": int(paired[-8:].sum()),
+            "left_gradient_median": float(np.median(left_strength[paired])),
+            "right_gradient_median": float(np.median(right_strength[paired])),
+            "left_contrast_median": float(np.median(left_contrast[paired])),
+            "right_contrast_median": float(np.median(right_contrast[paired])),
+            "contrast_proof": "broad_inside_outside" if broad_contrast else "paired_dark_troughs",
+            "dark_line": dark_line}
 
 
 def _hero_phase_portrait(image, box: tuple[int, int, int, int], unit_id: str) -> dict | None:
@@ -325,3 +652,88 @@ def _health_bar(hsv, gray, pet_bbox: list[int], *, frame_width: int = 78) -> dic
                 "frame_span": [left, gy - 3, right, gy + int(height) + 3],
                 "frame_support": [top_support, bottom_support, *sides]}
     return None
+
+
+def _yellow_health_bar(hsv, gray, pet_bbox: list[int], *, frame_width: int = 78) -> dict | None:
+    """The sampled current Warden's yellow fill inside its own dark HP frame."""
+    import cv2
+    import numpy as np
+
+    px, py = pet_bbox[:2]
+    left, top, right, bottom = px + 1, py - 22, px + 1 + frame_width, py - 1
+    if left < 1 or right >= hsv.shape[1] or top < 3:
+        return None
+    yellow = cv2.inRange(hsv[top:bottom, left:right], np.array([13, 170, 130]),
+                         np.array([29, 255, 255]))
+    _, _, stats, _ = cv2.connectedComponentsWithStats(yellow)
+    for x, y, width, height, area in stats[1:]:
+        if not (15 <= width <= 76 and 4 <= height <= 11 and area / (width * height) >= .85 and x <= 6):
+            continue
+        gx, gy = left + int(x), top + int(y)
+        top_support = max(float((gray[row, left + 1:right - 2] < 65).mean()) for row in range(gy - 3, gy))
+        bottom_support = max(float((gray[row, left + 1:right - 2] < 65).mean())
+                             for row in range(gy + height, gy + height + 3))
+        sides = [max(float((gray[gy:gy + height, column] < 65).mean()) for column in columns)
+                 for columns in (range(left - 1, left + 3), range(right - 5, right + 1))]
+        if min(top_support, bottom_support, *sides) < .85:
+            continue
+        return {"method": "yellow_fill_enclosed_by_dark_hp_frame",
+                "fill_bbox": [gx, gy, gx + int(width), gy + int(height)],
+                "frame_span": [left, gy - 3, right, gy + int(height) + 3],
+                "frame_support": [top_support, bottom_support, *sides],
+                "fill_density": round(float(area / (width * height)), 5)}
+    return None
+
+
+def _current_warden_red_health_bar(hsv, gray, box: tuple[int, int, int, int]) -> dict | None:
+    """Current Warden's low HP: a closed outline AND a solid red left fill.
+
+    The empty part is translucent battlefield art. Neither red map pixels nor
+    the outline itself can stand in for the interior fill. The caller has
+    already independently located this version's closed Warden card.
+    """
+    import numpy as np
+
+    left, top, right, bottom = box
+    if right - left != 89 or bottom - top != 116:
+        return None
+    x0, x1 = left + 6, right - 9
+    y0, y1 = top - 23, top - 13
+    if x0 < 0 or y0 < 0 or x1 >= hsv.shape[1] or y1 >= hsv.shape[0]:
+        return None
+    roi = hsv[y0:y1 + 1, x0:x1 + 1]
+    red = (((roi[:, :, 0] <= 10) | (roi[:, :, 0] >= 170))
+           & (roi[:, :, 1] >= 170) & (roi[:, :, 2] >= 130))
+    # Ignore the rounded corner pixels, but require each complete straight
+    # edge; a pair of detached horizontal red lines is insufficient.
+    edges = [float(red[0, 1:-1].mean()), float(red[-1, 1:-1].mean()),
+             float(red[2:-1, :2].any(axis=1).mean()),
+             float(red[2:-1, -2:].any(axis=1).mean())]
+    outline_phase = "red"
+    if min(edges) < .95:
+        # The sampled outline blinks between red and dark while the interior
+        # fill remains visible. Each phase must independently enclose it.
+        dark = gray[y0:y1 + 1, x0:x1 + 1] < 65
+        edges = [float(dark[0, 1:-1].mean()), float(dark[-1, 1:-1].mean()),
+                 float(dark[2:-1, :2].all(axis=1).mean()),
+                 float(dark[2:-1, -2:].all(axis=1).mean())]
+        if min(edges) < .95:
+            return None
+        outline_phase = "dark"
+    # Exclude both the red outline and its antialiased inner edge. Low HP
+    # has a left-aligned, dense rectangular prefix, not isolated red clutter.
+    interior = red[2:-2, 2:-2]
+    columns = interior.mean(axis=0) >= .95
+    gaps = np.flatnonzero(~columns)
+    fill_width = int(gaps[0]) if gaps.size else interior.shape[1]
+    if not 8 <= fill_width <= 30:
+        return None
+    suffix = interior[:, fill_width + 2:]
+    if suffix.size == 0 or float(suffix.mean()) > .30:
+        return None
+    return {"method": "18.647.2_warden_solid_red_fill_inside_closed_hp_frame",
+            "fill_bbox": [x0 + 2, y0 + 2, x0 + 2 + fill_width, y1 - 1],
+            "frame_span": [x0, y0, x1 + 1, y1 + 1],
+            "frame_support": edges, "outline_phase": outline_phase,
+            "fill_density": float(interior[:, :fill_width].mean()),
+            "suffix_red_density": float(suffix.mean()), "client_version": "18.647.2"}

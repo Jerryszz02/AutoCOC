@@ -1,0 +1,44 @@
+{
+  "client_version": "18.647.2",
+  "retained_roi_native": [
+    250,
+    1120,
+    870,
+    1440
+  ],
+  "outside_preserved_area": "black masked",
+  "events_source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-014520-449453-9bf5f72a\\events.jsonl",
+  "events_sha256": "e6b71848a254a5520cd79c9345a7dc79230ad6dd41b36a9faae273611a036dca",
+  "assets": {
+    "00038-toolbar.png": {
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-014520-449453-9bf5f72a\\frames\\00038-line-boundary.png",
+      "source_sha256": "702d8de298e04a413c44295f51309c2afaf0ef14e669079ab80682efd1dbe087",
+      "fixture_sha256": "95c59964858387bd0d292d9cddd87a037aa6e25a633414cc84ee3161a39b3e62",
+      "retained_pixel_sha256": "3f9590355aead962032523c4c13ca6a09e4ba2af747e126b6f8066dba8a62b52",
+      "source_resolution": [
+        2560,
+        1440
+      ]
+    },
+    "00045-toolbar.png": {
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-014520-449453-9bf5f72a\\frames\\00045-mixed-dragon-post-0.png",
+      "source_sha256": "d5ebbb7b9ff5eb28fd0006efd814f39ba756883d725a17c25593e9b1d07af333",
+      "fixture_sha256": "18d4d15e3f0efd767e79fd9bc39f3844faa2d4922f5d91e2d27b01dc61bf0b7b",
+      "retained_pixel_sha256": "80b2d582fb982a5ddae93cb6037ab2c3c8bd95d7faedee9f626578f4501367e8",
+      "source_resolution": [
+        2560,
+        1440
+      ]
+    },
+    "00046-toolbar.png": {
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-014520-449453-9bf5f72a\\frames\\00046-mixed-dragon-post-1.png",
+      "source_sha256": "d5656d40e76880ccdbc22fe98a6df24d1ad6c2356da7e8c152b34d98f1e1a7ec",
+      "fixture_sha256": "d320630e259214e0535bb18a8f492ec77218815a3285c4921708e2083d0d7767",
+      "retained_pixel_sha256": "e45e04d85bd51fad0675f2da21bf197af8b74f9f532c8a92ea1ddb1f337c44b9",
+      "source_resolution": [
+        2560,
+        1440
+      ]
+    }
+  }
+}

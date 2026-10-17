@@ -1,0 +1,83 @@
+{
+  "client_version": "18.647.2",
+  "human_ground_truth": false,
+  "dynamic_event_validation": false,
+  "training_data": false,
+  "source_group": "20261017-023658-950285-38fdc9e8",
+  "builder_sha256": "9123b662f55ef7927c771d6c4161966d7a109c0668d6241217272b6bff504953",
+  "raw_manifest_sha256": "06b60a7e361790465dd495f8e30f272b457da6890e8f52799a9959c5c386f475",
+  "fixtures": {
+    "skill_before_31": {
+      "source_relative_to_reports": "live/20261017-023658-950285-38fdc9e8/frames/00031-post-deployment-skill-before.png",
+      "source_sha256": "5259521867075b1bc489084da3e8b18ce033ecbaa2971ee9b5c4d27a5c30a09c",
+      "source_resolution": [
+        2560,
+        1440
+      ],
+      "card_bbox_1280": [
+        638,
+        515,
+        742,
+        720
+      ],
+      "fixture_sha256": "241777196c0b9bdee9259a3bf6285799bf9b3dc619243e96a2631ea565ed77f3",
+      "card_pixels_sha256": "ad7780389e82cafb4820570f12c7f5f865ca13af079ece936a33f1ab8c230c42",
+      "transformation": "resize_INTER_AREA_1280x720_then_zero_outside_card_box",
+      "meaning": "agent-reviewed regression pixels: solid red HP prefix and independent ready book/card"
+    },
+    "raw_pre_1": {
+      "source_relative_to_reports": "live/20261017-023658-950285-38fdc9e8/skill_raw_sampling_v2/pre/ba66ac242e2341c58568133d5ad71a13/raw-01.png",
+      "source_sha256": "d84a524588c61fc86600bbb2abd181dd51f895e2bf58bbb3eab9e0501cf48084",
+      "source_resolution": [
+        2560,
+        1440
+      ],
+      "card_bbox_1280": [
+        638,
+        515,
+        742,
+        720
+      ],
+      "fixture_sha256": "d2bb6029e5b9be24871d1dda25f43de1bcb45eb3d7d827f3dac4259c09e261bd",
+      "card_pixels_sha256": "3c27e91984a13f141aba1b2e5251b7f0d80dd9c598e48db0ba4ba9ce49c48288",
+      "transformation": "resize_INTER_AREA_1280x720_then_zero_outside_card_box",
+      "meaning": "agent-reviewed regression pixels: solid red HP prefix and independent ready book/card"
+    },
+    "raw_pre_2": {
+      "source_relative_to_reports": "live/20261017-023658-950285-38fdc9e8/skill_raw_sampling_v2/pre/ba66ac242e2341c58568133d5ad71a13/raw-02.png",
+      "source_sha256": "39339aac95ad7178859a7466f59cb4ed2d6dafdef2f171c875a75ef0d76014f5",
+      "source_resolution": [
+        2560,
+        1440
+      ],
+      "card_bbox_1280": [
+        638,
+        515,
+        742,
+        720
+      ],
+      "fixture_sha256": "78e1bbc4cc42c119fe1c19dffeb0d9e441e8b2f5944b7aa781ba077a6209bf75",
+      "card_pixels_sha256": "68ea5990bb1926d02b506399939388fa80dd1cce4c4f8a4b3f729666f1a75901",
+      "transformation": "resize_INTER_AREA_1280x720_then_zero_outside_card_box",
+      "meaning": "agent-reviewed regression pixels: solid red HP prefix and independent ready book/card"
+    },
+    "raw_pre_3": {
+      "source_relative_to_reports": "live/20261017-023658-950285-38fdc9e8/skill_raw_sampling_v2/pre/ba66ac242e2341c58568133d5ad71a13/raw-03.png",
+      "source_sha256": "c4b85a5c17a38af41c7895afe06e13c2750a881e1b6d5387d56fb3f66dbea3c8",
+      "source_resolution": [
+        2560,
+        1440
+      ],
+      "card_bbox_1280": [
+        638,
+        515,
+        742,
+        720
+      ],
+      "fixture_sha256": "b102fc020a6620c08112adcf4b0c1a6d6604bddd67f99a3272e891100f9e9d28",
+      "card_pixels_sha256": "945594934e71ccb47d0275ca615d3943b3b6b33413a43ff4aa948cdb60656c75",
+      "transformation": "resize_INTER_AREA_1280x720_then_zero_outside_card_box",
+      "meaning": "agent-reviewed regression pixels: solid red HP prefix and independent ready book/card"
+    }
+  }
+}

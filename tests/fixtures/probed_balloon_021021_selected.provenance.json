@@ -1,0 +1,19 @@
+{
+  "client_version": "18.647.2",
+  "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-021021-768621-9236d757\\frames\\00020-continuous-line-failure-check.png",
+  "source_sha256": "815834ffafc170009834a9c2a2d9ea715222f42fb5648dea77f672ef15a481ad",
+  "fixture_sha256": "6d60654be98d7cd48b4190b4022df519d02d82454c3cda1c977c0567e5226ced",
+  "transform": "Decode BGR with OpenCV IMREAD_COLOR; overwrite native rows y=0..1089 inclusive with BGR (50,115,77); retain x=0..2559,y=1090..1439; encode PNG with cv2.imwrite.",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "retained_native_xyxy": [
+    0,
+    1090,
+    2560,
+    1440
+  ],
+  "purpose": "Current-version lower battle toolbar evidence only; upper game/player scene deliberately anonymized, not a full-scene fixture.",
+  "card_states": "balloon selected, x2; no probe sent"
+}

@@ -1,0 +1,42 @@
+{
+  "source_run": "20261017-053700-913562-8b4d661b",
+  "client_version": "18.647.2",
+  "source_report": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\run-20261017-053700-913562-8b4d661b.json",
+  "source_report_sha256": "7aaff80e8ad5253d2afed9816ce80018f685a0478d852936043e697d22cb26c5",
+  "events_source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-053700-913562-8b4d661b\\events.jsonl",
+  "events_sha256": "4dc8ee44cf670b4bdac629d6f146a6dc073d49dfa85046ef7c25a73de53059f7",
+  "retained_roi_native": [
+    260,
+    1160,
+    500,
+    1440
+  ],
+  "transform": "Keep source pixels only inside native toolbar ROI; every outside pixel is black. No resize or edit inside ROI.",
+  "source_status": "failed mixed probe; fixture is a regression, not a corrected live receipt",
+  "assets": {
+    "00091-toolbar.png": {
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-053700-913562-8b4d661b\\frames\\00091-line-boundary.png",
+      "source_sha256": "9a91534372fe675d7a4d04cda369677c6f80d0de6af829fb02ee9a84bdf33ccf",
+      "retained_pixel_sha256": "ecc593b6d67b2dba2bd49801987ff6a38be8b3ad174157bcb0297cf9d77eb7d9",
+      "fixture_sha256": "f729260a5c08b4eda1bb91475373587d4ebfe327986bb5543ee6a8688fd4a749"
+    },
+    "00097-toolbar.png": {
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-053700-913562-8b4d661b\\frames\\00097-mixed-dragon-selected-1.png",
+      "source_sha256": "0d2549f1913f9bc8509db441053e7d409c5fc3e7a280d06cc9b809f7f118d78e",
+      "retained_pixel_sha256": "6fde9e6f7c373459266fe73dcf906d34f7fbdeaeaa4ad97420a830d934ff42b8",
+      "fixture_sha256": "1525059bc176d8057180e4126d1a4f01e455b989971de49fce3de2b76997c8a1"
+    },
+    "00098-toolbar.png": {
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-053700-913562-8b4d661b\\frames\\00098-mixed-dragon-post-0.png",
+      "source_sha256": "772b2ce677fa4ab6391f0f0045ac624280688548d9982e079358564ef855ee15",
+      "retained_pixel_sha256": "8231d2623911327ab5c56656ec97c61dff30ac9966f64712ef5c0deda468b82c",
+      "fixture_sha256": "1321d8d8bb1f1f200c527abef3da6d15990963c04f60fca5801e251336ff0a1c"
+    },
+    "00099-toolbar.png": {
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-053700-913562-8b4d661b\\frames\\00099-mixed-dragon-post-1.png",
+      "source_sha256": "8270742f12e4f49ce780c1ba0bc21226c246fa3d235963a81b75df742b4e8546",
+      "retained_pixel_sha256": "aa02e1fa1ffb0c3ee03577b8bab5cea02afa74de2264adae7abb57fce14f55f7",
+      "fixture_sha256": "87c61d3154ddfa1b5249da73299a44dd359dce26063591216f8b6278cc9f71bc"
+    }
+  }
+}

@@ -9,6 +9,7 @@ import time
 import tomllib
 
 from .errors import CapabilityUnavailable, ConfigError, FlowError
+from .home_evidence import home_navigation_verified
 from .routine_config import TaskSpec
 
 
@@ -68,20 +69,43 @@ class ProgressAdapter:
     close_text: str = ""
     version: int = 1
     navigation: tuple[NavigationStep, ...] = ()
+    client_versions: tuple[str, ...] = ()
+    section_roi: tuple[int, int, int, int] = (0, 0, 1280, 720)
+    active_roi: tuple[int, int, int, int] = (0, 0, 1280, 720)
+    foreground_label: str = ""
+    foreground_evidence: str = ""
+    foreground_roi: tuple[int, int, int, int] = (0, 0, 1280, 720)
+    remaining_pattern: str = ""
+    remaining_roi: tuple[int, int, int, int] = (0, 0, 1280, 720)
+    unavailable_roi: tuple[int, int, int, int] = (0, 0, 1280, 720)
+    close_roi: tuple[int, int, int, int] = (0, 0, 1280, 720)
 
     def validate(self):
         if type(self.version) is not int or self.version != 1 or self.kind not in {"event", "clan_games"}:
             raise ConfigError("Unsupported progress adapter version/kind")
         for key in ("id", "title", "entry_text", "entry_template", "active_label", "accepted_label",
-                    "building_type", "completed_label", "unavailable_label", "close_text", "progress_pattern", "scoring_condition"):
+                    "building_type", "completed_label", "unavailable_label", "close_text", "progress_pattern", "scoring_condition",
+                    "foreground_label", "foreground_evidence", "remaining_pattern"):
             if not isinstance(getattr(self, key), str):
                 raise ConfigError(f"adapter.{key} must be text")
         if not self.id or not self.title or bool(self.entry_text) == bool(self.entry_template):
             raise ConfigError("Adapter requires id, exact page title and one entry text/template")
         if any(_unsafe_navigation_label(value) for value in (self.entry_text, self.entry_template, self.close_text)):
             raise ConfigError("Progress navigation cannot use task, reward or purchase controls")
-        for key in ("progress_roi", "entry_roi", "title_roi"):
+        if self.foreground_evidence not in {"", "event_panel"}:
+            raise ConfigError("Unknown progress foreground evidence source")
+        for key in ("progress_roi", "entry_roi", "title_roi", "section_roi", "active_roi",
+                    "foreground_roi", "remaining_roi", "unavailable_roi", "close_roi"):
             _validate_roi(getattr(self, key), f"adapter.{key}")
+        if (not isinstance(self.client_versions, (tuple, list)) or
+                any(not isinstance(version, str) or not version or version == "unknown"
+                    for version in self.client_versions) or len(set(self.client_versions)) != len(self.client_versions)):
+            raise ConfigError("adapter.client_versions must list known distinct client versions")
+        if (not _roi_contains(self.section_roi, self.progress_roi) or
+                not _roi_contains(self.section_roi, self.active_roi) or
+                self.remaining_pattern and not _roi_contains(self.section_roi, self.remaining_roi) or
+                self.unavailable_label and not _roi_contains(self.section_roi, self.unavailable_roi)):
+            raise ConfigError("Event progress/active/time ROI must stay inside its section")
         if not isinstance(self.navigation, (tuple, list)) or len(self.navigation) > 3:
             raise ConfigError("Adapter navigation supports at most three read-only steps")
         titles = set()
@@ -113,13 +137,22 @@ class ProgressAdapter:
             raise ConfigError(f"Invalid adapter progress regex: {exc}") from exc
         if not {"current", "target"} <= pattern.groupindex.keys():
             raise ConfigError("Progress regex needs named current and target groups")
+        if self.remaining_pattern:
+            try:
+                remaining = re.compile(self.remaining_pattern)
+            except re.error as exc:
+                raise ConfigError(f"Invalid adapter remaining regex: {exc}") from exc
+            if "days" not in remaining.groupindex:
+                raise ConfigError("Remaining regex needs a named days group")
 
 
 def load_adapter(path: str | Path) -> ProgressAdapter:
     try:
         with Path(path).open("rb") as stream:
             values = tomllib.load(stream)
-        for key in ("progress_roi", "entry_roi", "title_roi", "scoring_units"):
+        for key in ("progress_roi", "entry_roi", "title_roi", "scoring_units", "client_versions",
+                    "section_roi", "active_roi", "foreground_roi", "remaining_roi",
+                    "unavailable_roi", "close_roi"):
             if key in values:
                 values[key] = tuple(values[key])
         if "navigation" in values:
@@ -186,19 +219,38 @@ def _exact(snapshot, label, roi=None):
     return [item for item in _texts(snapshot, roi=roi) if _normalized(item["text"]) == _normalized(label)]
 
 
-def parse_progress(snapshot, adapter: ProgressAdapter, task: TaskSpec) -> GoalProgress:
+def parse_progress(snapshot, adapter: ProgressAdapter, task: TaskSpec, *,
+                   client_version: str | None = None) -> GoalProgress:
     """A page title plus active/accepted marker guards the exact progress ROI."""
+    version = client_version or snapshot.observations.get("client_version")
+    if adapter.client_versions and version not in adapter.client_versions:
+        raise FlowError("Progress page client version is not in adapter applicability")
     if len(_exact(snapshot, adapter.title, adapter.title_roi)) != 1:
         raise FlowError(f"Cannot confirm progress page: {adapter.title}")
+    if adapter.foreground_label and len(_exact(snapshot, adapter.foreground_label, adapter.foreground_roi)) != 1:
+        raise FlowError("Cannot confirm progress foreground panel")
+    if adapter.foreground_evidence and not isinstance(snapshot.observations.get(adapter.foreground_evidence), dict):
+        raise FlowError("Current progress foreground evidence is missing")
     if adapter.kind != task.kind or task.goal.building_type and adapter.building_type != task.goal.building_type:
         raise FlowError("Progress adapter does not match the selected task")
-    if adapter.unavailable_label and len(_exact(snapshot, adapter.unavailable_label)) == 1:
+    if adapter.unavailable_label and len(_exact(snapshot, adapter.unavailable_label, adapter.unavailable_roi)) == 1:
         return GoalProgress(False, reason="event_inactive" if task.kind == "event" else "no_accepted_clan_challenge",
                             evidence=(snapshot.screenshot_path,), available=False)
     complete = bool(adapter.completed_label and len(_exact(snapshot, adapter.completed_label)) == 1)
     marker = adapter.accepted_label if adapter.kind == "clan_games" else adapter.active_label
-    if len(_exact(snapshot, marker)) != 1 and not complete:
+    if len(_exact(snapshot, marker, adapter.active_roi)) != 1 and not complete:
         raise FlowError("Cannot verify active-event or accepted-challenge status")
+    if adapter.remaining_pattern:
+        remaining = []
+        for item in _texts(snapshot, roi=adapter.remaining_roi):
+            match = re.fullmatch(adapter.remaining_pattern, item["text"].strip())
+            if match:
+                remaining.append((int(match.group("days")), int(match.groupdict().get("hours") or 0)))
+        if len(remaining) != 1:
+            raise FlowError("Current event remaining time is unreadable or ambiguous")
+        if remaining[0] <= (0, 0):
+            return GoalProgress(False, reason="event_inactive",
+                                evidence=(snapshot.screenshot_path,), available=False)
     readings = []
     for item in _texts(snapshot, roi=adapter.progress_roi):
         match = re.fullmatch(adapter.progress_pattern, item["text"].strip())
@@ -303,10 +355,8 @@ def _observe_page(session, title: str, title_roi, label: str):
 
 
 def _verified_village(snapshot):
-    controls = {button.get("name") for button in snapshot.observations.get("buttons", [])
-                if isinstance(button, dict)}
     return (snapshot.scene == "village" and math.isfinite(snapshot.confidence)
-            and snapshot.confidence >= .8 and {"attack", "shop"} <= controls)
+            and snapshot.confidence >= .8 and home_navigation_verified(snapshot))
 
 
 def _observe_previous_or_home(session, step: NavigationStep):
@@ -339,6 +389,8 @@ def read_progress(session, task: TaskSpec) -> GoalProgress:
     adapter = load_adapter(path)
     if adapter.kind != task.kind:
         raise ConfigError("Adapter kind does not match task kind")
+    if adapter.client_versions and getattr(session, "client_version", None) not in adapter.client_versions:
+        raise CapabilityUnavailable("Current client version is outside progress adapter applicability")
     if adapter.entry_text:
         entries = _exact(home, adapter.entry_text, adapter.entry_roi)
         if len(entries) != 1:
@@ -368,11 +420,12 @@ def read_progress(session, task: TaskSpec) -> GoalProgress:
         current = _observe_page(session, next_title, next_roi, f"goal-page-{index + 2}")
     pending = None
     try:
-        progress = parse_progress(current, adapter, task)
+        progress = parse_progress(current, adapter, task,
+                                  client_version=getattr(session, "client_version", None))
     except (CapabilityUnavailable, ConfigError, FlowError) as exc:
         pending = exc
     if adapter.close_text:
-        closes = _exact(current, adapter.close_text)
+        closes = _exact(current, adapter.close_text, adapter.close_roi)
         if len(closes) != 1:
             raise FlowError("Cannot identify the progress panel close control")
         l, t, r, b = closes[0]["bbox"]

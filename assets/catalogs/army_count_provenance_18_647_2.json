@@ -1,0 +1,61 @@
+{
+  "client": "18.647.2",
+  "version_code": 180647003,
+  "surface": "army",
+  "observed_count": 1,
+  "reviewer_kind": "agent_visual",
+  "human_reviewed": false,
+  "meaning": "Observed balloon x1 glyph and trailing header from two development captures; paired appearance evidence, not human training truth.",
+  "coordinate_resolution": [
+    1280,
+    720
+  ],
+  "resize_interpolation": "INTER_AREA",
+  "samples": {
+    "army_count_x1_glyph_18_647_2.png": {
+      "sha256": "d0aaa24f96ff4efdecd6893d54a91a6a5d35364c9a6aa0449d10563292b8e937",
+      "source_frame": "reports/completion-20261015/live/20261016-153547-419639-94956f9a/frames/00009-battle-army-confirmation.png",
+      "source_sha256": "508681ec9365407db6945b248ecd3a8ac4580d351eff7c8b289b5b2ee8ed40ac",
+      "source_bbox_1280": [
+        869,
+        197,
+        892,
+        220
+      ],
+      "role": "glyph"
+    },
+    "army_count_x1_18_647_2.png": {
+      "sha256": "6ce3d3d50c7e3f5af2b119996af8ff977ef95b45bd037894c3aa4c6b6253e62a",
+      "source_frame": "reports/completion-20261015/probes/20261016-154137-observe/frames/00001-before.png",
+      "source_sha256": "2eb39d6b43bb4252472f0f4d9fbffbfab1ccb806cd6e162ca87552c14c3d92d6",
+      "source_bbox_1280": [
+        867,
+        195,
+        909,
+        221
+      ],
+      "role": "whole"
+    }
+  },
+  "fixture": {
+    "path": "tests/fixtures/army_balloon_x1_18_647_2.png",
+    "sha256": "e78a47cd0869277f302c8fc03ce56f30a169db79e730e8a55e768ada2d4a6d9a",
+    "source_frame": "reports/completion-20261015/probes/20261016-154137-observe/frames/00001-before.png",
+    "source_sha256": "2eb39d6b43bb4252472f0f4d9fbffbfab1ccb806cd6e162ca87552c14c3d92d6",
+    "preserved_rois_1280": [
+      [
+        180,
+        40,
+        1100,
+        110
+      ],
+      [
+        545,
+        188,
+        1255,
+        305
+      ]
+    ],
+    "redaction": "black outside preserved panel headings and ordinary troop card row; no HUD/account/heroes"
+  }
+}

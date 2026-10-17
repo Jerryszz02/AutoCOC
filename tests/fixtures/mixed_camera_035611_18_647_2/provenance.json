@@ -1,0 +1,85 @@
+{
+  "schema": "autococ.anonymous_mixed_camera_035611.v1",
+  "source_run_relative": "reports/completion-20261015/live/20261017-035611-364323-dbbca001",
+  "client_version": "18.647.2",
+  "source_events_sha256": "ff87b3707d3dcbbfde95f6e79c5f5ffdc471e0bde62226709c0bc886fa49a596",
+  "source_report_sha256": "cbce06399be5499819135a9d43bb98925b467e3c029286daf705fba27cf60142",
+  "retained_native_rectangles_xyxy": [
+    [
+      480,
+      300,
+      2100,
+      980
+    ],
+    [
+      260,
+      1150,
+      480,
+      1440
+    ]
+  ],
+  "outside_bgr": [
+    45,
+    45,
+    45
+  ],
+  "camera_roi_at_1280x720": [
+    240,
+    150,
+    1050,
+    490
+  ],
+  "card_roi_at_1280x720": [
+    130,
+    575,
+    240,
+    720
+  ],
+  "truth_status": "offline_camera_and_card_evidence_only",
+  "formal_acceptance": false,
+  "human_reviewed": false,
+  "rows": [
+    {
+      "role": "before",
+      "source_frame": "00017-line-boundary.png",
+      "source_sha256": "7be7986132d4b2173f6aca44f7572a8c681d5602a2fec8fcb888150da3530cbd",
+      "fixture": "before.png",
+      "fixture_sha256": "cd83c88b26e603df354123051f21ef923661fd25015fa9aa5a516bf640ce5bf3"
+    },
+    {
+      "role": "source",
+      "source_frame": "00018-line-boundary.png",
+      "source_sha256": "b8999ed9108f3144387d90b11c2ec75fd378e43fc2c83babc2b3c92136b39439",
+      "fixture": "source.png",
+      "fixture_sha256": "074a7d8caaef81f18adfbe9c0a61dfb4dcd7548d11d5c6575be7418115e16233"
+    },
+    {
+      "role": "balloon_post",
+      "source_frame": "00022-mixed-balloon-post-1.png",
+      "source_sha256": "e434f4a5cde4c126e2f545ef1132dd747d9c87482f90e13127ba6f40614ba1e5",
+      "fixture": "balloon_post.png",
+      "fixture_sha256": "9972f0416b8be885e1857b8292fa43c5ac2e2d837ac5ce95cf33439cb5bc3a0b"
+    },
+    {
+      "role": "dragon_selected_0",
+      "source_frame": "00023-mixed-dragon-selected-0.png",
+      "source_sha256": "77d9b865c92886dacecd197d62e437caea81ea66850c4065714908a33a8fe022",
+      "fixture": "dragon_selected_0.png",
+      "fixture_sha256": "f14baa6bbced16916dbde4cad23ef4db8ecaddc6eea3a782457d796562e12716"
+    },
+    {
+      "role": "dragon_selected_1",
+      "source_frame": "00024-mixed-dragon-selected-1.png",
+      "source_sha256": "5cd1344e64856a745a7443ecbbccc90d3d132631c87f63a912fd9ff75da5a48f",
+      "fixture": "dragon_selected_1.png",
+      "fixture_sha256": "55205d44a8b2ae8f86dd833388bd354b669ec01d380cf4de965e02d85b72f84d"
+    },
+    {
+      "role": "later_battle",
+      "source_frame": "00025-battle-settlement.png",
+      "source_sha256": "63e464c246402404938554de7b4bd8f6ea08961a39f3985817f67fdd2d1a12dc",
+      "fixture": "later_battle.png",
+      "fixture_sha256": "27eb68bf089d687c9f52ee5bc7591348faa797d03452bd4c5a0858a26366c7bb"
+    }
+  ]
+}

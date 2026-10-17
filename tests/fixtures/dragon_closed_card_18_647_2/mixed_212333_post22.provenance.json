@@ -1,0 +1,22 @@
+{
+  "client_version": "18.647.2",
+  "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-212333-508869-610cb694\\frames\\00022-mixed-dragon-post-1.png",
+  "source_sha256": "c9374e1414ff0c59874c4a935ec5f269369800879f6a7006a36db10fafeea8bd",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "native_preserved_xyxy": [
+    360,
+    1140,
+    590,
+    1440
+  ],
+  "native_preserved_pixel_sha256": "458e793328c5c6ad31a884185d131ce4c00eb54fb3220833c32db7d3312ab5d9",
+  "output_sha256": "be95e2c842b8273f2809f9b303deef938af27232e63645eeece87cefd89c29b6",
+  "output_preserved_pixel_sha256": "458e793328c5c6ad31a884185d131ce4c00eb54fb3220833c32db7d3312ab5d9",
+  "outside_preserved_area": "black masked",
+  "events_source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-212333-508869-610cb694\\events.jsonl",
+  "events_sha256": "be05f59af2a1de334a204069da1b2c8d64eb0ad8bb642ff5970211ce11d7e8a8",
+  "purpose": "Development-only source-bound dragon upper-corner regression; not human truth or formal heldout."
+}

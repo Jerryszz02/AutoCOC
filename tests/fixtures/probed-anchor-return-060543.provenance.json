@@ -1,0 +1,94 @@
+{
+  "client_version": "18.647.2",
+  "source_group": "20261016-060543-370868-5b86efb1",
+  "purpose": "Anonymous same-battle source/map/toolbar replay; no account or opponent labels and no independent battle session",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "fixture_resolution": [
+    2560,
+    1440
+  ],
+  "transform": "Decode source BGR with cv2.imdecode(IMREAD_COLOR) at native 2560x1440; fill output BGR (50,115,77); copy each baseline half-open retained ROI scaled exactly x2 in order from original native source; then fill the opponent clan label mask ROI scaled x2 with BGR (50,115,77); cv2.imwrite PNG. No downsample before saving, retaining native OCR detail.",
+  "retained_baseline_xyxy_half_open": [
+    [
+      240,
+      150,
+      1050,
+      490
+    ],
+    [
+      0,
+      580,
+      1280,
+      720
+    ],
+    [
+      440,
+      10,
+      760,
+      100
+    ],
+    [
+      0,
+      490,
+      185,
+      595
+    ]
+  ],
+  "rows": [
+    {
+      "frame_number": 24,
+      "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-060543-370868-5b86efb1\\frames\\00024-line-zoom-verified.png",
+      "source_sha256": "10cff5c8864eee11fc01716a37f2a9a413002a58dcb6d787164dc78f6571835e",
+      "fixture": "probed-anchor-return-060543-24.png",
+      "fixture_sha256": "79786cc1d64ff8acd9e67ff494296319215f5545f7b7b9c59ad0faac69a3b8a8"
+    },
+    {
+      "frame_number": 26,
+      "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-060543-370868-5b86efb1\\frames\\00026-line-boundary.png",
+      "source_sha256": "16d0f11ae06b318775c2c2f6c87404ead3e6acb8c14ac2d39d8769d526d39c68",
+      "fixture": "probed-anchor-return-060543-26.png",
+      "fixture_sha256": "8242658683e25eb6cfc761a8c765c9497331c164a1e5d8e7cafd44be5b73eede"
+    },
+    {
+      "frame_number": 32,
+      "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-060543-370868-5b86efb1\\frames\\00032-probed-anchor-1-post-1.png",
+      "source_sha256": "6009d30295bf977fc52a6b3f992bdb23685bf3b971d2d26ebc7b66924b026225",
+      "fixture": "probed-anchor-return-060543-32.png",
+      "fixture_sha256": "3cfbf1edffa80666c8a177aace803807f988d07d33ec6a597391b5bce426ccd5"
+    },
+    {
+      "frame_number": 34,
+      "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-060543-370868-5b86efb1\\frames\\00034-battle-settlement.png",
+      "source_sha256": "3e9dc9457e4554b10496c182bd956dc127797e8c92724e63449ca7a1585df8c3",
+      "fixture": "probed-anchor-return-060543-34.png",
+      "fixture_sha256": "cd57b8f55f13b3543deacde359b5f7177408710b06493108b2a155bd075401f9"
+    },
+    {
+      "frame_number": 35,
+      "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-060543-370868-5b86efb1\\frames\\00035-battle-settlement.png",
+      "source_sha256": "fe0c530acd6be2d22e4c9e8fbdcd2ea073ea191b1a00f46b89834b7cb2a2ad6d",
+      "fixture": "probed-anchor-return-060543-35.png",
+      "fixture_sha256": "b8a1df51784e0a4afb704df287ad1d9b7e472e139177083bb8837776f5307f6d"
+    },
+    {
+      "frame_number": 36,
+      "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-060543-370868-5b86efb1\\frames\\00036-battle-settlement.png",
+      "source_sha256": "083319d193dc7ecb3e71b4eac11cb3917bcc3599e2eb5db2734481e37f2ff125",
+      "fixture": "probed-anchor-return-060543-36.png",
+      "fixture_sha256": "258f9b5caea1cc0488ec5f28cede82ec15035a2869636f86ba4f8aded517ca9a"
+    }
+  ],
+  "truth_status": "agent_visual_prototype_only",
+  "formal_success": false,
+  "masked_baseline_xyxy_half_open_after_retention": [
+    [
+      630,
+      350,
+      670,
+      378
+    ]
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "client_version": "18.647.2",
+  "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-024858-453163-d946a9d8\\frames\\00018-line-boundary.png",
+  "source_sha256": "6a4824c14fb9efe09069a9eff6030cac272037f17ce4ae99bad74f1fd8b5a6fc",
+  "fixture_sha256": "a0ea5737f6b5e9105dd96b3880dc6aeb288da71d9428dddcda30754e87b63c6c",
+  "transform": "Decode BGR with OpenCV IMREAD_COLOR; overwrite native rows y=0..1089 inclusive with BGR (50,115,77); retain x=0..2559,y=1090..1439; encode PNG with cv2.imwrite.",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "retained_native_xyxy": [
+    0,
+    1090,
+    2560,
+    1440
+  ],
+  "purpose": "Current-version lower battle toolbar evidence only; upper game/player scene deliberately anonymized, not a full-scene fixture.",
+  "card_states": "frozen preview with selected first troop, balloon x2"
+}

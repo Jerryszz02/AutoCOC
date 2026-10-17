@@ -13,6 +13,74 @@ from autococ.routine_config import GoalConfig, RoutineConfig, TaskSpec
 
 
 class GUITests(unittest.TestCase):
+    def test_event_adapter_preset_is_explicit_and_custom_path_survives_save(self):
+        self.assertFalse(self.app.task_vars["event"].get())
+        self.assertEqual(self.app.task_fields["event"]["adapter_path"].get(), "")
+        self.app._open_task_config("event")
+        self.app._choose_current_event_adapter("event")
+        selected = self.app.task_fields["event"]["adapter_path"].get()
+        self.assertTrue(selected.endswith("rift_event_18_647_2.adapter.toml"))
+        self.assertFalse(self.app.task_vars["event"].get())
+        self.app.task_fields["event"]["adapter_path"].set("custom/event.toml")
+        self.app._save()
+        self.app._load()
+        self.assertEqual(self.app.task_fields["event"]["adapter_path"].get(), "custom/event.toml")
+
+    def test_event_progress_check_uses_only_the_explicit_readonly_worker(self):
+        self.app._open_task_config("event")
+        self.app._choose_current_event_adapter("event")
+        self.app.start_event_check()
+        self.controller.start_event_check.assert_called_once()
+        self.controller.start.assert_not_called()
+        self.controller.start_picker.assert_not_called()
+        self.assertTrue(self.app.event_check_active)
+        self.assertTrue(self.app.event_check_button.instate(["disabled"]))
+        self.app._event({"kind": "event_check_finished", "output": "C:/evidence/event",
+                         "result": {"status": "completed", "returned_home": True,
+                                    "progress": {"current": 13925, "target": 16000}}})
+        self.assertIn("13925 / 16000", self.app.status.get())
+        self.app.stop()
+        self.controller.stop.assert_called_once_with()
+
+    def test_picker_action_is_explicit_and_separate_from_daily_start(self):
+        output = self.path.parent / "new-picker-run"
+        self.app.picker_output.set(str(output))
+        self.app.picker_pages.set("3")
+        self.app.picker_limit.set("150")
+        self.app.start_picker()
+        self.controller.start_picker.assert_called_once_with(
+            self.path.resolve(), output.resolve(), max_troop_pages=3, limit_sec=150)
+        self.controller.start.assert_not_called()
+        self.assertTrue(self.app.picker_active)
+        self.assertTrue(self.app.picker_start_button.instate(["disabled"]))
+        self.app.stop()
+        self.controller.stop.assert_called_once_with()
+
+    def test_picker_finish_reports_pending_evidence_and_failure_uncertainty(self):
+        self.app._event({"kind": "picker_finished", "result": {"status": "completed"},
+                         "output": "C:/runs/picker"})
+        self.assertIn("尚未导入或人工复核", self.app.picker_status.get())
+        self.app._event({"kind": "picker_finished", "result": {"status": "failed", "reason": "stopped_by_user"},
+                         "output": "C:/runs/picker"})
+        self.assertIn("选择器可能仍打开", self.app.picker_status.get())
+
+    def test_closing_window_during_picker_requests_stop(self):
+        self.controller.running = True
+        self.app.picker_active = True
+        self.app.close()
+        self.controller.stop.assert_called_once_with()
+        self.assertTrue(self.app.closing)
+        self.assertTrue(self.root.winfo_exists())
+
+    def test_picker_existing_output_is_rejected_before_worker(self):
+        output = self.path.parent / "existing-picker-run"
+        output.mkdir()
+        self.app.picker_output.set(str(output))
+        with patch("autococ.gui.messagebox.showerror") as showerror:
+            self.app.start_picker()
+        showerror.assert_called_once()
+        self.controller.start_picker.assert_not_called()
+
     def test_vision_agent_settings_reach_worker_and_persist(self):
         self.app.agent_enabled.set(True)
         self.app.agent_values["model_dir"].set("models/current")
@@ -52,6 +120,52 @@ class GUITests(unittest.TestCase):
         self.controller.start.assert_not_called()
         self.assertEqual(self.app.mode.get(), "离线预演")
         self.assertEqual(self.app.start_button.cget("text"), "开始预演")
+
+    def test_free_event_reward_target_dropdown_and_saved_roundtrip(self):
+        self.assertFalse(self.app.task_vars["event_reward"].get())
+        self.app._open_task_config("event_reward")
+        choices = [child for child in self.app.task_config.winfo_children()
+                   if isinstance(child, ttk.Combobox)]
+        self.assertEqual(len(choices), 1)
+        self.assertEqual(tuple(choices[0].cget("values")),
+                         ("请选择免费奖励", "闪亮矿石 1250", "璀璨矿石 115"))
+        choices[0].current(2)
+        choices[0].event_generate("<<ComboboxSelected>>")
+        self.root.update()
+        self.app.task_vars["event_reward"].set(True)
+        options = self.app._options()
+        reward = next(task for task in options.routine.tasks if task.kind == "event_reward")
+        self.assertEqual(reward.free_reward_target, "glowy")
+        self.assertFalse(next(task for task in options.routine.tasks if task.kind == "event").enabled)
+        self.app._save()
+        self.app._load()
+        rebuilt = next(task for task in self.app._options().routine.tasks if task.kind == "event_reward")
+        self.assertTrue(rebuilt.enabled)
+        self.assertEqual(rebuilt.free_reward_target, "glowy")
+
+    def test_ore_inventory_is_disabled_read_only_task_and_saved_roundtrip(self):
+        self.assertFalse(self.app.task_vars["ore_inventory"].get())
+        self.app._open_task_config("ore_inventory")
+        self.assertIn("读取矿石库存", self.app.task_choice.cget("values"))
+        labels = [child.cget("text") for child in self.app.task_config.winfo_children()
+                  if isinstance(child, ttk.Label)]
+        self.assertTrue(any("不会领取奖励" in label for label in labels))
+        self.app.task_vars["ore_inventory"].set(True)
+        self.app._save()
+        self.app._load()
+        task = next(item for item in self.app._options().routine.tasks
+                    if item.kind == "ore_inventory")
+        self.assertTrue(task.enabled)
+        self.assertEqual(task.free_reward_target, "")
+        self.assertEqual(self.app._task_label("ore_inventory"), "读取矿石库存")
+
+    def test_enabled_free_event_reward_without_target_never_starts_worker(self):
+        self.app.task_vars["event_reward"].set(True)
+        self.app.task_fields["event_reward"]["free_reward_target"].set("")
+        with patch("autococ.gui.messagebox.showerror") as error:
+            self.app.start()
+        error.assert_called_once()
+        self.controller.start.assert_not_called()
 
     def test_selected_tasks_are_passed_to_background_worker(self):
         for var in self.app.task_vars.values():
@@ -115,7 +229,8 @@ class GUITests(unittest.TestCase):
         self.app.task_fields["resources"]["filter"].set("1")
         self.app.full_flags["resources"]["gold"].set(True)
         self.app._sync_full_resources("resources")
-        self.assertEqual(self.app._options().routine.tasks[3].goal.full_resources, ("gold",))
+        tasks = {task.id: task for task in self.app._options().routine.tasks}
+        self.assertEqual(tasks["resources"].goal.full_resources, ("gold",))
         self.app.selected_task.set("clan_games")
         goal_children = [child for widget in self.app.task_config.winfo_children() for child in widget.winfo_children()]
         goal_labels = [child.cget("text") for child in goal_children if isinstance(child, ttk.Label)]
@@ -125,12 +240,17 @@ class GUITests(unittest.TestCase):
                         and "防空火箭" in child.cget("values"))
         building.set("法术工厂")
         building.event_generate("<<ComboboxSelected>>")
-        self.assertEqual(self.app._options().routine.tasks[-1].goal.building_type, "spell_factory")
+        tasks = {task.id: task for task in self.app._options().routine.tasks}
+        self.assertEqual(tasks["clan_games"].goal.building_type, "spell_factory")
 
     def test_task_order_and_battle_progress_are_separate_from_task_success(self):
         self.app.selected_task.set("resources")
+        original_order = self.app.task_order[:]
+        old_index = original_order.index("resources")
         self.app._move_task(-1)
-        self.assertEqual(self.app.task_order[2:4], ["resources", "donate"])
+        expected_order = original_order[:]
+        expected_order[old_index - 1:old_index + 1] = ["resources", original_order[old_index - 1]]
+        self.assertEqual(self.app.task_order, expected_order)
         self.app._event({"kind": "battle_progress", "task_id": "resources", "phase": "筛选对手",
                          "battle_number": 3, "battles_completed": 2, "battles_won": 1,
                          "resources": {"gold": 750000}, "goal_current": 2, "goal_target": 5})
@@ -151,13 +271,44 @@ class GUITests(unittest.TestCase):
         self.app.selected_task.set("resources")
         self.assertEqual(self.app.task_fields["resources"]["gold"].get(), "500000")
         self.assertEqual(self.app.strategy_text.get("1.0", "end-1c"), "# resources draft")
+        original_order = self.app.task_order[:]
+        old_index = original_order.index("resources")
         self.app._move_task(-1)
         self.app._save()
         loaded = load_options(settings_path(self.path), load_config(self.path))
-        self.assertEqual([task.id for task in loaded.routine.tasks][:4], ["collect", "request", "resources", "donate"])
+        expected_order = original_order[:]
+        expected_order[old_index - 1:old_index + 1] = ["resources", original_order[old_index - 1]]
+        self.assertEqual([task.id for task in loaded.routine.tasks], expected_order)
         values = {task.id: task for task in loaded.routine.tasks}
         self.assertEqual(values["resources"].resource_filter.min_gold, 500000)
         self.assertEqual(values["event"].goal.target, 250)
+
+    def test_train_task_label_selection_reorder_and_save_preserve_task_values(self):
+        self.assertIn("检查军队", self.app.task_choice.cget("values"))
+        self.app.selected_task_label.set("检查军队")
+        self.app._choose_task_label()
+        self.assertEqual(self.app.selected_task.get(), "train")
+        self.app.task_vars["train"].set(True)
+        self.app.task_fields["train"]["minutes"].set("17")
+        self.app.selected_task.set("resources")
+        self.app.task_fields["resources"]["gold"].set("510000")
+        self.app.selected_task.set("train")
+        original_order = self.app.task_order[:]
+        old_index = original_order.index("train")
+        self.app._move_task(-1)
+        options = self.app._options()
+        self.assertIn("train", options.tasks)
+        self.assertEqual([task.id for task in options.routine.tasks if task.enabled].count("train"), 1)
+        self.app._save()
+        loaded = load_options(settings_path(self.path), load_config(self.path))
+        expected_order = original_order[:]
+        expected_order[old_index - 1:old_index + 1] = ["train", original_order[old_index - 1]]
+        self.assertEqual([task.id for task in loaded.routine.tasks], expected_order)
+        values = {task.id: task for task in loaded.routine.tasks}
+        self.assertTrue(values["train"].enabled)
+        self.assertEqual(values["train"].max_duration_sec, 17 * 60)
+        self.assertEqual(values["resources"].resource_filter.min_gold, 510000)
+        self.assertIn("train", loaded.tasks)
 
     def test_custom_task_ids_survive_gui_round_trip(self):
         routine = RoutineConfig((TaskSpec("gold_run", "resources", goal=GoalConfig(resource_targets={"gold": 1000000})),

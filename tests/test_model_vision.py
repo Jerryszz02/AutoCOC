@@ -176,7 +176,7 @@ class ModelVisionTests(unittest.TestCase):
         self.assertEqual(report["timing"]["failed_attempts"], 1)
         self.assertIsNotNone(report["timing"]["p95_seconds"])
 
-    def test_scene_rejection_rate_and_building_ap50_location(self):
+    def test_scene_rejection_rate_and_building_runtime_location(self):
         self.package("scene", ["village", "battle"],
                      {"format": "logits", "min_confidence": .7, "min_margin": .2})
         scene_session = FakeSession([[0, 3]])
@@ -207,11 +207,12 @@ class ModelVisionTests(unittest.TestCase):
             self.root)
         self.assertEqual(report["per_class"]["town_hall"]["tp"], 1)
         self.assertEqual(report["per_class"]["town_hall"]["fp"], 1)
-        self.assertAlmostEqual(report["per_class"]["town_hall"]["ap50"], .5)
-        self.assertAlmostEqual(report["mAP50"], .5)
+        self.assertEqual(report["protocol"], "runtime_point")
+        self.assertNotIn("ap50", report["per_class"]["town_hall"])
+        self.assertNotIn("mAP50", report)
         self.assertEqual(report["per_class"]["town_hall"]["mean_center_error_px"], 0)
 
-    def test_failed_building_inference_remains_in_recall_and_ap_denominator(self):
+    def test_failed_building_inference_remains_in_runtime_recall_denominator(self):
         self.package("building", ["town_hall"],
                      {"format": "xyxy_score_class", "coordinates": "input_pixels",
                       "min_confidence": .5, "nms_iou": .5})
@@ -235,7 +236,7 @@ class ModelVisionTests(unittest.TestCase):
         self.assertEqual(report["per_class"]["town_hall"]["tp"], 1)
         self.assertEqual(report["per_class"]["town_hall"]["fn"], 1)
         self.assertEqual(report["per_class"]["town_hall"]["recall"], .5)
-        self.assertLess(report["per_class"]["town_hall"]["ap50"], 1)
+        self.assertNotIn("ap50", report["per_class"]["town_hall"])
         self.assertEqual(report["valid_labeled_samples"], 2)
         self.assertEqual(report["timing"]["failed_attempts"], 2)
         self.assertEqual(report["attempts"][1]["status"], "inference_error")

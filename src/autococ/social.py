@@ -8,8 +8,9 @@ from pathlib import Path
 import re
 import time
 
-from .errors import AutoCOCError, FlowError
+from .errors import AutoCOCError, FlowError, LocatorError
 from .donation import execute_donation
+from .locator import find_template
 from .reporting import TaskResult
 from .scene import SceneSnapshot
 from .session import GameSession
@@ -44,7 +45,7 @@ def request_reinforcements(session: GameSession) -> TaskResult:
             evidence.append(current.screenshot_path)
 
         _require_scene(current, {"request"})
-        gems_before = _gems(current)
+        gems_before = _gems(current, client_version=session.client_version)
         if gems_before is None:
             raise FlowError("Gem inventory unreadable before request")
         body = "".join(item["text"] for item in _ocr_in(current, (350, 280, 920, 430)))
@@ -64,7 +65,7 @@ def request_reinforcements(session: GameSession) -> TaskResult:
                 raise FlowError("Request verification reused its before screenshot")
             cooldown = _cooldown(after)
             record = _fresh_request_record(session, after, body)
-            gems_after = _gems(after)
+            gems_after = _gems(after, client_version=session.client_version)
             metrics.update({"gems_after": gems_after, "cooldown_seconds": cooldown, "request_record": record})
             if gems_after is not None and gems_after != gems_before:
                 metrics["request_cost_gems"] = gems_before - gems_after
@@ -185,7 +186,14 @@ def _chat_page_identity(snapshot: SceneSnapshot) -> tuple[str, ...]:
 def _open_chat(session: GameSession, current: SceneSnapshot, evidence: list[Path]) -> SceneSnapshot:
     _require_scene(current, {"village", "clan_chat"})
     if current.scene == "village":
-        session.click_template(current, "hud_chat", roi=(0, 250, 130, 390))
+        version = getattr(session, "client_version", "unknown")
+        if version == "18.647.2":
+            template, region = "hud_chat_18_647_2", (35, 330, 115, 410)
+        elif version == "18.600.7":
+            template, region = "hud_chat", (0, 250, 130, 390)
+        else:
+            raise FlowError(f"Clan chat HUD is uncalibrated for client {version}")
+        session.click_template(current, template, roi=region)
         current = session.wait_for({"clan_chat"}, timeout_sec=30, label="social-chat")
         evidence.append(current.screenshot_path)
     _require_scene(current, {"clan_chat"})
@@ -229,8 +237,23 @@ def _ocr_in(snapshot: SceneSnapshot, region: tuple[int, int, int, int]) -> list[
     return sorted(items, key=lambda item: (item["bbox"][1], item["bbox"][0]))
 
 
-def _gems(snapshot: SceneSnapshot) -> int | None:
-    candidates = [parse_resource_number(item["text"]) for item in _ocr_in(snapshot, (1100, 215, 1230, 270))]
+def _gems(snapshot: SceneSnapshot, *, client_version: str) -> int | None:
+    if client_version == "18.647.2":
+        # The new top-right resource stack moved gems up one row. A recognized
+        # plus icon on that exact row anchors the OCR number to the live HUD.
+        icon = Path(__file__).resolve().parents[2] / "assets/templates/hud_gems_plus_18_647_2.png"
+        try:
+            find_template(snapshot.screenshot_path, icon, threshold=.88,
+                          roi=(1030, 155, 1110, 215), roi_base_resolution=(1280, 720))
+        except LocatorError:
+            return None
+        region = (1130, 164, 1240, 208)
+    elif client_version == "18.600.7":
+        region = (1100, 215, 1230, 270)
+    else:
+        return None
+    candidates = [parse_resource_number(item["text"]) for item in _ocr_in(snapshot, region)
+                  if item["confidence"] >= .9]
     values = [value for value in candidates if value is not None]
     return values[0] if len(values) == 1 else None
 

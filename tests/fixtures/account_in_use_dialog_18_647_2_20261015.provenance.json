@@ -1,0 +1,44 @@
+{
+  "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261015-201112-306703-310ff33d\\frames\\00007-starting-home.png",
+  "source_sha256": "f151b21008dd0a7aa29b580cdd9de7f4b045f92dce8e1634090a3aa34f758dda",
+  "retained_roi_source_pixels": [
+    600,
+    530,
+    1960,
+    910
+  ],
+  "anonymization": "All pixels outside the account dialog are blacked out; player name and village HUD removed.",
+  "fixture_sha256": "704df1ad21d2f86568a954f92ed8b163dd4ef30451cfa6c0c7e0f2cee6b82c63",
+  "observed_ocr_baseline_1280x720": [
+    {
+      "text": "连接断开",
+      "confidence": 0.99938,
+      "bbox": [
+        330,
+        294,
+        426,
+        323
+      ]
+    },
+    {
+      "text": "另一个设备正在连接这个村庄。",
+      "confidence": 0.99991,
+      "bbox": [
+        330,
+        334,
+        576,
+        358
+      ]
+    },
+    {
+      "text": "重新载入",
+      "confidence": 0.99962,
+      "bbox": [
+        330,
+        408,
+        399,
+        430
+      ]
+    }
+  ]
+}

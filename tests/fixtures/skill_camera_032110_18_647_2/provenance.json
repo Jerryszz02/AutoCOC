@@ -1,0 +1,199 @@
+{
+  "schema": "skill_camera_anonymized_fixture_v1",
+  "client_version": "18.647.2",
+  "run_id": "20261017-032110-734641-8f141943",
+  "source_run_relative": "reports/completion-20261015/live/20261017-032110-734641-8f141943",
+  "source_diagnostic_relative": "reports/completion-20261015/diagnostics/skill-camera-032110-reader-v1/summary.json",
+  "source_diagnostic_sha256": "a397bf17f8295af219658c72882fb04be95d51721da6db0cbdbcb3a9b98b6b42",
+  "native_resolution": [
+    2560,
+    1440
+  ],
+  "mask_rectangles_native_xyxy": [
+    [
+      400,
+      220,
+      2180,
+      1060
+    ],
+    [
+      1230,
+      1010,
+      1490,
+      1440
+    ]
+  ],
+  "mask_method": "decode_original_png_bgr; zero_entire_native_canvas; copy_exact_bgr_pixels_inside_rectangles; encode_png",
+  "mask_purpose": "ORB camera ROI with feature-neighborhood margin and current Warden card, equipment and HP only",
+  "human_ground_truth": false,
+  "dynamic_event_validation": false,
+  "device_input_proof": false,
+  "input_replay_allowed": false,
+  "original_skill_attempted": false,
+  "frames": [
+    {
+      "name": "00028-frozen-line-post-recheck.png",
+      "source_relative": "reports/completion-20261015/live/20261017-032110-734641-8f141943/frames/00028-frozen-line-post-recheck.png",
+      "source_sha256": "5e3985722f28ee8158b43e3a9e769b1b507d7ea11ec647b5f857b831a19504d3",
+      "fixture_sha256": "0cef30c47a31d08554aba49bf8178a335d1cc9d31a2c2316b2eced882330e3c9",
+      "source_size_bytes": 6891563,
+      "fixture_size_bytes": 3609425,
+      "source_scene_from_event": "battle",
+      "source_requested_at_monotonic": 1245530.317585,
+      "source_observed_at_monotonic": 1245530.3175748
+    },
+    {
+      "name": "00029-post-deployment-skill-before.png",
+      "source_relative": "reports/completion-20261015/live/20261017-032110-734641-8f141943/frames/00029-post-deployment-skill-before.png",
+      "source_sha256": "94d87c0ea0c88fe4b4a5e8d3a25b85f1a19b55b00cd8fd56b5730bd3d127b417",
+      "fixture_sha256": "f711f5838d25f155822fd188d311facc1eb7c63759cf7461617ea16bf6d2c241",
+      "source_size_bytes": 6857677,
+      "fixture_size_bytes": 3590406,
+      "source_scene_from_event": "battle",
+      "source_requested_at_monotonic": 1245544.4734637,
+      "source_observed_at_monotonic": 1245544.4734528
+    },
+    {
+      "name": "00030-post-deployment-skill-stabilized-before.png",
+      "source_relative": "reports/completion-20261015/live/20261017-032110-734641-8f141943/frames/00030-post-deployment-skill-stabilized-before.png",
+      "source_sha256": "edc6226fb9c35c0d9f8cdfc93425891dd4bde34595d9775bc77cfb2c5d1f9aee",
+      "fixture_sha256": "933160f645b6071b9eb59c9de5b3e5a6e3f7f6ddbc4022efad50f169c96ce1a4",
+      "source_size_bytes": 6857874,
+      "fixture_size_bytes": 3581995,
+      "source_scene_from_event": "battle",
+      "source_requested_at_monotonic": 1245546.8014628,
+      "source_observed_at_monotonic": 1245546.8014535
+    },
+    {
+      "name": "00031-battle-settlement.png",
+      "source_relative": "reports/completion-20261015/live/20261017-032110-734641-8f141943/frames/00031-battle-settlement.png",
+      "source_sha256": "deae3551aca2174aeab85a94160c8ce3ea9be6008dc022cbc6d2eb68f4b33787",
+      "fixture_sha256": "40721ba7027a1cd54605789ea90ce149689eee7ebeb18c1b2d39b69166ffd5ce",
+      "source_size_bytes": 6851625,
+      "fixture_size_bytes": 3574555,
+      "source_scene_from_event": "battle",
+      "source_requested_at_monotonic": 1245549.0676269,
+      "source_observed_at_monotonic": 1245549.0676181
+    }
+  ],
+  "readonly_diagnostic_motion_pairs": [
+    {
+      "from": "00028-frozen-line-post-recheck.png",
+      "to": "00029-post-deployment-skill-before.png",
+      "matched_points": 282,
+      "inliers": 271,
+      "affine": [
+        [
+          0.9998211723630794,
+          0.00036253995348772274,
+          2.2967131311034676
+        ],
+        [
+          -0.00036253995348772274,
+          0.9998211723630794,
+          2.575945601045219
+        ]
+      ],
+      "translation_px": 3.4511428463810807,
+      "strict_minimum_zoom_motion": false,
+      "bounded_stabilization_candidate": true
+    },
+    {
+      "from": "00029-post-deployment-skill-before.png",
+      "to": "00030-post-deployment-skill-stabilized-before.png",
+      "matched_points": 406,
+      "inliers": 400,
+      "affine": [
+        [
+          1.0001288437721383,
+          -0.00042237893373359256,
+          0.05886132063768093
+        ],
+        [
+          0.00042237893373359256,
+          1.0001288437721383,
+          -3.7664051078094474
+        ]
+      ],
+      "translation_px": 3.7668650216327513,
+      "strict_minimum_zoom_motion": false,
+      "bounded_stabilization_candidate": true
+    },
+    {
+      "from": "00030-post-deployment-skill-stabilized-before.png",
+      "to": "00031-battle-settlement.png",
+      "matched_points": 451,
+      "inliers": 440,
+      "affine": [
+        [
+          0.9997677536983343,
+          -0.0002552464197931553,
+          -0.8072774336522661
+        ],
+        [
+          0.0002552464197931553,
+          0.9997677536983343,
+          1.0145944325207987
+        ]
+      ],
+      "translation_px": 1.2965719098400947,
+      "strict_minimum_zoom_motion": true,
+      "bounded_stabilization_candidate": false
+    }
+  ],
+  "readonly_diagnostic_warden": [
+    {
+      "frame": "00028-frozen-line-post-recheck.png",
+      "verified": true,
+      "bbox": [
+        647,
+        595,
+        736,
+        711
+      ],
+      "health_method": "green_fill_enclosed_by_dark_hp_frame",
+      "ability_ready": true,
+      "ability_used": false
+    },
+    {
+      "frame": "00029-post-deployment-skill-before.png",
+      "verified": true,
+      "bbox": [
+        647,
+        595,
+        736,
+        711
+      ],
+      "health_method": "green_fill_enclosed_by_dark_hp_frame",
+      "ability_ready": true,
+      "ability_used": false
+    },
+    {
+      "frame": "00030-post-deployment-skill-stabilized-before.png",
+      "verified": true,
+      "bbox": [
+        647,
+        595,
+        736,
+        711
+      ],
+      "health_method": "green_fill_enclosed_by_dark_hp_frame",
+      "ability_ready": true,
+      "ability_used": false
+    },
+    {
+      "frame": "00031-battle-settlement.png",
+      "verified": true,
+      "bbox": [
+        647,
+        595,
+        736,
+        711
+      ],
+      "health_method": "green_fill_enclosed_by_dark_hp_frame",
+      "ability_ready": true,
+      "ability_used": false
+    }
+  ],
+  "masking_limit": "ORB uses the resized full image with an ROI mask; masking can change feature selection or affine values. This fixture is checked for observed gate outcomes and same-frame Warden evidence, not full-frame equivalence."
+}

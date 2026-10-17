@@ -1,0 +1,126 @@
+{
+  "client_version": "18.647.2",
+  "source_run": "20261016-203115-283389-5691c7cb",
+  "source_frame": "00075-battle-settlement-reread.png",
+  "source_sha256": "9c4ba4004015ef85af72e639bd9c12a253ce5ce5033cdc5999df7d0be292dbe0",
+  "source_events_sha256": "f3792758422581dfd02d4d0b3ee6b7a161e170dd5b48fc0ce990553f305f1218",
+  "fixture": "settlement-title-background-203115.png",
+  "fixture_sha256": "f28f17ee5f6bc306e5362578b305d42f95f30ed1992b763a2c8bbc60d64d828f",
+  "native_resolution": [
+    2560,
+    1440
+  ],
+  "preserved_native_roi": [
+    680,
+    190,
+    1880,
+    1350
+  ],
+  "preserved_pixels_exact": true,
+  "ocr": [
+    {
+      "text": "2%",
+      "confidence": 0.99002,
+      "bbox": [
+        617,
+        100,
+        664,
+        132
+      ]
+    },
+    {
+      "text": "失败",
+      "confidence": 0.99862,
+      "bbox": [
+        608,
+        196,
+        671,
+        236
+      ]
+    },
+    {
+      "text": "您得到了KISTAN",
+      "confidence": 0.94272,
+      "bbox": [
+        597,
+        302,
+        706,
+        327
+      ]
+    },
+    {
+      "text": "3470",
+      "confidence": 0.99993,
+      "bbox": [
+        574,
+        390,
+        668,
+        424
+      ]
+    },
+    {
+      "text": "损耗的部队",
+      "confidence": 0.99974,
+      "bbox": [
+        592,
+        464,
+        680,
+        486
+      ]
+    },
+    {
+      "text": "回营",
+      "confidence": 0.99635,
+      "bbox": [
+        623,
+        608,
+        660,
+        631
+      ]
+    }
+  ],
+  "original_gold_line": {
+    "text": "0",
+    "confidence": 0.98992,
+    "bbox": [
+      642,
+      341,
+      665,
+      365
+    ],
+    "source": "glyph_line_roi",
+    "resource_icon": {
+      "bbox_at_1280x720": [
+        674,
+        332,
+        715,
+        377
+      ],
+      "confidence": 0.9562354683876038,
+      "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\templates\\settlement_gold.png",
+      "comparison": "full_template"
+    }
+  },
+  "title_line_report_sha256": "ceea2899ac8d106f1599784afd58bf12a9790380e25255f2aa7f637bf2c21f13",
+  "title_line_roi_at_1280x720": [
+    597,
+    302,
+    667,
+    328
+  ],
+  "title_line_native": [
+    {
+      "text": "您得到了",
+      "confidence": 0.99973,
+      "bbox": [
+        1194,
+        604,
+        1334,
+        656
+      ]
+    }
+  ],
+  "formal_training_data": false,
+  "human_reviewed": false,
+  "purpose": "agent-generated regression fixture from development run"
+}

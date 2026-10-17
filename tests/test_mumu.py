@@ -251,6 +251,7 @@ class MuMuWorkerTests(unittest.TestCase):
 
         def capture(operation, fresh, timeout_sec):
             self.assertEqual(operation, "capture")
+            wall_clock.now.assert_called_once()
             Path(fresh).write_bytes(png)
             return {"width": 4, "height": 3, "pixels_ready_at_monotonic": 102,
                     "encode_elapsed_sec": .5}
@@ -258,10 +259,12 @@ class MuMuWorkerTests(unittest.TestCase):
         with TemporaryDirectory() as temp, patch.object(client, "_request", side_effect=capture):
             path = Path(temp) / "screen.png"
             path.write_bytes(b"previous frame")
-            with patch("autococ.mumu.time.monotonic", side_effect=[100, 103, 104]):
+            with patch("autococ.mumu.time.monotonic", side_effect=[100, 103, 104]), patch("autococ.mumu.datetime") as wall_clock:
+                wall_clock.now.return_value.isoformat.return_value = "2026-10-15T18:00:00+00:00"
                 first = client.screenshot(path, timeout_sec=4)
             self.assertEqual(path.read_bytes(), png)
             self.assertEqual(first.requested_at_monotonic, 100)
+            self.assertEqual(first.requested_at_utc, "2026-10-15T18:00:00+00:00")
             self.assertEqual(first.pixels_ready_at_monotonic, 102)
             self.assertEqual(first.payload_ready_at_monotonic, 102.5)
             self.assertEqual(first.published_at_monotonic, 104)

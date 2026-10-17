@@ -1,0 +1,61 @@
+{
+  "client_version": "18.647.2",
+  "purpose": "anonymized real dark-elixir capacity ROI replay; agent visual, not independent model acceptance",
+  "transformation": {
+    "decode": "cv2.IMREAD_COLOR",
+    "resize": [
+      1280,
+      720
+    ],
+    "interpolation": "cv2.INTER_AREA",
+    "preserved_roi_xyxy": [
+      1000,
+      152,
+      1265,
+      211
+    ],
+    "fill_bgr": [
+      24,
+      24,
+      24
+    ],
+    "order": [
+      "decode",
+      "resize",
+      "fill outside preserved ROI",
+      "cv2.imwrite PNG"
+    ]
+  },
+  "fixtures": {
+    "old_home": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261015-220121-tap\\frames\\00001-before.png",
+      "source_sha256": "d1ec2eca7930304b47da3a64a65057c38d4a3c382b294e789735a642a862bdec",
+      "derived_path": "tests/fixtures/resource_capacity_18_647_2_dark_20261016/old_home.png",
+      "derived_sha256": "1a16393737743921c012fa7389bd54667565df9fff80a8b800bb10a337bf6551"
+    },
+    "old_settled": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261015-220121-tap\\frames\\00002-after.png",
+      "source_sha256": "72081313a72424da2144e67d71e3ecb3e15685e2fb7e594cdf07475848ff4dda",
+      "derived_path": "tests/fixtures/resource_capacity_18_647_2_dark_20261016/old_settled.png",
+      "derived_sha256": "12aeb8a7be667db5cb86ca1f076a4a35f9a44c9f4382df4c4ecdd8f28732ec9a"
+    },
+    "new_home": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-080407-670698-capacity-all-v1\\frames\\00001-capacity-all-current-home.png",
+      "source_sha256": "f4bab64b587cf6a3af8199729cacec144af02cc618ebb2c2ae39509e0d666df8",
+      "derived_path": "tests/fixtures/resource_capacity_18_647_2_dark_20261016/new_home.png",
+      "derived_sha256": "5d9e4b19c6bce51b75d27926b33344d0f663d6fad246ec70e9db61a62c92571e"
+    },
+    "new_animation": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-080407-670698-capacity-all-v1\\frames\\00010-dark_elixir-storage-detail.png",
+      "source_sha256": "4551012a9e5475f2223504a400ed00d4c5a1edba5d19bf9ad65f7314e46039c9",
+      "derived_path": "tests/fixtures/resource_capacity_18_647_2_dark_20261016/new_animation.png",
+      "derived_sha256": "78a6ef9e9a197b02d40fb2b1f171e6a89e47db9752d43092e2f9e4e2aeb5790a"
+    },
+    "new_settled": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-080407-670698-capacity-all-v1\\frames\\00011-dark_elixir-storage-detail-settled.png",
+      "source_sha256": "e77e35510da9d98e57cf1e8479758b952e07b20b366b4910a42b7932d0a73912",
+      "derived_path": "tests/fixtures/resource_capacity_18_647_2_dark_20261016/new_settled.png",
+      "derived_sha256": "00d766a1a72acd15b85d479a458a213c41ad61b26722ecac6475978e91d090cd"
+    }
+  }
+}

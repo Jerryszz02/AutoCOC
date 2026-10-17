@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "client_version": "18.647.2",
+  "fixture": "siege_picker_navigation_18_647_2.png",
+  "fixture_sha256": "2a46fad9a2a4aa45ad71e889b6653d8f24a86dead5ad4cd1aeb53622d9315bd1",
+  "source_report": "completion-20261015/probes/20261015-182006-tap/frames/00002-after.png",
+  "source_sha256": "990637bd562ec7d967bf74c4e8f9368433fb246f62898c83d47884a9ae09271d",
+  "transformation": "Resized to 1280x720; irrelevant background masked black; observed header and siege tray retained.",
+  "purpose": "Current siege tray navigation regression; no uncalibrated army mutation controls.",
+  "counts_toward_acceptance": false
+}

@@ -46,17 +46,17 @@ def collect_resources(session: GameSession) -> TaskResult:
         return TaskResult("collect", status, reason, started_at=started_at,
                           elapsed_sec=time.monotonic() - started, evidence=evidence, metrics=metrics)
 
-    def observe(label: str) -> tuple[SceneSnapshot, dict[str, int], list[CollectionTarget]]:
+    def observe(label: str) -> SceneSnapshot:
         snapshot = session.observe(label)
         evidence.append(snapshot.screenshot_path)
         metrics["resources_after"] = snapshot.observations.get("resources")
         if len(evidence) == 1:
             metrics["resources_before"] = snapshot.observations.get("resources")
-        inventory = _inventory(snapshot)
-        return snapshot, inventory, _targets(snapshot)
+        return snapshot
 
     try:
-        current, inventory, targets = observe("collect-before")
+        current = observe("collect-before")
+        inventory, targets = _inventory(current), _targets(current)
         while True:
             session.check_deadline()
             if not targets:
@@ -74,26 +74,47 @@ def collect_resources(session: GameSession) -> TaskResult:
             before, before_inventory = current, inventory
             attempted_targets += 1
             session.tap(before, target["point"], reason=f"Collect {target['resource']} bubble: {target['template']}")
+            settled_inventory: dict[str, int] | None = None
+            settled_frame: Path | None = None
             for observation in range(VERIFICATION_OBSERVATIONS):
                 time.sleep(min(session.config.runtime.poll_interval_sec, 1.0))
-                current, inventory, targets = observe("collect-verify")
-                if current.screenshot_path == before.screenshot_path:
-                    raise FlowError("Collection verification reused its before screenshot")
-                if any(inventory[resource] < before_inventory[resource] for resource in RESOURCES):
+                current = observe("collect-verify")
+                if current.screenshot_path in evidence[:-1]:
+                    raise FlowError("Collection verification reused a screenshot")
+                partial_inventory = _inventory_values(current)
+                targets = _targets(current)
+                if any(value is not None and value < before_inventory[resource]
+                       for resource, value in partial_inventory.items()):
                     raise FlowError("Inventory decreased during collection; resource change is not attributable")
+                if any(value is None for value in partial_inventory.values()):
+                    # A fresh recognized village may catch the balance animation
+                    # between OCR reads. Spend the existing observation budget,
+                    # never another collection tap or a remembered balance.
+                    if observation == VERIFICATION_OBSERVATIONS - 1:
+                        raise FlowError("Village resource inventory is incomplete")
+                    settled_inventory, settled_frame = None, None
+                    continue
+                inventory = _inventory(current)
                 resource = target["resource"]
                 increase = inventory[resource] - before_inventory[resource]
                 disappeared = not any(_overlaps(target["bbox"], item["bbox"]) for item in targets)
                 if disappeared and increase > 0:
-                    collected[resource] += increase
-                    event = {
-                        "target": target, "resource": resource, "increase": increase,
-                        "resources_before": dict(before_inventory), "resources_after": dict(inventory),
-                        "before_frame": str(before.screenshot_path), "after_frame": str(current.screenshot_path),
-                    }
-                    verified.append(event)
-                    session.event("collection_verified", **event)
-                    break
+                    if inventory == settled_inventory:
+                        collected[resource] += increase
+                        event = {
+                            "target": target, "resource": resource, "increase": increase,
+                            "resources_before": dict(before_inventory), "resources_after": dict(inventory),
+                            "before_frame": str(before.screenshot_path), "after_frame": str(current.screenshot_path),
+                            "stable_inventory_frames": [str(settled_frame), str(current.screenshot_path)],
+                        }
+                        verified.append(event)
+                        session.event("collection_verified", **event)
+                        break
+                    # The HUD counts upward during collection. A readable
+                    # intermediate amount must not become the credited total.
+                    settled_inventory, settled_frame = dict(inventory), current.screenshot_path
+                else:
+                    settled_inventory, settled_frame = None, None
                 if observation == VERIFICATION_OBSERVATIONS - 1:
                     return finish("failed", "collection_postcondition_unverified")
     except AutoCOCError as exc:
@@ -101,16 +122,24 @@ def collect_resources(session: GameSession) -> TaskResult:
 
 
 def _inventory(snapshot: SceneSnapshot) -> dict[str, int]:
+    values = _inventory_values(snapshot)
+    if any(value is None for value in values.values()):
+        raise FlowError("Village resource inventory is incomplete")
+    return {resource: int(values[resource]) for resource in RESOURCES}
+
+
+def _inventory_values(snapshot: SceneSnapshot) -> dict[str, int | None]:
     if snapshot.scene != SCENE_VILLAGE or snapshot.confidence < 0.8:
         raise FlowError(f"Collection requires a recognized village, observed {snapshot.scene}")
     if snapshot.observations.get("resource_source") != "village_inventory":
         raise FlowError("Collection requires village inventory readings")
     values = snapshot.observations.get("resources")
     if not isinstance(values, dict) or any(
-        type(values.get(resource)) is not int or values[resource] < 0 for resource in RESOURCES
+        values.get(resource) is not None and
+        (type(values[resource]) is not int or values[resource] < 0) for resource in RESOURCES
     ):
-        raise FlowError("Village resource inventory is incomplete")
-    return {resource: values[resource] for resource in RESOURCES}
+        raise FlowError("Village resource inventory is invalid")
+    return {resource: values.get(resource) for resource in RESOURCES}
 
 
 def _targets(snapshot: SceneSnapshot) -> list[CollectionTarget]:

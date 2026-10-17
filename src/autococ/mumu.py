@@ -7,6 +7,7 @@ Use the modern finger API: coordinates are already in screenshot space.
 from __future__ import annotations
 
 import ctypes
+from datetime import datetime, timezone
 import json
 import multiprocessing
 import os
@@ -111,6 +112,7 @@ class MuMuClient:
         from .errors import CaptureError
 
         started = time.monotonic()
+        requested_at_utc = datetime.now(timezone.utc).isoformat()
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         # The parent owns publication: a late worker cannot overwrite the
@@ -152,6 +154,7 @@ class MuMuClient:
             encode_elapsed_sec=encode_elapsed,
             handoff_elapsed_sec=max(0.0, elapsed - pixel_elapsed - (encode_elapsed or 0.0)),
             frame_id=uuid4().hex,
+            requested_at_utc=requested_at_utc,
         )
 
     def tap(self, x: int, y: int) -> None:

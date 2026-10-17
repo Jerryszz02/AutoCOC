@@ -29,9 +29,12 @@ class Unit:
     housing_space: int | None = None
 
 
-# Independently observed information panels / picker space labels on 18.600.7.
+# Independently observed information panels / picker space labels on 18.600.7;
+# 18.647.2 archer and totem details also confirm one housing space each;
+# the level-4 Furnace detail independently shows 18 housing spaces.
 # Unobserved units keep None; capacity checks must never treat that as zero.
 _SAMPLED_HOUSING = {"electro_dragon": 30, "dragon_rider": 25, "balloon": 5,
+                    "dragon": 20, "baby_dragon": 10, "archer": 1, "furnace": 18,
                     "lightning_spell": 1, "totem_spell": 1}
 
 
@@ -91,8 +94,12 @@ def get_unit(unit_id: str) -> Unit | None:
     return UNIT_BY_ID.get(unit_id)
 
 
-def template_manifest(root: Path = CATALOG_ROOT) -> dict:
-    path = root / "unit_templates.json"
+def template_manifest(root: Path = CATALOG_ROOT, *, client_version: str | None = None) -> dict:
+    filename = "unit_templates.json" if client_version in (None, "18.600.7") else (
+        "unit_templates_18_647_2.json" if client_version == "18.647.2" else None)
+    if filename is None:
+        return {"client": "unknown", "templates": []}
+    path = root / filename
     if not path.is_file():
         return {"client": "unknown", "templates": []}
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -101,9 +108,9 @@ def template_manifest(root: Path = CATALOG_ROOT) -> dict:
     return data
 
 
-def coverage(root: Path = CATALOG_ROOT) -> dict[str, dict[str, object]]:
+def coverage(root: Path = CATALOG_ROOT, *, client_version: str | None = None) -> dict[str, dict[str, object]]:
     """Report samples present on disk, separately from catalogue membership."""
-    manifest = template_manifest(root)
+    manifest = template_manifest(root, client_version=client_version)
     result = {unit.unit_id: {"kind": unit.kind, "catalogued": True,
                              "recognition": "unavailable", "templates": 0}
               for unit in UNITS}
@@ -130,14 +137,15 @@ def recognize_card_identity(
     this result. A missing, ambiguous, or unsampled portrait stays unknown.
     """
     left, top, right, bottom = box
-    manifest = template_manifest(root)
+    manifest = template_manifest(root, client_version=client_version)
     manifest_version = str(manifest.get("client", "unknown"))
-    version_verified = client_version is not None and client_version == manifest_version
+    version_verified = (client_version is not None and manifest_version != "unknown"
+                        and client_version == manifest_version)
     result: dict[str, object] = {"unit_id": None, "confidence": None,
                                   "reason": "no_supported_template", "evidence": [],
                                   "template_client_version": manifest_version,
                                   "version_verified": version_verified}
-    if client_version is not None and not version_verified:
+    if not version_verified:
         result["reason"] = "client_version_unverified"
         return result
     if not (0 <= left < right <= image.shape[1] and 0 <= top < bottom <= image.shape[0]):
@@ -202,13 +210,13 @@ def recognize_large_hero_identity(
     distribution must *both* agree with samples for the same hero. Neither
     the card's position, pet nor equipment contributes to its ID.
     """
-    manifest = template_manifest(root)
+    manifest = template_manifest(root, client_version=client_version)
     version = str(manifest.get("client", "unknown"))
     result: dict[str, object] = {"unit_id": None, "confidence": None,
                                   "reason": "no_supported_template", "evidence": [],
                                   "template_client_version": version,
-                                  "version_verified": client_version == version}
-    if client_version != version:
+                                  "version_verified": version != "unknown" and client_version == version}
+    if not result["version_verified"]:
         result["reason"] = "client_version_unverified"
         return result
     left, top, right, bottom = box

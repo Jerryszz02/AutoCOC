@@ -1,0 +1,382 @@
+{
+  "client_version": "18.647.2",
+  "coordinate_resolution": [
+    1280,
+    720
+  ],
+  "frames": [
+    {
+      "fixture": "battle_toolbar_archer_00012_18_647_2.png",
+      "fixture_sha256": "dec530e1323d7a4d8e2f5cfe21ab7f0786721a4f34bde5cf4111790e981790a6",
+      "source_frame": "reports/completion-20261015/collections/20261015-234304-archer-preview-session/frames/00012-battle-candidate.png",
+      "source_sha256": "4193937c1da6ea5314a5b909d006b86cec351c2a5e8c20ac96bd8872b9d806e9",
+      "retained_roi_1280": [
+        35,
+        580,
+        1240,
+        720
+      ],
+      "ocr": [
+        {
+          "text": "x10",
+          "confidence": 0.99523,
+          "bbox": [
+            82,
+            592,
+            131,
+            621
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99517,
+          "bbox": [
+            194,
+            592,
+            228,
+            622
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99625,
+          "bbox": [
+            294,
+            595,
+            324,
+            620
+          ]
+        },
+        {
+          "text": "x2",
+          "confidence": 0.99648,
+          "bbox": [
+            384,
+            592,
+            422,
+            621
+          ]
+        },
+        {
+          "text": "x3",
+          "confidence": 0.9935,
+          "bbox": [
+            479,
+            592,
+            519,
+            621
+          ]
+        },
+        {
+          "text": "x6",
+          "confidence": 0.99476,
+          "bbox": [
+            1092,
+            592,
+            1134,
+            622
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.99722,
+          "bbox": [
+            1190,
+            592,
+            1231,
+            622
+          ]
+        },
+        {
+          "text": "12",
+          "confidence": 0.99999,
+          "bbox": [
+            150,
+            680,
+            170,
+            698
+          ]
+        },
+        {
+          "text": "29",
+          "confidence": 1.0,
+          "bbox": [
+            654,
+            680,
+            677,
+            698
+          ]
+        },
+        {
+          "text": "16",
+          "confidence": 0.99998,
+          "bbox": [
+            752,
+            680,
+            770,
+            698
+          ]
+        },
+        {
+          "text": "08",
+          "confidence": 0.99998,
+          "bbox": [
+            942,
+            680,
+            968,
+            698
+          ]
+        }
+      ]
+    },
+    {
+      "fixture": "battle_toolbar_archer_00013_18_647_2.png",
+      "fixture_sha256": "72e59de66ae418e689576673e4db6a90e30b968f83c78813026146b9a2feef87",
+      "source_frame": "reports/completion-20261015/collections/20261015-234304-archer-preview-session/frames/00013-scout-camera-ready.png",
+      "source_sha256": "659813c3c684ebd4ffd48e095503b68bc529024e7faadf1137c29a78a3d11f5a",
+      "retained_roi_1280": [
+        35,
+        580,
+        1240,
+        720
+      ],
+      "ocr": [
+        {
+          "text": "x10",
+          "confidence": 0.99523,
+          "bbox": [
+            82,
+            592,
+            131,
+            621
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99517,
+          "bbox": [
+            194,
+            592,
+            228,
+            622
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99625,
+          "bbox": [
+            294,
+            595,
+            324,
+            620
+          ]
+        },
+        {
+          "text": "x2",
+          "confidence": 0.99648,
+          "bbox": [
+            384,
+            592,
+            422,
+            621
+          ]
+        },
+        {
+          "text": "x3",
+          "confidence": 0.99356,
+          "bbox": [
+            479,
+            592,
+            519,
+            621
+          ]
+        },
+        {
+          "text": "x6",
+          "confidence": 0.99476,
+          "bbox": [
+            1092,
+            592,
+            1134,
+            622
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.99517,
+          "bbox": [
+            1190,
+            591,
+            1231,
+            622
+          ]
+        },
+        {
+          "text": "12",
+          "confidence": 0.99998,
+          "bbox": [
+            150,
+            680,
+            170,
+            698
+          ]
+        },
+        {
+          "text": "29",
+          "confidence": 1.0,
+          "bbox": [
+            654,
+            680,
+            677,
+            698
+          ]
+        },
+        {
+          "text": "16",
+          "confidence": 0.99998,
+          "bbox": [
+            752,
+            680,
+            770,
+            698
+          ]
+        },
+        {
+          "text": "08",
+          "confidence": 0.99998,
+          "bbox": [
+            942,
+            680,
+            968,
+            698
+          ]
+        }
+      ]
+    },
+    {
+      "fixture": "battle_toolbar_archer_00014_18_647_2.png",
+      "fixture_sha256": "0db3d4d388754ea989f3c5939b351dc0f3ca52bf62cb1657602a012bf229a2b7",
+      "source_frame": "reports/completion-20261015/collections/20261015-234304-archer-preview-session/frames/00014-vision-collection-exit-fresh.png",
+      "source_sha256": "3b1cb94346b49f6efb11e967fd01579464b842b77aac800f860d955bc595832a",
+      "retained_roi_1280": [
+        35,
+        580,
+        1240,
+        720
+      ],
+      "ocr": [
+        {
+          "text": "x10",
+          "confidence": 0.99523,
+          "bbox": [
+            82,
+            592,
+            131,
+            621
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99312,
+          "bbox": [
+            195,
+            594,
+            228,
+            621
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99625,
+          "bbox": [
+            294,
+            595,
+            324,
+            620
+          ]
+        },
+        {
+          "text": "x2",
+          "confidence": 0.99648,
+          "bbox": [
+            384,
+            592,
+            422,
+            621
+          ]
+        },
+        {
+          "text": "x3",
+          "confidence": 0.9935,
+          "bbox": [
+            479,
+            592,
+            519,
+            621
+          ]
+        },
+        {
+          "text": "x6",
+          "confidence": 0.99476,
+          "bbox": [
+            1092,
+            592,
+            1134,
+            622
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.99509,
+          "bbox": [
+            1190,
+            591,
+            1231,
+            622
+          ]
+        },
+        {
+          "text": "12",
+          "confidence": 0.99999,
+          "bbox": [
+            150,
+            680,
+            170,
+            698
+          ]
+        },
+        {
+          "text": "29",
+          "confidence": 1.0,
+          "bbox": [
+            654,
+            680,
+            677,
+            698
+          ]
+        },
+        {
+          "text": "16",
+          "confidence": 0.99998,
+          "bbox": [
+            752,
+            680,
+            770,
+            698
+          ]
+        },
+        {
+          "text": "08",
+          "confidence": 0.99998,
+          "bbox": [
+            942,
+            680,
+            968,
+            698
+          ]
+        }
+      ]
+    }
+  ],
+  "anonymization": "Only the live battle toolbar is retained at its original position. Opponent village, resources, and account UI are zeroed."
+}

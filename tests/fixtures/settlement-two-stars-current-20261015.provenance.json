@@ -1,0 +1,14 @@
+{
+  "source_run": "20261015-215245-013077-d6fb30ed",
+  "source_frame": "00053-battle-settlement-reread.png",
+  "source_sha256": "53346915f8fa9a59f13b91792c49b229428c7635fade7b81cef9fdd93f112ee2",
+  "crop_at_1280x720": [
+    430,
+    20,
+    845,
+    220
+  ],
+  "fixture_sha256": "5572e8b16408d520e0b95ea949829ba3ea2ca65d5a5be12a21d91746ad789975",
+  "description": "Only star shapes and local settlement backdrop; opponent and account text outside crop.",
+  "review_method": "agent_visual"
+}

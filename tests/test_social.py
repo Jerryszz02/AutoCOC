@@ -3,7 +3,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from autococ.errors import FlowError
+from autococ.errors import FlowError, LocatorError
+from autococ.locator import find_template
 from autococ.ocr import OCRText
 from autococ.scene import SceneSnapshot
 from autococ.session import GameSession
@@ -19,8 +20,8 @@ def text(value: str, box: list[int]) -> dict:
 
 def frame(index: int, scene: str, *, cooldown: str | None = None, record: bool = False,
           age: str | None = "刚刚", gems: int = 323, extra: list | None = None, donate: bool = False,
-          older_messages: bool = False) -> SceneSnapshot:
-    ocr = [text(str(gems), [1160, 226, 1208, 252])]
+          older_messages: bool = False, gem_bbox: list[int] | None = None) -> SceneSnapshot:
+    ocr = [text(str(gems), gem_bbox or [1160, 226, 1208, 252])]
     buttons = []
     if scene == "request":
         ocr += [text(BODY, [377, 311, 613, 339]), text("50/50", [445, 124, 520, 150])]
@@ -60,8 +61,9 @@ class FakeSession:
     click = GameSession.click
 
     def __init__(self, frames: list[SceneSnapshot], *, region_results: list[OCRText] | None = None,
-                 line_results: list[OCRText] | None = None) -> None:
+                 line_results: list[OCRText] | None = None, client_version: str = "18.600.7") -> None:
         self.frames = iter(frames)
+        self.client_version = client_version
         self.recognizer = FakeRecognizer(region_results, line_results)
         self.config = SimpleNamespace(runtime=SimpleNamespace(poll_interval_sec=0))
         self.taps, self.template_clicks, self.waits, self.events = [], [], [], []
@@ -152,6 +154,58 @@ class SocialTests(unittest.TestCase):
         self.assertEqual(session.taps, [(Path("social-3.png"), [782, 502])])
         self.assertEqual([item[0] for item in session.template_clicks], ["hud_chat", "chat_request"])
         self.assertIn(({"request"}, 45), session.waits)
+
+    def test_current_client_uses_observed_chat_hud(self) -> None:
+        session = FakeSession([frame(0, "village"), frame(1, "clan_chat")],
+                              client_version="18.647.2")
+        result = donate_troops(session)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(session.template_clicks[0], ("hud_chat_18_647_2", (35, 330, 115, 410)))
+
+    def test_unknown_client_does_not_borrow_legacy_chat_hud(self) -> None:
+        session = FakeSession([frame(0, "village")], client_version="unknown")
+        result = donate_troops(session)
+        self.assertEqual(result.status, "failed")
+        self.assertIn("uncalibrated", result.reason)
+        self.assertEqual(session.template_clicks, [])
+
+    def test_current_chat_template_matches_independent_real_hud_crops(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        current = root / "assets/templates/hud_chat_18_647_2.png"
+        legacy = root / "assets/templates/hud_chat.png"
+        for index in (1, 2):
+            crop = root / f"tests/fixtures/social_hud/home_chat_18_647_2_{index}.png"
+            with self.subTest(index=index):
+                match = find_template(crop, current, threshold=.88)
+                self.assertGreaterEqual(match.confidence, .98)
+                self.assertTrue(40 <= match.point[0] <= 90 and 40 <= match.point[1] <= 95)
+                with self.assertRaises(LocatorError):
+                    find_template(crop, legacy, threshold=.88)
+
+    def test_current_request_uses_anchored_new_gem_row(self) -> None:
+        box = [1176, 174, 1220, 200]
+        session = FakeSession([frame(0, "request", gems=216, gem_bbox=box),
+                               frame(1, "clan_chat", cooldown="1分钟", record=True,
+                                     gems=216, gem_bbox=box)], client_version="18.647.2")
+        with patch("autococ.social.find_template") as locate:
+            result = request_reinforcements(session)
+        self.assertEqual(result.status, "succeeded")
+        self.assertEqual(result.metrics["gems_before"], 216)
+        self.assertEqual(result.metrics["gems_after"], 216)
+        self.assertEqual(locate.call_count, 2)
+        self.assertEqual(locate.call_args.kwargs["roi"], (1030, 155, 1110, 215))
+
+    def test_current_request_rejects_unanchored_or_legacy_gem_number(self) -> None:
+        for gem_bbox, missing_icon in (([1176, 174, 1220, 200], True),
+                                       ([1160, 226, 1208, 252], False)):
+            with self.subTest(gem_bbox=gem_bbox, missing_icon=missing_icon):
+                session = FakeSession([frame(0, "request", gem_bbox=gem_bbox)],
+                                      client_version="18.647.2")
+                with patch("autococ.social.find_template", side_effect=LocatorError("missing") if missing_icon else None):
+                    result = request_reinforcements(session)
+                self.assertEqual(result.status, "failed")
+                self.assertEqual(result.metrics["send_actions"], 0)
+                self.assertEqual(session.taps, [])
 
     def test_request_configuration_capacity_is_not_received_capacity(self) -> None:
         session = FakeSession([frame(0, "request"), frame(1, "clan_chat", cooldown="1分钟", record=True)])

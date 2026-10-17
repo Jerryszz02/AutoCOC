@@ -163,6 +163,33 @@ class ArmyManifestTests(unittest.TestCase):
         self.assertEqual([card["count"] for card in result["spells"]], [6, 5])
         self.assertEqual(result["troops"][2]["evidence"]["count"]["source"], "line_roi")
 
+    def test_current_client_army_counts_and_supported_identities(self) -> None:
+        path = Path(__file__).parent / "fixtures/army_current_18_647_2_20261015.png"
+        provider = RapidOCRProvider()
+        texts = provider.recognize(path)
+        result = recognize_army_manifest(path, provider, texts,
+                                         baseline_resolution=(2560, 1440),
+                                         client_version="18.647.2")
+        self.assertTrue(result["complete"], result["unknowns"])
+        self.assertTrue(result["identity_complete"])
+        self.assertEqual([(card["unit_id"], card["count"]) for card in result["troops"]],
+                         [("electro_dragon", 10), ("dragon", 1),
+                          ("baby_dragon", 1), ("balloon", 2)])
+        self.assertEqual([(card["unit_id"], card["count"]) for card in result["spells"]],
+                         [("lightning_spell", 6), ("totem_spell", 5)])
+        heroes = recognize_army_heroes(path, {"used": 4, "capacity": 4},
+                                       client_version="18.647.2")
+        self.assertEqual([card["unit_id"] for card in heroes["cards"]],
+                         ["grand_warden", "dragon_duke", "minion_prince", "archer_queen"])
+        self.assertTrue(heroes["complete"])
+        siege = recognize_army_siege(path, provider, {"used": 3, "capacity": 3},
+                                     client_version="18.647.2")
+        self.assertEqual([card["count"] for card in siege["cards"]], [1, 1, 1])
+        self.assertEqual([card["unit_id"] for card in siege["cards"]],
+                         ["siege_barracks", "sky_wagon", "troop_launcher"])
+        self.assertTrue(siege["complete"])
+        self.assertEqual(siege["unknowns"], [])
+
     def test_live_spell_contrast_recovers_all_four_counts_without_capacity_guess(self) -> None:
         path = Path(__file__).parent / "fixtures/army_confirmation_counts_20260926.png"
         # Only the panel is retained in this fixture; the account/header and

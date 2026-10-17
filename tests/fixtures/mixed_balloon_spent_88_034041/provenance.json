@@ -1,0 +1,43 @@
+{
+  "schema": "autococ.anonymous_mixed_balloon_spent_88.v1",
+  "client_version": "18.647.2",
+  "source_run_relative": "reports/completion-20261015/live/20261017-034041-064557-2538f096",
+  "source_events_sha256": "383f3f267394bdf0536bc0cff5498a756b2e145349c1eacb2c130ddb17c2f488",
+  "retained_native_xyxy": [
+    656,
+    1170,
+    860,
+    1440
+  ],
+  "outside_bgr": [
+    45,
+    45,
+    45
+  ],
+  "truth_status": "offline_card_evidence_only",
+  "formal_acceptance": false,
+  "human_reviewed": false,
+  "rows": [
+    {
+      "role": "before",
+      "source_frame": "00017-line-boundary.png",
+      "source_sha256": "abe999165753bd4b57b66a33941bf0a686f8c98a90de738eb33eebc22f22e049",
+      "fixture": "before.png",
+      "fixture_sha256": "363ac07ee185a43f6555f59a829c290aaac1036745f93d4d98a8c64025a0540c"
+    },
+    {
+      "role": "source",
+      "source_frame": "00018-line-boundary.png",
+      "source_sha256": "a79057b479de6a9121c688cf38cc1355aa34600492c1651f7a9047885eadd926",
+      "fixture": "source.png",
+      "fixture_sha256": "363ac07ee185a43f6555f59a829c290aaac1036745f93d4d98a8c64025a0540c"
+    },
+    {
+      "role": "spent",
+      "source_frame": "00022-mixed-balloon-post-1.png",
+      "source_sha256": "3c39c3bcb8fbf3267ad29d5a391d6f16416d730181c65fef57fffe3ed40e742b",
+      "fixture": "spent.png",
+      "fixture_sha256": "b505a924ca99bd56dd0994c3f76cbad29134c25b50556bfd578e9f61b8875df6"
+    }
+  ]
+}

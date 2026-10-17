@@ -1,0 +1,14 @@
+{
+  "source_probe": "20261015-221320-capacity-reader",
+  "source_frame": "00001-launch-home-check.png",
+  "source_sha256": "10909d11a2260ed06a2928bddf7584fb60c440bf15e13ac2225dcf94ffacdb0b",
+  "preserved_roi_at_native_2560x1440": [
+    2016,
+    38,
+    2480,
+    416
+  ],
+  "fixture_sha256": "68b6361d2dbcd55ca22cf2a35bbe0ae5c53cccc1af6d1ae09d72b1734d973cb3",
+  "description": "Only current village numeric inventory HUD retained; all account and village pixels blacked out. Regression data, not formal model training.",
+  "review_method": "agent_visual"
+}

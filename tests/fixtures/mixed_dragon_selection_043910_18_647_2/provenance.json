@@ -1,0 +1,42 @@
+{
+  "source_run": "20261017-043910-242928-a79cf8b6",
+  "client_version": "18.647.2",
+  "retained_roi_native": [
+    240,
+    1120,
+    870,
+    1440
+  ],
+  "mask": "all pixels outside ROI exactly zero; ROI exact native source pixels",
+  "scope": "selection/count/border regression only; no map/camera equivalence claim",
+  "events_source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-043910-242928-a79cf8b6\\events.jsonl",
+  "events_sha256": "2b6f73ce15e9c5ab1834eed1d23a861ee050e71b0e54ccb4deba3af3c811c48a",
+  "report_source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\run-20261017-043910-242928-a79cf8b6.json",
+  "report_sha256": "f176c323ff8f20f8c2089565b39e59d7c4bbd41aaca072db9f4b722050db31b3",
+  "assets": {
+    "00018-toolbar.png": {
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-043910-242928-a79cf8b6\\frames\\00018-line-boundary.png",
+      "source_sha256": "34bb4ec6f2478b4c975c5224faca86b8f2d7687765bc2374a907da39d2a1dc72",
+      "fixture_sha256": "455d4904df1143d8d09ca6e49ed9783d9612a3a638607e56f3b7147a4939b446",
+      "retained_pixel_sha256": "3d04f27e6d58e4a17a3e95e02e456b4a136e8ce8534bc4bb6860ad55c1a48d26"
+    },
+    "00023-toolbar.png": {
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-043910-242928-a79cf8b6\\frames\\00023-mixed-dragon-selected-0.png",
+      "source_sha256": "89ece96a2f0853109a808fce6f52a26b43c0168fc2fe678169daef948b359773",
+      "fixture_sha256": "b4c4be1ee07e6f3efe59045011cc2b1b4a1bd9d14249f7cc5f9952a4a83223b2",
+      "retained_pixel_sha256": "10285bdbd5a06db1c8238837cf4ef6023066c9313f3e95060eac94c893f4b8f2"
+    },
+    "00024-toolbar.png": {
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-043910-242928-a79cf8b6\\frames\\00024-mixed-dragon-selected-1.png",
+      "source_sha256": "2a53a0b5281cb5abdd1f43ee6a0b812d1f5f55889eb604ce9b343bdcd948ae30",
+      "fixture_sha256": "ed7d91b7f9788da458070a162c1a6ce3b7aa45d8f3e6e412d26cdae0fc09c402",
+      "retained_pixel_sha256": "258748c002be6546e04b7e379d2d40b62a8143404ab68e26010f271d5868be9a"
+    },
+    "00025-toolbar.png": {
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-043910-242928-a79cf8b6\\frames\\00025-mixed-dragon-selected-2.png",
+      "source_sha256": "75ce2d91a498a610bdf9420c17c7674888e77195503c21b2724342213ffa6924",
+      "fixture_sha256": "886609f8a2ea8bf923e8b6ce7d41bc92829d1cbc53eb58dae63f998b407b066e",
+      "retained_pixel_sha256": "e87f93748b4f3043be3c6a09cbdacaa1170599b680e9908c0d1052d1e29d6e80"
+    }
+  }
+}

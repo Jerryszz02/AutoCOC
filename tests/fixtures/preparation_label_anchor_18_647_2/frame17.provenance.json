@@ -1,0 +1,99 @@
+{
+  "client_version": "18.647.2",
+  "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-195227-267488-df2ffe32\\frames\\00017-continuous-line-failure-check.png",
+  "source_sha256": "a6a4ced6034866a1248ae45c3bc0aca97c37ac732d31edb8def11015c954b4aa",
+  "events_source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-195227-267488-df2ffe32\\events.jsonl",
+  "events_sha256": "fd0d6b7a33b09ca77aa353439441ad6be2d12c58e237a9e77c8faa9b67afef04",
+  "output_sha256": "b559840149cb927e4c43b49d78aacb4c8985b3b6b497cb8e55a9dc2513447dfb",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "native_preserved_xyxy": [
+    [
+      1120,
+      0,
+      1420,
+      180
+    ],
+    [
+      100,
+      1000,
+      300,
+      1140
+    ]
+  ],
+  "native_preserved_pixel_sha256": [
+    "9434d55f16e2c8a65e2b285937a3545b4d23f40b369e8035ae0dd3325468cf0c",
+    "232b62d2b104670ad76d082ff00b4bf1083fc3896efd52e6bb3fcffd89c26cc6"
+  ],
+  "outside_preserved_area": "black masked",
+  "source_scene": "enemy_village",
+  "source_confidence": 0.92,
+  "cached_ocr": [
+    {
+      "text": "开战倒计时",
+      "confidence": 0.99963,
+      "bbox": [
+        584,
+        12,
+        680,
+        40
+      ]
+    },
+    {
+      "text": "9秒",
+      "confidence": 0.99386,
+      "bbox": [
+        608,
+        34,
+        675,
+        78
+      ]
+    }
+  ],
+  "cached_buttons": [
+    {
+      "name": "end_battle",
+      "text": "结束战斗",
+      "confidence": 0.99949,
+      "bbox": [
+        60,
+        528,
+        126,
+        550
+      ],
+      "point": [
+        93,
+        539
+      ]
+    }
+  ],
+  "cached_countdown_evidence": {
+    "frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-195227-267488-df2ffe32\\frames\\00017-continuous-line-failure-check.png",
+    "label": {
+      "text": "开战倒计时",
+      "bbox": [
+        584,
+        12,
+        680,
+        40
+      ],
+      "confidence": 0.99963
+    },
+    "timer": {
+      "text": "9秒",
+      "bbox": [
+        608,
+        34,
+        675,
+        78
+      ],
+      "confidence": 0.99386
+    },
+    "confidence": 0.99386,
+    "source": "current_frame_ocr"
+  },
+  "ocr_filter": "only preparation heading and seconds inside top HUD ROI; no text outside retained pixels",
+  "purpose": "Development-only masked HUD replay, not human truth or live acceptance"
+}

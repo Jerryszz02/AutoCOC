@@ -1,0 +1,317 @@
+{
+  "client_version": "18.647.2",
+  "unit_id": "furnace",
+  "purpose": "agent_visual_active_battle_identity_regression_not_training_ground_truth",
+  "evidence_limits": "Same scout session, separate preview and un-deployed battle frames. Active portrait only; no selected, spent or deployment proof. No generalization or formal acceptance claim.",
+  "source_commit": "52dff7d184feb08dfb50eafb5a72731d031057e7",
+  "human_reviewed": false,
+  "counts_toward_acceptance": false,
+  "template": {
+    "unit_id": "furnace",
+    "surface": "battle",
+    "path": "units/furnace_battle_active_18_647_2.png",
+    "source_frame": "reports/completion-20261015/probes/20261016-160800-observe/frames/00001-before.png",
+    "source_bbox_1280": [
+      301,
+      624,
+      363,
+      680
+    ],
+    "source_card_bbox_1280": [
+      287,
+      595,
+      375,
+      711
+    ],
+    "state": "active",
+    "client_version": "18.647.2",
+    "source_sha256": "ab7fe70376acc3a63051e793ef73d1b4dae18187303e7932ec6679d0cc701a01",
+    "template_sha256": "256959bd4d3964ae198c136c9528561dcd4f14c2942049f84967e2269edcf686",
+    "identity_evidence_frame": "reports/completion-20261015/probes/20261016-154621-tap/frames/00002-after.png",
+    "identity_evidence_sha256": "3752e78a3af402e1351f9847111a54fd8fabcd8646bef722bb2433e49e636a69",
+    "identity_evidence_title": "4级烈焰熔炉",
+    "identity_evidence_status": "agent_visual_detail_and_army_to_battle_not_human_ground_truth"
+  },
+  "frames": [
+    {
+      "path": "tests/fixtures/furnace_battle_active_1_18_647_2.png",
+      "sha256": "79b250fe177abf584f5e1a38f2e525ee95ebd8a599fdfce0780e9acbcda5e340",
+      "source_frame": "reports/completion-20261015/probes/20261016-160800-observe/frames/00001-before.png",
+      "source_sha256": "ab7fe70376acc3a63051e793ef73d1b4dae18187303e7932ec6679d0cc701a01",
+      "source_events": "reports/completion-20261015/probes/20261016-160800-observe/events.jsonl",
+      "source_events_sha256": "4a4951471c71742297dd378a995f30d5a991aa35af1f18b4a9d8bd71b1fd13bf",
+      "scene": "enemy_village",
+      "cached_ocr": [
+        {
+          "text": "开战倒计时",
+          "confidence": 0.99946,
+          "bbox": [
+            582,
+            12,
+            680,
+            40
+          ]
+        },
+        {
+          "text": "17秒",
+          "confidence": 0.9999,
+          "bbox": [
+            604,
+            36,
+            677,
+            78
+          ]
+        },
+        {
+          "text": "x10",
+          "confidence": 0.99606,
+          "bbox": [
+            130,
+            592,
+            179,
+            621
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99523,
+          "bbox": [
+            244,
+            594,
+            276,
+            621
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99591,
+          "bbox": [
+            342,
+            595,
+            372,
+            620
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99552,
+          "bbox": [
+            438,
+            594,
+            470,
+            621
+          ]
+        },
+        {
+          "text": "x6",
+          "confidence": 0.99389,
+          "bbox": [
+            1044,
+            592,
+            1086,
+            622
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.99788,
+          "bbox": [
+            1142,
+            592,
+            1183,
+            623
+          ]
+        },
+        {
+          "text": "29",
+          "confidence": 1.0,
+          "bbox": [
+            604,
+            680,
+            630,
+            698
+          ]
+        },
+        {
+          "text": "80",
+          "confidence": 0.99999,
+          "bbox": [
+            894,
+            680,
+            920,
+            698
+          ]
+        },
+        {
+          "text": "12",
+          "confidence": 1.0,
+          "bbox": [
+            1008,
+            680,
+            1026,
+            698
+          ]
+        }
+      ],
+      "retained_baseline_rectangles_xyxy": [
+        [
+          0,
+          580,
+          1280,
+          720
+        ],
+        [
+          530,
+          0,
+          750,
+          95
+        ]
+      ],
+      "captured_at_utc": "2026-10-16T15:08:02.407962+00:00"
+    },
+    {
+      "path": "tests/fixtures/furnace_battle_active_2_18_647_2.png",
+      "sha256": "b52c9a2599470299ba6ac5972886bfab96eb24d72b74713d657b112db0fa2e48",
+      "source_frame": "reports/completion-20261015/probes/20261016-160831-click/frames/00001-before.png",
+      "source_sha256": "5e73deed510e1e938c63d1758fb6c772bcd2986fbd9e1cfd3026c81fbf31f1cc",
+      "source_events": "reports/completion-20261015/probes/20261016-160831-click/events.jsonl",
+      "source_events_sha256": "59b53769b4e0309256a80c544098c6c71d5cde601932066014ab92b20e82e5da",
+      "scene": "battle",
+      "cached_ocr": [
+        {
+          "text": "离战斗结束还有：",
+          "confidence": 0.99959,
+          "bbox": [
+            564,
+            12,
+            711,
+            40
+          ]
+        },
+        {
+          "text": "2分钟46秒",
+          "confidence": 0.99956,
+          "bbox": [
+            552,
+            35,
+            726,
+            80
+          ]
+        },
+        {
+          "text": "x10",
+          "confidence": 0.99601,
+          "bbox": [
+            130,
+            592,
+            179,
+            621
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99572,
+          "bbox": [
+            245,
+            595,
+            275,
+            620
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99591,
+          "bbox": [
+            342,
+            595,
+            372,
+            620
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99552,
+          "bbox": [
+            438,
+            594,
+            470,
+            621
+          ]
+        },
+        {
+          "text": "x6",
+          "confidence": 0.99389,
+          "bbox": [
+            1044,
+            592,
+            1086,
+            622
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.99738,
+          "bbox": [
+            1142,
+            591,
+            1183,
+            623
+          ]
+        },
+        {
+          "text": "29",
+          "confidence": 1.0,
+          "bbox": [
+            604,
+            680,
+            630,
+            698
+          ]
+        },
+        {
+          "text": "80",
+          "confidence": 0.99999,
+          "bbox": [
+            894,
+            680,
+            920,
+            698
+          ]
+        },
+        {
+          "text": "12",
+          "confidence": 1.0,
+          "bbox": [
+            1008,
+            680,
+            1026,
+            698
+          ]
+        }
+      ],
+      "retained_baseline_rectangles_xyxy": [
+        [
+          0,
+          580,
+          1280,
+          720
+        ],
+        [
+          530,
+          0,
+          750,
+          95
+        ]
+      ],
+      "captured_at_utc": "2026-10-16T15:08:33.234684+00:00"
+    }
+  ],
+  "fixture_derivation": {
+    "resize": "cv2.resize(source, (1280, 720), interpolation=cv2.INTER_AREA)",
+    "background_bgr": [
+      45,
+      45,
+      45
+    ]
+  }
+}

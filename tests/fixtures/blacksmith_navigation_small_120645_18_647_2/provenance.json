@@ -1,0 +1,120 @@
+{
+  "schema": "blacksmith_navigation_small_120645_18_647_2_fixture_v1",
+  "client_version": "18.647.2",
+  "split": "TRAIN",
+  "formal_acceptance": false,
+  "account_verified": false,
+  "ore_reward_claimed": false,
+  "original_run_failure_preserved": true,
+  "identity_basis": "Root Agent visually confirmed frame13 green-roof/front matches the separately selected level-10 blacksmith after same-village map registration; weak old-template NCC alone did not establish identity.",
+  "root_two_scale_review": {
+    "path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\diagnostics\\blacksmith-two-scale-root-review-v1.json",
+    "sha256": "344a04d570d2798514f515c75968ddc6386b04ea317497a262a4c2eabc6c4ee4"
+  },
+  "prospective_train_declarations": [
+    {
+      "path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\external\\staging\\prospective-free-ore-train-d06a359-v1.json",
+      "sha256": "d747a51b7e219ca0b8baeb96bd5db0173480200a30e3e6824cf3439ac9cc459b"
+    },
+    {
+      "path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\external\\staging\\prospective-blacksmith-calibration-train-a438774-v1.json",
+      "sha256": "5971b3f5488e479b518c39eb5e250e9b5c670967b60cdd892e9b5c89a668af07"
+    }
+  ],
+  "registration": {
+    "path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\diagnostics\\ore-front-calibration-1237-agent-v1\\old-new-registration.json",
+    "sha256": "4468fbeb2c781a0fc99ad267ae5bf03cd4fe40b88863d0389be21e35df6daf29",
+    "map_scale_small_to_verified": 1.0628982327162306,
+    "inliers_frame13": 226,
+    "projected_verified_tap_small_baseline": [
+      746.33,
+      209.69
+    ]
+  },
+  "template": {
+    "path": "assets/templates/ore_navigation_blacksmith_front_small_verified_120645_18_647_2.png",
+    "sha256": "36c1ee46b1da37ba4388d6a97bd0d98fd6590a3d485d1e634acf903315d2ad5e",
+    "source_frame_sha256": "f97483da6bc9bf0cd6ca8646260acda1b9cdfdbfb57ef23940538ddb0f2e4797",
+    "source_roi_xyxy": [
+      751,
+      207,
+      769,
+      229
+    ],
+    "source_pixel_sha256": "c1cc2fec33fc39f19b9e23d691d869340e8d1ebbbdadbbdff685c18ad5987124",
+    "tap_point_baseline": [
+      746,
+      210
+    ],
+    "tap_offset_xy": [
+      -5,
+      3
+    ],
+    "selection_status": "projected_from_separately_verified_123758_tap; subsequent exact title and Equipment gate still required"
+  },
+  "transformation": {
+    "baseline_resolution": [
+      1280,
+      720
+    ],
+    "resize": "cv2.INTER_AREA",
+    "retained_roi_xyxy": [
+      720,
+      170,
+      810,
+      250
+    ],
+    "outside_bgr": [
+      24,
+      24,
+      24
+    ]
+  },
+  "fixtures": {
+    "home_small_07": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-120645-062450-aa90794c\\frames\\00007-ore-navigation-current-1.png",
+      "source_sha256": "ff43f111c984d603efb32312db71bbab6b72f29528ba5cec4c166fbb7c808dde",
+      "derived_path": "tests/fixtures/blacksmith_navigation_small_120645_18_647_2/home_small_07.png",
+      "derived_sha256": "6eb05ea1567d54dae553c4120f388034b5353fb9c7124ae0c11172eab99f8f72",
+      "context_path": "tests/fixtures/blacksmith_navigation_small_120645_18_647_2/home_small_07.json",
+      "context_sha256": "41d484d71a8663ec2a076c5a68e22ba2091893bca1799fab33aa0a4580b72381",
+      "retained_roi_pixel_sha256": "9da627beb3e1ee85a2f36ccd18547d97148d4a1b024c3eda60310b2c8fd6ccad"
+    },
+    "home_small_08": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-120645-062450-aa90794c\\frames\\00008-ore-navigation-current-2.png",
+      "source_sha256": "b734956b4c42d4ed309813daebd5df2b2f730dde8e81fe4049780aaea956b3ec",
+      "derived_path": "tests/fixtures/blacksmith_navigation_small_120645_18_647_2/home_small_08.png",
+      "derived_sha256": "c3db549c570089407249378183959df4c7249e33871cfb40bed4560db53d4860",
+      "context_path": "tests/fixtures/blacksmith_navigation_small_120645_18_647_2/home_small_08.json",
+      "context_sha256": "41d484d71a8663ec2a076c5a68e22ba2091893bca1799fab33aa0a4580b72381",
+      "retained_roi_pixel_sha256": "9e806d027cda993d5ae46567aeb403ccbadfc04134e7168eb0a6c67eb69842e6"
+    },
+    "home_small_09": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-120645-062450-aa90794c\\frames\\00009-ore-navigation-current-3.png",
+      "source_sha256": "ddcd7fbc7043146dfd9c4431a5cec69beb609f3c683a3382d25478369a94a5eb",
+      "derived_path": "tests/fixtures/blacksmith_navigation_small_120645_18_647_2/home_small_09.png",
+      "derived_sha256": "c353bf4672f9ce060894cde112cf3bb0bf6f1265c1937a1caf748133df990640",
+      "context_path": "tests/fixtures/blacksmith_navigation_small_120645_18_647_2/home_small_09.json",
+      "context_sha256": "41d484d71a8663ec2a076c5a68e22ba2091893bca1799fab33aa0a4580b72381",
+      "retained_roi_pixel_sha256": "e7b180396614819b977c94dc027c8a905d55a7cc6800df7f47637e409212cf06"
+    },
+    "home_small_12": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-120645-062450-aa90794c\\frames\\00012-ore-navigation-current-6.png",
+      "source_sha256": "f15e911d8593e30a79a831786e5f9b22dd893afd81a2fca3437e93ca05fa9fd7",
+      "derived_path": "tests/fixtures/blacksmith_navigation_small_120645_18_647_2/home_small_12.png",
+      "derived_sha256": "934b98143580fce42925d1dda6f140be61b527fb4c1c3d275a8f3706fa9cd155",
+      "context_path": "tests/fixtures/blacksmith_navigation_small_120645_18_647_2/home_small_12.json",
+      "context_sha256": "41d484d71a8663ec2a076c5a68e22ba2091893bca1799fab33aa0a4580b72381",
+      "retained_roi_pixel_sha256": "e1215bf5451a482c3953c4492fcff2b6366a652b6dd4907bee5153b85989f47b"
+    },
+    "home_small_13": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-120645-062450-aa90794c\\frames\\00013-ore-navigation-current-7.png",
+      "source_sha256": "f97483da6bc9bf0cd6ca8646260acda1b9cdfdbfb57ef23940538ddb0f2e4797",
+      "derived_path": "tests/fixtures/blacksmith_navigation_small_120645_18_647_2/home_small_13.png",
+      "derived_sha256": "ddc937c115a43f993c49973f20d858c84192e3e3e080a020b78c89911845aeae",
+      "context_path": "tests/fixtures/blacksmith_navigation_small_120645_18_647_2/home_small_13.json",
+      "context_sha256": "41d484d71a8663ec2a076c5a68e22ba2091893bca1799fab33aa0a4580b72381",
+      "retained_roi_pixel_sha256": "0fc3929dcff2094962c0b03845fc3c53366fe0a9a51f3a0a28730b8eb08ee953"
+    }
+  }
+}

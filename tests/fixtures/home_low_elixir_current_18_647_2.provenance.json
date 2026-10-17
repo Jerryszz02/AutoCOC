@@ -1,0 +1,12 @@
+{
+  "client_version": "18.647.2",
+  "fixture": "home_low_elixir_current_18_647_2.png",
+  "fixture_sha256": "b622c02f452d4e0014fcb8deeef22f8b26476b52a0f5ed40ce6eff7cfa490697",
+  "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-134027-011432-0f1d6283\\frames\\00010-collect-verify.png",
+  "source_sha256": "794a7b46c16ee2d29f2a7688cd3ae00dc931f5975fa1aeb3e2a824bc88df0c19",
+  "prospective_train_plan": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\external\\staging\\prospective-continuous-train-png0-717bdfb-v2.json",
+  "prospective_train_plan_sha256": "a89f83121d1c241474c4509fc9d02235f0ffa55a4f50770c8185a4b6cdf25d3a",
+  "transformation": "resize_2560x1440_to_1280x720_inter_area; redact_account_upper_left_baseline_0_0_300_130; redact_map_center",
+  "label_scope": "agent_visual_ui_fixture_only",
+  "formal_label": false
+}

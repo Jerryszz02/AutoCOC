@@ -1,0 +1,18 @@
+{
+  "client_version": "18.647.2",
+  "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261015-194523-915723-bff2f65f\\frames\\00017-line-consumption.png",
+  "source_sha256": "25b4fe4bc22d159e7f942fd591f6f2a2b30683c4aabfa51ece1ee59b28a9bc99",
+  "crop_xyxy_native": [
+    360,
+    1140,
+    590,
+    1440
+  ],
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "output_sha256": "9caa8d748be444206198472753b7fe6846e6b02dd0e08ffb25fda2963e128a87",
+  "contents": "Only battle HUD dragon card and adjacent card edges; no player name or village background.",
+  "purpose": "Third independent live x0 sample with weak full-header OCR confidence 0.791; narrow current-frame read must establish the value."
+}

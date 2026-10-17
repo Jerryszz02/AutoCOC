@@ -1,0 +1,16 @@
+{
+  "source_run": "20261016-050523-425062-d2145862",
+  "source_frame": "00006-collect-verify.png",
+  "source_sha256": "20bd2ec92d85e3c9f6281434bdf790133af4e3178a979298de2502bd6194b190",
+  "capture_code_commit": "c89ebe6",
+  "preserved_roi_at_native_2560x1440": [
+    2016,
+    130,
+    2480,
+    222
+  ],
+  "fixture_sha256": "885b83b367272500772a9ca9cfe8ca82c5bb1720887b2253d24b3bd00d0429b6",
+  "derivation": "Original 2560x1440 BGR pixels retained only in elixir HUD row; all other pixels zero. No rescaling or enhancement.",
+  "review_method": "agent_visual",
+  "training_status": "not_model_training"
+}

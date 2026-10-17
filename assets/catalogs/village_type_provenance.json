@@ -1,8 +1,10 @@
 {
-  "client": "Clash of Clans 18.600.7 (versionCode 180600008), MuMu 2026-09-26, 1280x720 baseline",
+  "client": "Clash of Clans 18.600.7 (versionCode 180600008) and 18.647.2, MuMu, 1280x720 baseline",
   "templates": [
     {"type": "home", "file": "village_home_attack.png", "source": "reports/live-army-probe/frames/00002-boat-after.png", "crop_at_1280x720": [45, 580, 119, 648]},
     {"type": "home", "file": "village_home_attack_stars.png", "source": "reports/live-army-editor-probe/frames/00003-army-return-return-1.png", "crop_at_1280x720": [40, 590, 115, 659], "state": "attack_icon_with_stars"},
-    {"type": "builder_base", "file": "village_builder_attack.png", "source": "reports/live-capabilities/frames/00006-returning-home.png", "crop_at_1280x720": [45, 580, 119, 648]}
+    {"type": "builder_base", "file": "village_builder_attack.png", "source": "reports/live-capabilities/frames/00006-returning-home.png", "crop_at_1280x720": [45, 580, 119, 648]},
+    {"type": "home", "file": "village_home_battle_18_647_2.png", "source": "reports/completion-20261015/live/20261015-174504-770137-dd484309/frames/00010-welcome-home.png", "crop_at_1280x720": [45, 590, 120, 665], "client": "Clash of Clans 18.647.2", "state": "new_home_battle_icon"},
+    {"type": "home", "file": "village_home_battle_checklist_18_647_2.png", "source": "reports/completion-20261015/live/20261015-190703-632544-0fe8f840/frames/00011-recovery-after.png", "source_sha256": "1abf9492ccccc9b6c96b4a58b02be68422c7a1b6b0be12619d5b4a0dfd6e5adc", "crop_at_1280x720": [45, 590, 120, 665], "template_sha256": "14dfb85ab1b26d8dec490e586e9fabfc1acfbcb4fe2eec8ce443f282a86cf9f4", "client": "Clash of Clans 18.647.2", "state": "battle_checklist_green_check"}
   ]
 }

@@ -1,0 +1,38 @@
+{
+  "client_version": "18.647.2",
+  "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-195227-267488-df2ffe32\\frames\\00016-mixed-balloon-selected-0.png",
+  "source_sha256": "b01cebd4a70e5858c35bd8915f656f1cd0df48f16c96db5d61831162937d7403",
+  "events_source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-195227-267488-df2ffe32\\events.jsonl",
+  "events_sha256": "fd0d6b7a33b09ca77aa353439441ad6be2d12c58e237a9e77c8faa9b67afef04",
+  "output_sha256": "d9a446d6186f0af139fc3be5327b0447aa064593349f226825f7892f32a2164b",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "native_preserved_xyxy": [
+    [
+      1120,
+      0,
+      1420,
+      180
+    ],
+    [
+      100,
+      1000,
+      300,
+      1140
+    ]
+  ],
+  "native_preserved_pixel_sha256": [
+    "26876940a96359fc0d86f081a73787fcc695902782565ed560883488cb0c8b82",
+    "18969fd80691c743d93a1c94f6678f0e8b278465a13a6e61630a5a2b8dadd5fe"
+  ],
+  "outside_preserved_area": "black masked",
+  "source_scene": "unknown",
+  "source_confidence": 0.0,
+  "cached_ocr": [],
+  "cached_buttons": [],
+  "cached_countdown_evidence": null,
+  "ocr_filter": "only preparation heading and seconds inside top HUD ROI; no text outside retained pixels",
+  "purpose": "Development-only masked HUD replay, not human truth or live acceptance"
+}

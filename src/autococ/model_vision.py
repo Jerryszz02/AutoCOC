@@ -37,6 +37,21 @@ class StaleModelFrame(ModelUnavailable):
     """The image is older than the model package's maximum allowed age."""
 
 
+_CONTRACT_FIELDS = ("kind", "classes", "preprocess", "output", "applicability",
+                    "client_versions", "max_frame_age_seconds")
+
+
+def model_contract_sha256(manifest: dict) -> str:
+    """Hash inference behavior, excluding validation fields changed by promotion."""
+    contract = {field: manifest.get(field) for field in _CONTRACT_FIELDS}
+    try:
+        raw = json.dumps(contract, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                         allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ModelUnavailable("Model contract cannot be serialized") from exc
+    return hashlib.sha256(raw).hexdigest()
+
+
 @dataclass(frozen=True)
 class ScenePrediction:
     scene: str
@@ -126,8 +141,10 @@ def _manifest(root: Path, kind: str, client_version: str | None) -> tuple[dict, 
 class _ONNXModel:
     def __init__(self, root: str | Path, kind: str, *, client_version: str | None = None,
                  session_factory: Callable[[str], object] | None = None) -> None:
-        self.manifest, path, self.model_sha256 = _manifest(Path(root), kind, client_version)
+        self.package_root = Path(root).resolve()
+        self.manifest, path, self.model_sha256 = _manifest(self.package_root, kind, client_version)
         self.metadata = {"kind": kind, "model_sha256": self.model_sha256,
+                         "model_contract_sha256": model_contract_sha256(self.manifest),
                          "code_version": self.manifest["code_version"],
                          "data_version": self.manifest["data_version"],
                          "validation": self.manifest["validation"],

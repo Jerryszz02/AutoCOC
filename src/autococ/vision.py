@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import hashlib
 import math
 from pathlib import Path
 import re
@@ -10,11 +11,12 @@ import time
 
 from .config import OCRConfig
 from .images import read_frame, read_template
-from .errors import LocatorError, SceneError
+from .errors import LocatorError, OCRError, SceneError
 from .locator import find_template, scale_box
 from .ocr import OCRProvider, OCRText, create_ocr_provider, filter_ocr_results
-from .scene import SCENE_BATTLE, SCENE_CLAN_CHAT, SCENE_DISCONNECTED, SCENE_ENEMY_VILLAGE, SCENE_MAINTENANCE, SCENE_POPUP, SCENE_REQUEST, SCENE_SEARCH, SCENE_SETTLEMENT, SCENE_STARTING, SCENE_TRAINING, SCENE_UNKNOWN, SCENE_VILLAGE, SceneSnapshot, classify_scene_text, surrender_dialog_evidence
+from .scene import SCENE_ACCOUNT_IN_USE, SCENE_BATTLE, SCENE_BATTLE_REWARD, SCENE_CLAN_CHAT, SCENE_DISCONNECTED, SCENE_ENEMY_VILLAGE, SCENE_MAINTENANCE, SCENE_POPUP, SCENE_REQUEST, SCENE_SEARCH, SCENE_SETTLEMENT, SCENE_STARTING, SCENE_TRAINING, SCENE_UNKNOWN, SCENE_VILLAGE, SceneSnapshot, account_in_use_dialog_evidence, classify_scene_text, surrender_dialog_evidence
 from .model_vision import ModelUnavailable, SceneModel, BuildingModel
+from .home_evidence import RESOURCE_NAMES, RESOURCE_ROIS, ocr_sha256
 
 
 BUTTON_LABELS: dict[str, tuple[str, ...]] = {
@@ -48,6 +50,44 @@ def parse_resource_number(text: str) -> int | None:
     return int(re.sub(r"\D", "", normalized))
 
 
+def _segmented_hud_number(
+    candidates: list[tuple[float, int, OCRText]],
+    line_roi: tuple[int, int, int, int],
+    min_confidence: float,
+) -> tuple[str, tuple[int, int, int, int]] | None:
+    """Locate two complete, aligned OCR fragments for an independent line read."""
+    if len(candidates) != 2:
+        return None
+    if any(item.bbox is None for _, _, item in candidates):
+        return None
+    first, second = sorted((item for _, _, item in candidates), key=lambda item: item.bbox[0])
+    if first.bbox is None or second.bbox is None:
+        return None
+    if any(item.confidence < min_confidence or re.fullmatch(r"[0-9]+", item.text) is None
+           for item in (first, second)):
+        return None
+    left, top, right, bottom = first.bbox
+    next_left, next_top, next_right, next_bottom = second.bbox
+    hud_left = min(line_roi[0], 998)  # The fixed gem crop may clip a split leading digit.
+    if not (hud_left <= left < right <= line_roi[2]
+            and hud_left <= next_left < next_right <= line_roi[2]
+            and line_roi[1] <= top < bottom <= line_roi[3]
+            and line_roi[1] <= next_top < next_bottom <= line_roi[3]):
+        return None
+    height = min(bottom - top, next_bottom - next_top)
+    if (min(bottom, next_bottom) - max(top, next_top) < .6 * height
+            or abs((top + bottom) - (next_top + next_bottom)) > 12):
+        return None
+    gap = next_left - right
+    if gap > 12 or -gap > .35 * min(right - left, next_right - next_left):
+        return None
+    # These are OCR box paddings, not inferred missing digits. The result must
+    # be read independently and agree exactly with both fragments below.
+    tight_roi = (max(hud_left, left - 4), max(line_roi[1], min(top, next_top) - 3),
+                 min(line_roi[2], next_right + 4), min(line_roi[3], max(bottom, next_bottom) + 3))
+    return first.text + second.text, tight_roi
+
+
 def parse_capacity(text: str) -> tuple[int, int] | None:
     match = re.fullmatch(r"\s*(\d+)\s*/\s*(\d+)\s*", text)
     if match is None:
@@ -68,10 +108,9 @@ def parse_countdown(text: str) -> int | None:
     return None
 
 
-def recognize_village_type(screenshot_path: str | Path) -> dict[str, object]:
+def recognize_village_type(screenshot_path: str | Path, *, client_version: str | None = None) -> dict[str, object]:
     """Require a positive Home/Builder Base attack-icon match on this frame."""
     import cv2
-    import numpy as np
 
     path = Path(screenshot_path)
     source = read_frame(path, cv2.IMREAD_COLOR)
@@ -83,24 +122,85 @@ def recognize_village_type(screenshot_path: str | Path) -> dict[str, object]:
     root = Path(__file__).resolve().parents[2] / "assets" / "catalogs"
     scores = {}
     matched_templates = {}
-    for village_type, filename in (("home", "village_home_attack.png"),
-                                   ("home", "village_home_attack_stars.png"),
-                                   ("builder_base", "village_builder_attack.png")):
+    for village_type, filename, method in (
+        ("home", "village_home_attack.png", cv2.TM_CCOEFF_NORMED),
+        ("home", "village_home_attack_stars.png", cv2.TM_CCOEFF_NORMED),
+        ("home", "village_home_battle_18_647_2.png", cv2.TM_SQDIFF_NORMED),
+        ("home", "village_home_battle_checklist_18_647_2.png", cv2.TM_SQDIFF_NORMED),
+        ("builder_base", "village_builder_attack.png", cv2.TM_CCOEFF_NORMED),
+    ):
+        if filename.endswith("_18_647_2.png") and client_version != "18.647.2":
+            continue
         template = read_template(root / filename)
         if template is None or template.shape[0] > region.shape[0] or template.shape[1] > region.shape[1]:
             continue
-        score = float(cv2.matchTemplate(region, template, cv2.TM_CCOEFF_NORMED).max())
+        minimum, maximum, minimum_point, maximum_point = cv2.minMaxLoc(cv2.matchTemplate(region, template, method))
+        score = 1.0 - minimum if method == cv2.TM_SQDIFF_NORMED else maximum
+        point = minimum_point if method == cv2.TM_SQDIFF_NORMED else maximum_point
+        if method == cv2.TM_SQDIFF_NORMED and score < .92:
+            continue
         if math.isfinite(score) and score > scores.get(village_type, -1):
             scores[village_type] = round(score, 5)
-            matched_templates[village_type] = filename
+            matched_templates[village_type] = (filename, point, template.shape[:2])
     result["scores"] = scores
     if scores:
         selected = max(scores, key=scores.get)
         runner_up = max((score for name, score in scores.items() if name != selected), default=-1)
         if scores[selected] >= .92 and scores[selected] - runner_up >= .1:
             result["type"] = selected
-            result["template"] = str(root / matched_templates[selected])
+            filename, (left, top), (height, width) = matched_templates[selected]
+            result["template"] = str(root / filename)
+            result["bbox"] = [left + 25, top + 570, left + 25 + width, top + 570 + height]
+            result["point"] = [left + 25 + width // 2, top + 570 + height // 2]
     return result
+
+
+def _current_home_full_ocr_resources(
+    texts: list[OCRText], path: Path, source_resolution: tuple[int, int],
+    line_reader,
+) -> dict[str, dict] | None:
+    """Require four complete HUD numbers; independently verify one weak row."""
+    anchors: dict[str, dict] = {}
+    supplemented = 0
+    for name in RESOURCE_NAMES:
+        roi = RESOURCE_ROIS[name]
+        row_items = []
+        for item in texts:
+            if (item.bbox is None or type(item.confidence) not in (int, float)
+                    or not .9 <= item.confidence <= 1
+                    or not (roi[0] <= item.bbox[0] < item.bbox[2] <= roi[2]
+                            and roi[1] <= item.bbox[1] < item.bbox[3] <= roi[3])):
+                continue
+            row_items.append(item)
+        if len(row_items) != 1:
+            return None
+        item = row_items[0]
+        value = parse_resource_number(item.text)
+        if value is None:
+            return None
+        anchors[name] = {"ocr": asdict(item), "value": value}
+        if item.confidence >= .95:
+            continue
+        supplemented += 1
+        if supplemented != 1 or not callable(line_reader):
+            return None
+        native_roi = scale_box(roi, from_resolution=(1280, 720), to_resolution=source_resolution)
+        # RapidOCR's line bbox is the requested crop, not glyph localization.
+        # The independent tight full-image OCR bbox above provides geometry.
+        line_items = line_reader(path, native_roi)
+        if not isinstance(line_items, list) or len(line_items) != 1:
+            return None
+        line = line_items[0]
+        if (not isinstance(line, OCRText) or type(line.confidence) not in (int, float)
+                or not .95 <= line.confidence <= 1
+                or parse_resource_number(line.text) != value
+                or line.bbox != native_roi):
+            return None
+        anchors[name]["line_verification"] = {
+            "roi_baseline": list(roi), "roi_native": list(native_roi),
+            "ocr": asdict(line),
+        }
+    return anchors
 
 
 def detect_collectibles(
@@ -137,7 +237,7 @@ def detect_collectibles(
         original = read_template(template_path)
         if original is None:
             raise SceneError(f"Unable to decode collection template: {template_path}")
-        for size in (0.8, 0.9, 1.0, 1.1, 1.2):
+        for size in (0.8, 0.82, 0.9, 1.0, 1.1, 1.2):
             target = (
                 max(2, round(original.shape[1] * width / 1280 * size)),
                 max(2, round(original.shape[0] * height / 720 * size)),
@@ -175,6 +275,26 @@ def detect_collectibles(
     return sorted(kept, key=lambda item: (item["point"][1], item["point"][0]))
 
 
+def _colliding_card_groups(boxes: list[tuple[int, int, int, int]]) -> list[list[tuple[int, int, int, int]]]:
+    """Return horizontal-overlap components, independent of contour order."""
+    remaining = list(boxes)
+    groups = []
+    while remaining:
+        group = [remaining.pop(0)]
+        expanded = True
+        while expanded:
+            expanded = False
+            for candidate in list(remaining):
+                if any(min(candidate[2], member[2]) > max(candidate[0], member[0])
+                       for member in group):
+                    group.append(candidate)
+                    remaining.remove(candidate)
+                    expanded = True
+        if len(group) > 1:
+            groups.append(group)
+    return groups
+
+
 class ScreenshotRecognizer:
     def __init__(
         self,
@@ -198,9 +318,10 @@ class ScreenshotRecognizer:
 
     def recognize_battle(self, screenshot_path: str | Path, *, purpose: str,
                          slot: dict | None = None, previous: SceneSnapshot | None = None) -> SceneSnapshot:
-        if purpose not in {"troop_count", "hero", "settlement"}:
+        if purpose not in {"troop_count", "mixed_selection_wait", "line_boundary_wait",
+                           "hero", "settlement", "battle_hud"}:
             raise ValueError(f"Unknown battle observation purpose: {purpose}")
-        if purpose == "troop_count" and slot is None:
+        if purpose in {"troop_count", "mixed_selection_wait"} and slot is None:
             raise ValueError("Troop observation requires a known card")
         return self.battle_observer.observe(Path(screenshot_path), purpose=purpose, slot=slot, previous=previous)
 
@@ -214,8 +335,147 @@ class ScreenshotRecognizer:
         ocr_finished = time.monotonic()
         texts = [self._baseline_result(result, resolution) for result in results]
         scene, confidence, reasons = classify_scene_text("\n".join(result.text for result in texts))
+        account_in_use = account_in_use_dialog_evidence([asdict(item) for item in texts])
+        account_claim_visible = any(
+            normalize_label(item.text) == normalize_label("另一个设备正在连接这个村庄。")
+            and math.isfinite(item.confidence) and item.confidence >= .95
+            and self._in_observed_roi(item, (310, 325, 680, 385)) for item in texts)
+        if account_in_use is not None:
+            scene, confidence, reasons = SCENE_ACCOUNT_IN_USE, .95, ["account_in_use_dialog_anchored"]
+        elif account_claim_visible:
+            # A partial account-ownership dialog must not inherit an ordinary
+            # disconnect's retry button or the village HUD behind the modal.
+            scene, confidence, reasons = SCENE_UNKNOWN, 0.0, ["account_in_use_dialog_incomplete"]
+        event_panel = None
+        # The event page remains visible behind an idle-disconnection modal.
+        if (self.client_version == "18.647.2" and account_in_use is None
+                and not account_claim_visible and scene != SCENE_DISCONNECTED):
+            anchors = {}
+            for name, label, roi in (("title", "活动", (590, 25, 690, 90)),
+                                     ("close", "X", (1010, 15, 1100, 100)),
+                                     ("section", "今日活动", (195, 85, 310, 145))):
+                # The stylized red close glyph can score below the two crisp
+                # text headings (.922 on a held-out panel). It is still bound
+                # to its small top-right ROI and both headings remain required.
+                minimum = .9 if name == "close" else .95
+                matches = [item for item in texts if normalize_label(item.text) == normalize_label(label)
+                           and math.isfinite(item.confidence) and minimum <= item.confidence <= 1
+                           and self._in_observed_roi(item, roi)]
+                if len(matches) == 1:
+                    anchors[name] = asdict(matches[0])
+            if len(anchors) == 3:
+                event_panel = anchors
+                scene, confidence, reasons = SCENE_POPUP, .95, ["current_event_panel_title_close_and_section"]
+        hero_detail = self._hero_detail_close(path, texts) if scene in {
+            SCENE_UNKNOWN, SCENE_TRAINING, SCENE_POPUP} else None
+        unit_detail = self._unit_detail_close(path, texts) if hero_detail is None and scene in {
+            SCENE_UNKNOWN, SCENE_TRAINING, SCENE_POPUP} else None
+        spell_detail = None
+        if hero_detail is None and unit_detail is None and scene in {
+                SCENE_UNKNOWN, SCENE_TRAINING, SCENE_POPUP}:
+            spell_detail = (self._lightning_detail_close(path, texts)
+                            or self._totem_detail_close(path, texts))
+        if hero_detail is not None:
+            scene, confidence, reasons = SCENE_POPUP, .95, ["hero_detail_title_stats_and_close"]
+        elif unit_detail is not None:
+            scene, confidence, reasons = SCENE_POPUP, .95, ["unit_detail_title_stats_and_close"]
+        elif spell_detail is not None:
+            scene, confidence, reasons = SCENE_POPUP, .95, [
+                "lightning_detail_title_stats_and_close" if spell_detail["unit_id"] == "lightning_spell"
+                else "totem_detail_title_stats_and_close"]
+        event_reward_track = None
+        if (self.client_version == "18.647.2" and not account_claim_visible
+                and account_in_use is None and hero_detail is None and unit_detail is None
+                and spell_detail is None and scene in {SCENE_UNKNOWN, SCENE_POPUP}):
+            from .event_rewards import observe_reward_track
+            event_reward_track = observe_reward_track(
+                path, [asdict(item) for item in texts], client_version=self.client_version,
+                baseline_resolution=self.baseline_resolution)
+            if event_reward_track is not None:
+                scene, confidence, reasons = SCENE_POPUP, .95, ["current_event_reward_track_verified"]
+        ore_inventory = None
+        if (self.client_version == "18.647.2" and not account_claim_visible
+                and account_in_use is None and hero_detail is None and unit_detail is None
+                and spell_detail is None and event_panel is None and event_reward_track is None
+                and scene in {SCENE_UNKNOWN, SCENE_POPUP}
+                and any(normalize_label(item.text) == "英雄装备" for item in texts)):
+            from .ore_inventory import observe_ore_inventory
+            ore_inventory = observe_ore_inventory(
+                path, [asdict(item) for item in texts], client_version=self.client_version,
+                baseline_resolution=self.baseline_resolution,
+                line_reader=lambda frame, roi: [asdict(item) for item in
+                                                self.recognize_region(frame, roi, single_line=True)])
+            if ore_inventory is not None:
+                scene, confidence, reasons = SCENE_POPUP, .95, ["current_ore_inventory_verified"]
+        battle_reward_claim = None
+        battle_reward = None
+        if (self.client_version == "18.647.2" and not account_claim_visible
+                and account_in_use is None and scene == SCENE_UNKNOWN):
+            from .battle_rewards import observe_battle_reward_claim, observe_battle_chest
+            current_ocr = [asdict(item) for item in texts]
+            if any(normalize_label(item.text) == "领取奖励" for item in texts):
+                battle_reward_claim = observe_battle_reward_claim(
+                    path, current_ocr, client_version=self.client_version,
+                    baseline_resolution=self.baseline_resolution)
+                if battle_reward_claim is not None:
+                    scene, confidence, reasons = SCENE_SETTLEMENT, .95, ["current_battle_chest_claim_settlement"]
+            elif any(normalize_label(item.text) in {"普通", "稀有", "英雄药水", "跳过开箱动画"}
+                     for item in texts):
+                battle_reward = observe_battle_chest(
+                    path, current_ocr, client_version=self.client_version,
+                    baseline_resolution=self.baseline_resolution)
+                if battle_reward is not None:
+                    scene, confidence, reasons = SCENE_BATTLE_REWARD, .95, ["current_battle_chest_page"]
+        village_type_evidence = None
+        home_hud_proof = None
+        current_home_resources = None
+        if scene == SCENE_UNKNOWN and not account_claim_visible and account_in_use is None:
+            shop = [item for item in texts if normalize_label(item.text) == "商店"
+                    and self._in_observed_roi(item, (1160, 340, 1255, 420))]
+            builder_seen = any(normalize_label(item.text) == "建造"
+                               and self._in_observed_roi(item, (1150, 645, 1250, 715))
+                               for item in texts)
+            builder = [item for item in texts if normalize_label(item.text) == "建造"
+                       and math.isfinite(item.confidence) and .95 <= item.confidence <= 1
+                       and self._in_observed_roi(item, (1150, 645, 1250, 715))]
+            if builder_seen:
+                village_type_evidence = recognize_village_type(path, client_version=self.client_version)
+                if village_type_evidence["type"] == "home" and shop:
+                    scene, confidence, reasons = SCENE_VILLAGE, .9, ["home_battle_icon", "shop_and_build_hud"]
+                elif (village_type_evidence["type"] == "home" and not shop and len(builder) == 1
+                      and self.client_version == "18.647.2"
+                      and Path(str(village_type_evidence.get("template", ""))).name in {
+                          "village_home_battle_18_647_2.png",
+                          "village_home_battle_checklist_18_647_2.png"}):
+                    with path.open("rb") as source:
+                        frame_sha256 = hashlib.file_digest(source, "sha256").hexdigest()
+                    anchors = _current_home_full_ocr_resources(
+                        texts, path, resolution, getattr(self.provider, "recognize_line", None))
+                    if anchors is not None:
+                        resources, evidence = self._village_resources(
+                            path, texts, resolution, new_home_hud=True)
+                        if (all(resources.get(name) == anchors[name]["value"] and name in evidence
+                                for name in RESOURCE_NAMES) and
+                                hashlib.sha256(path.read_bytes()).hexdigest() == frame_sha256):
+                            template = Path(str(village_type_evidence["template"]))
+                            with template.open("rb") as source:
+                                template_sha256 = hashlib.file_digest(source, "sha256").hexdigest()
+                            home_hud_proof = {
+                                "method": "current_icon_builder_four_full_ocr",
+                                "client_version": self.client_version,
+                                "frame": str(path), "frame_sha256": frame_sha256,
+                                "source_resolution": list(resolution),
+                                "baseline_resolution": list(self.baseline_resolution),
+                                "attack_icon": village_type_evidence,
+                                "attack_template_sha256": template_sha256,
+                                "ocr_sha256": ocr_sha256([asdict(item) for item in texts]),
+                                "builder": asdict(builder[0]), "resources": anchors,
+                            }
+                            current_home_resources = (resources, evidence)
+                            scene, confidence, reasons = SCENE_VILLAGE, .9, [
+                                "home_battle_icon", "builder_hud", "four_full_resource_rows"]
         model_scene_evidence: dict[str, object] | None = None
-        if self.scene_model is not None:
+        if self.scene_model is not None and not account_claim_visible and battle_reward_claim is None and battle_reward is None:
             if captured_at is None:
                 model_scene_evidence = {"status": "unavailable", "reason": "capture_time_missing"}
             else:
@@ -243,7 +503,7 @@ class ScreenshotRecognizer:
                 # The pale dialog is not cloud cover and its background HUD is
                 # not an active battle surface while confirmation is pending.
                 scene, confidence, reasons = SCENE_POPUP, .95, ["surrender_dialog_geometry_verified"]
-        startup_logo = self._startup_logo(path) if scene == SCENE_UNKNOWN else None
+        startup_logo = self._startup_logo(path) if scene == SCENE_UNKNOWN and not account_claim_visible else None
         if startup_logo is not None:
             scene, confidence, reasons = SCENE_STARTING, 0.65, ["supercell_startup_logo"]
         cloud_cover = None
@@ -280,6 +540,9 @@ class ScreenshotRecognizer:
         )
         buttons = []
         for result in texts:
+            if hero_detail is not None or unit_detail is not None or spell_detail is not None or event_panel is not None:
+                # Background My Army controls and upgrade text are inert under the dialog.
+                continue
             if result.bbox is None:
                 continue
             normalized = normalize_label(result.text)
@@ -289,7 +552,7 @@ class ScreenshotRecognizer:
                     list(result.bbox) != list(surrender_dialog[name]["bbox"])
                 ):
                     continue
-                if scene in {SCENE_UNKNOWN, SCENE_MAINTENANCE}:
+                if scene in {SCENE_UNKNOWN, SCENE_MAINTENANCE, SCENE_ACCOUNT_IN_USE}:
                     continue
                 if scene == SCENE_DISCONNECTED and not (
                     name == "retry" and self._in_observed_roi(result, (305, 380, 975, 460))
@@ -308,7 +571,10 @@ class ScreenshotRecognizer:
                 ):
                     continue
                 if scene == SCENE_SEARCH and (
-                    name != "find_match" or not regular_search or not self._in_observed_roi(result, (100, 490, 350, 570))
+                    not regular_search or not (
+                        (name == "find_match" and self._in_observed_roi(result, (100, 490, 350, 570)))
+                        or (name == "edit_army" and self._in_observed_roi(result, (100, 650, 250, 710)))
+                    )
                 ):
                     continue
                 if scene in {SCENE_ENEMY_VILLAGE, SCENE_BATTLE} and not (
@@ -319,7 +585,7 @@ class ScreenshotRecognizer:
                 if any(normalized == normalize_label(label) for label in labels):
                     left, top, right, bottom = result.bbox
                     buttons.append({
-                        "name": "find_match_regular" if scene == SCENE_SEARCH else name,
+                        "name": "find_match_regular" if scene == SCENE_SEARCH and name == "find_match" else name,
                         "text": result.text, "confidence": result.confidence,
                         "bbox": list(result.bbox), "point": [(left + right) // 2, (top + bottom) // 2],
                     })
@@ -328,6 +594,32 @@ class ScreenshotRecognizer:
                 navigation = self._chat_navigation(name, path, resolution)
                 if navigation is not None:
                     buttons.append(navigation)
+        if hero_detail is not None and scene == SCENE_POPUP:
+            buttons.append(hero_detail["button"])
+        if unit_detail is not None and scene == SCENE_POPUP:
+            buttons.append(unit_detail["button"])
+        if spell_detail is not None and scene == SCENE_POPUP:
+            buttons.append(spell_detail["button"])
+        if event_reward_track is not None and scene == SCENE_POPUP:
+            # Claiming is only available through the explicitly enabled reward
+            # executor. General popup navigation can only close this surface.
+            buttons = [event_reward_track["button"]]
+        if ore_inventory is not None and scene == SCENE_POPUP:
+            # This read-only inventory page exposes no equip or upgrade action.
+            buttons = [ore_inventory["button"]]
+        if battle_reward_claim is not None and scene == SCENE_SETTLEMENT:
+            buttons = [battle_reward_claim["button"]]
+        if battle_reward is not None and scene == SCENE_BATTLE_REWARD:
+            buttons = [battle_reward["button"]]
+        if (scene == SCENE_VILLAGE and village_type_evidence is not None
+                and village_type_evidence.get("type") == "home"
+                and not any(button["name"] == "attack" for button in buttons)):
+            buttons.append({
+                "name": "attack", "text": "战斗（图标）",
+                "confidence": village_type_evidence["scores"]["home"],
+                "bbox": village_type_evidence["bbox"],
+                "point": village_type_evidence["point"],
+            })
         observations: dict[str, object] = {
             "ocr": [asdict(result) for result in texts],
             "buttons": buttons,
@@ -340,6 +632,13 @@ class ScreenshotRecognizer:
             "resource_capacities": {"gold": None, "elixir": None, "dark_elixir": None},
             "village_type": "unknown",
             "village_type_evidence": None,
+            "home_hud_proof": home_hud_proof,
+            "event_panel": event_panel,
+            "event_reward_track": event_reward_track,
+            "ore_inventory": ore_inventory,
+            "battle_reward_claim": battle_reward_claim,
+            "battle_reward": battle_reward,
+            "account_in_use": account_in_use,
             "resource_evidence": {},
             "collectibles": [],
             "army": None,
@@ -354,13 +653,19 @@ class ScreenshotRecognizer:
             "surrender_dialog": surrender_dialog,
             "cloud_cover": cloud_cover,
             "startup_logo": startup_logo,
+            "hero_detail": hero_detail,
+            "unit_detail": unit_detail,
+            "spell_detail": spell_detail,
             "scene_model": model_scene_evidence,
         }
         if scene == SCENE_VILLAGE:
-            village_type = recognize_village_type(path)
+            village_type = village_type_evidence or recognize_village_type(path, client_version=self.client_version)
             observations["village_type"] = village_type["type"]
             observations["village_type_evidence"] = village_type
-            resources, evidence = self._village_resources(path, texts, resolution)
+            new_home_hud = str(village_type.get("template", "")).endswith((
+                "village_home_battle_18_647_2.png", "village_home_battle_checklist_18_647_2.png"))
+            resources, evidence = (current_home_resources if current_home_resources is not None else
+                                   self._village_resources(path, texts, resolution, new_home_hud=new_home_hud))
             observations["resources"] = resources
             observations["resource_evidence"] = evidence
             observations["resource_source"] = "village_inventory"
@@ -400,19 +705,29 @@ class ScreenshotRecognizer:
                 observations["battle"]["model_buildings"] = model_result
             self._tracked_buildings = buildings
             if scene == SCENE_ENEMY_VILLAGE:
-                prices = [item for item in texts if self._in_observed_roi(item, (1098, 515, 1250, 560))
+                price_roi = (1098, 515, 1250, 560)
+                prices = [item for item in texts if self._in_observed_roi(item, price_roi)
                           and parse_resource_number(item.text) is not None]
                 if prices:
                     price = max(prices, key=lambda item: item.confidence)
                     observations["search_cost_gold"] = parse_resource_number(price.text)
-                    observations["search_cost_evidence"] = asdict(price)
+                    with path.open("rb") as handle:
+                        frame_sha256 = hashlib.file_digest(handle, "sha256").hexdigest()
+                    observations["search_cost_evidence"] = {**asdict(price), "frame": str(path),
+                        "frame_sha256": frame_sha256, "expected_roi_at_1280x720": list(price_roi),
+                        "candidate_count": len(prices)}
         elif regular_search:
-            prices = [item for item in texts if self._in_observed_roi(item, (145, 530, 245, 573))
+            price_roi = (145, 530, 245, 573)
+            prices = [item for item in texts if self._in_observed_roi(item, price_roi)
                       and parse_resource_number(item.text) is not None]
             if prices:
                 price = max(prices, key=lambda item: item.confidence)
                 observations["search_cost_gold"] = parse_resource_number(price.text)
-                observations["search_cost_evidence"] = asdict(price)
+                with path.open("rb") as handle:
+                    frame_sha256 = hashlib.file_digest(handle, "sha256").hexdigest()
+                observations["search_cost_evidence"] = {**asdict(price), "frame": str(path),
+                    "frame_sha256": frame_sha256, "expected_roi_at_1280x720": list(price_roi),
+                    "candidate_count": len(prices)}
         if scene not in {SCENE_ENEMY_VILLAGE, SCENE_BATTLE, SCENE_UNKNOWN}:
             self._tracked_buildings = []
         if scene in {SCENE_TRAINING, SCENE_UNKNOWN}:
@@ -466,8 +781,107 @@ class ScreenshotRecognizer:
             "ocr": ocr_finished - decoded, "details": time.monotonic() - ocr_finished}
         from .battle_vision import attach_preparation_countdown
         snapshot = SceneSnapshot(scene, confidence, path, observations)
+        self._recover_preparation_timer(snapshot, resolution)
+        self._recover_preparation_heading(snapshot, resolution)
         attach_preparation_countdown(snapshot, self.baseline_resolution)
+        observations["recognition_seconds"] = round(time.monotonic() - started, 3)
+        observations["recognition_timings_sec"]["details"] = time.monotonic() - ocr_finished
         return snapshot
+
+    def _recover_preparation_timer(self, snapshot: SceneSnapshot,
+                                   resolution: tuple[int, int]) -> None:
+        """Read one intact timer line on this frame if full OCR added a stray dot."""
+        if (self.client_version != "18.647.2" or type(snapshot.confidence) not in (int, float)
+                or not math.isfinite(snapshot.confidence) or snapshot.confidence < .8):
+            return
+        from .battle_vision import preparation_timer_line_recovery_candidate, _preparation_seconds
+
+        candidate = preparation_timer_line_recovery_candidate(snapshot, self.baseline_resolution)
+        if candidate is None:
+            return
+        receipt = {**candidate, "trigger": candidate["reason"], "status": "unproved",
+                   "source": "current_frame_timer_line_roi"}
+        snapshot.observations["preparation_timer_recovery"] = receipt
+        read_line = getattr(self.provider, "recognize_line", None)
+        if not callable(read_line):
+            receipt["reason"] = "line_reader_unavailable"
+            return
+        roi = tuple(candidate["baseline_roi"])
+        native_roi = scale_box(roi, from_resolution=self.baseline_resolution,
+                               to_resolution=resolution)
+        receipt["native_roi"] = list(native_roi)
+        try:
+            reads = read_line(snapshot.screenshot_path, native_roi)
+        except OCRError:
+            receipt["reason"] = "line_reader_failed"
+            return
+        receipt["readings"] = ([asdict(item) for item in reads]
+                               if isinstance(reads, list) and all(isinstance(item, OCRText) for item in reads)
+                               else [])
+        if not isinstance(reads, list) or len(reads) != 1 or not isinstance(reads[0], OCRText):
+            receipt["reason"] = "line_reader_not_unique"
+            return
+        local = self._baseline_result(reads[0], resolution)
+        if (local.text.strip() != candidate["expected_full_text"]
+                or _preparation_seconds(local.text.strip()) is None
+                or not math.isfinite(local.confidence)
+                or not max(.9, self.ocr_config.confidence_threshold) <= local.confidence <= 1
+                or local.bbox is None or any(abs(a - b) > 1 for a, b in zip(local.bbox, roi))):
+            receipt["reason"] = "line_reader_not_exact_strong_timer"
+            return
+        corrected = {**asdict(local), "frame": str(snapshot.screenshot_path),
+                     "source": "current_frame_timer_line_roi"}
+        snapshot.observations["ocr"].append(corrected)
+        receipt.update(status="exact_current_frame_timer", correction=corrected)
+
+    def _recover_preparation_heading(self, snapshot: SceneSnapshot,
+                                     resolution: tuple[int, int]) -> None:
+        """Read one fixed current-frame title crop when full OCR merged a weak heading."""
+        if (self.client_version != "18.647.2" or type(snapshot.confidence) not in (int, float)
+                or not math.isfinite(snapshot.confidence)
+                or snapshot.confidence < .8):
+            return
+        from .battle_vision import preparation_label_line_recovery_candidate
+
+        candidate = preparation_label_line_recovery_candidate(snapshot, self.baseline_resolution)
+        if candidate is None:
+            return
+        receipt = {**candidate, "trigger": candidate["reason"],
+                   "status": "unproved", "source": "current_frame_heading_line_roi"}
+        snapshot.observations["preparation_label_recovery"] = receipt
+        read_line = getattr(self.provider, "recognize_line", None)
+        if not callable(read_line):
+            receipt["reason"] = "line_reader_unavailable"
+            return
+        roi = tuple(candidate["baseline_roi"])
+        native_roi = scale_box(roi, from_resolution=self.baseline_resolution,
+                               to_resolution=resolution)
+        receipt["native_roi"] = list(native_roi)
+        try:
+            reads = read_line(snapshot.screenshot_path, native_roi)
+        except OCRError:
+            receipt["reason"] = "line_reader_failed"
+            return
+        receipt["readings"] = ([asdict(item) for item in reads]
+                               if isinstance(reads, list) and all(isinstance(item, OCRText) for item in reads)
+                               else [])
+        if not isinstance(reads, list) or len(reads) != 1 or not isinstance(reads[0], OCRText):
+            receipt["reason"] = "line_reader_not_unique"
+            return
+        local = self._baseline_result(reads[0], resolution)
+        title = local.text.strip()
+        if (candidate.get("allow_one_trailing_colon") is True and
+                title in {"开战倒计时：", "开战倒计时:"}):
+            title = "开战倒计时"
+        if (title != "开战倒计时" or not math.isfinite(local.confidence)
+                or not max(.9, self.ocr_config.confidence_threshold) <= local.confidence <= 1
+                or local.bbox is None or any(abs(a - b) > 1 for a, b in zip(local.bbox, roi))):
+            receipt["reason"] = "line_reader_not_exact_strong_heading"
+            return
+        corrected = {**asdict(local), "text": title, "frame": str(snapshot.screenshot_path),
+                     "source": "current_frame_heading_line_roi"}
+        snapshot.observations["ocr"].append(corrected)
+        receipt.update(status="exact_current_frame_heading", correction=corrected)
 
     @staticmethod
     def _startup_logo(path: Path) -> dict | None:
@@ -595,6 +1009,33 @@ class ScreenshotRecognizer:
                                   "bbox": list(line_roi), "source": "count_bbox_threshold_line" if count_bbox else "header_threshold_line",
                                   "threshold": 120})
 
+        # A current 18.647.2 exhausted card keeps its x0 header but dims the
+        # glyph. The already verified card geometry locates a narrow header
+        # without treating weak full-frame OCR (or an older x1 box) as proof.
+        # Only a high-confidence read from this frame and a gray portrait can
+        # confirm zero; conflicting confident reads are rejected below.
+        if self.client_version == "18.647.2":
+            narrow_reader = getattr(self.provider, "recognize_line_image", None)
+            if callable(narrow_reader):
+                color = cv2.resize(read_frame(path), self.baseline_resolution,
+                                   interpolation=cv2.INTER_AREA)
+                portrait = color[top + round(38 * height / 720):top + round(78 * height / 720),
+                                 left + round(20 * width / 1280):right - round(15 * width / 1280)]
+                if (portrait.size and float(np.mean(cv2.cvtColor(portrait, cv2.COLOR_BGR2HSV)[:, :, 1] < 24)) >= .9):
+                    narrow_roi = (max(roi[0], right - round(48 * width / 1280)),
+                                  max(roi[1], top - round(9 * height / 720)), right,
+                                  min(roi[3], top + round(30 * height / 720)))
+                    a, b, c, d = scale_box(narrow_roi, from_resolution=self.baseline_resolution,
+                                           to_resolution=resolution)
+                    gray = read_frame(path, cv2.IMREAD_GRAYSCALE)[b:d, a:c]
+                    refined = narrow_reader(cv2.threshold(gray, 95, 255, cv2.THRESH_BINARY)[1])
+                    if (len(refined) == 1 and refined[0].text.strip().lower() == "x0"
+                            and math.isfinite(refined[0].confidence)
+                            and max(.9, self.ocr_config.confidence_threshold) <= refined[0].confidence <= 1):
+                        reads.append({"text": refined[0].text, "confidence": refined[0].confidence,
+                                      "bbox": list(narrow_roi), "source": "gray_card_current_glyph_threshold_line",
+                                      "threshold": 95})
+
         confident = [item for item in reads if math.isfinite(item["confidence"])
                      and max(.9, self.ocr_config.confidence_threshold) <= item["confidence"] <= 1]
         matches = [re.fullmatch(r"[xX×]\s*([0-9]+)", item["text"].strip()) for item in confident]
@@ -613,6 +1054,216 @@ class ScreenshotRecognizer:
                 "frame": str(path), "slot_bbox": list(bbox), "roi": list(roi), "readings": reads,
                 "count_bbox": list(count_bbox) if count_bbox is not None else None, "line_roi": list(line_roi),
                 "reason": "explicit_header_count" if count is not None else "header_count_unverified"}
+
+    def _hero_detail_close(self, path: Path, texts: list[OCRText]) -> dict[str, object] | None:
+        """Require the current hero detail title, stat labels and its own close icon."""
+        if self.client_version != "18.647.2":
+            return None
+        titles = [item for item in texts
+                  if item.confidence >= .9
+                  and re.fullmatch(r"\d{1,3}级[\u4e00-\u9fff]{2,8}", normalize_label(item.text))
+                  and self._in_observed_roi(item, (530, 15, 750, 95))]
+        if len(titles) != 1 or not all(
+            any(item.confidence >= .9 and normalize_label(item.text) == label
+                and self._in_observed_roi(item, roi) for item in texts)
+            for label, roi in (("生命值", (650, 110, 830, 180)),
+                               ("每秒伤害值", (900, 110, 1090, 180)))
+        ):
+            return None
+        import cv2
+
+        image = read_frame(path, cv2.IMREAD_COLOR)
+        template = read_template(Path(__file__).resolve().parents[2] /
+                                 "assets/catalogs/hero_detail_close_18_647_2.png")
+        if image is None or template is None:
+            return None
+        image = cv2.resize(image, (1280, 720), interpolation=cv2.INTER_AREA)
+        region = image[15:100, 1080:1170]
+        minimum, _, position, _ = cv2.minMaxLoc(cv2.matchTemplate(region, template, cv2.TM_SQDIFF_NORMED))
+        score = 1.0 - minimum
+        if not math.isfinite(score) or score < .92:
+            return None
+        left, top = position[0] + 1080, position[1] + 15
+        box = scale_box((left, top, left + template.shape[1], top + template.shape[0]),
+                        from_resolution=(1280, 720), to_resolution=self.baseline_resolution)
+        button = {"name": "close_hero_details", "text": "英雄详情关闭图标",
+                  "confidence": round(score, 5), "bbox": list(box),
+                  "point": [(box[0] + box[2]) // 2, (box[1] + box[3]) // 2]}
+        return {"title": asdict(titles[0]), "close_score": round(score, 5), "button": button}
+
+    def _lightning_detail_close(self, path: Path, texts: list[OCRText]) -> dict[str, object] | None:
+        """Recognize only the sampled 18.647.2 lightning detail; expose its X."""
+        if self.client_version != "18.647.2":
+            return None
+        anchors = (
+            ("12级雷电法术", (530, 15, 750, 95)),
+            ("总伤害", (650, 105, 790, 155)),
+            ("680", (650, 140, 790, 190)),
+            ("击晕/瘫痪时间（秒）", (900, 105, 1140, 155)),
+            ("0.1", (900, 140, 1050, 190)),
+        )
+        evidence = []
+        for label, roi in anchors:
+            hits = [item for item in texts if math.isfinite(item.confidence)
+                    and .9 <= item.confidence <= 1
+                    and (item.text.strip() == label if label in {"680", "0.1"}
+                         else normalize_label(item.text) == normalize_label(label))
+                    and self._in_observed_roi(item, roi)]
+            if len(hits) != 1:
+                return None
+            evidence.append(asdict(hits[0]))
+        import cv2
+
+        image = read_frame(path, cv2.IMREAD_COLOR)
+        template = read_template(Path(__file__).resolve().parents[2] /
+                                 "assets/catalogs/hero_detail_close_18_647_2.png")
+        if image is None or template is None:
+            return None
+        image = cv2.resize(image, (1280, 720), interpolation=cv2.INTER_AREA)
+        region = image[15:100, 1080:1170]
+        minimum, _, position, _ = cv2.minMaxLoc(cv2.matchTemplate(region, template, cv2.TM_SQDIFF_NORMED))
+        score = 1.0 - minimum
+        if not math.isfinite(score) or score < .92:
+            return None
+        left, top = position[0] + 1080, position[1] + 15
+        box = scale_box((left, top, left + template.shape[1], top + template.shape[0]),
+                        from_resolution=(1280, 720), to_resolution=self.baseline_resolution)
+        button = {"name": "close_spell_details", "text": "雷电法术详情关闭图标",
+                  "confidence": round(score, 5), "bbox": list(box),
+                  "point": [(box[0] + box[2]) // 2, (box[1] + box[3]) // 2]}
+        return {"unit_id": "lightning_spell", "title": evidence[0],
+                "damage": evidence[2], "stun_seconds": evidence[4],
+                "anchors": evidence, "close_score": round(score, 5), "button": button}
+
+    def _totem_detail_close(self, path: Path, texts: list[OCRText]) -> dict[str, object] | None:
+        """Expose only the sampled level-2 Totem detail's close control."""
+        if self.client_version != "18.647.2":
+            return None
+        anchors = (
+            ("2级图腾法术", (530, 15, 750, 95)),
+            ("击晕/瘫痪时间（秒）", (650, 105, 900, 155)),
+            ("0.2", (650, 140, 770, 190)),
+            ("生命值", (900, 105, 1070, 155)),
+            ("11000", (900, 140, 1080, 190)),
+            ("所需空间", (595, 190, 760, 250)),
+        )
+        evidence = []
+        for label, roi in anchors:
+            def matches_label(item: OCRText) -> bool:
+                if label == "0.2":
+                    return item.text.strip() == label
+                if label == "11000":
+                    # The original and anonymized OCR return these two exact
+                    # spellings; other separators have not been observed here.
+                    return item.text.strip() in {"11 000", "11000"}
+                return normalize_label(item.text) == normalize_label(label)
+
+            hits = [item for item in texts if math.isfinite(item.confidence)
+                    and .9 <= item.confidence <= 1
+                    and matches_label(item)
+                    and self._in_observed_roi(item, roi)]
+            if len(hits) != 1:
+                return None
+            evidence.append(asdict(hits[0]))
+        import cv2
+
+        image = read_frame(path, cv2.IMREAD_COLOR)
+        template = read_template(Path(__file__).resolve().parents[2] /
+                                 "assets/catalogs/hero_detail_close_18_647_2.png")
+        if image is None or template is None:
+            return None
+        image = cv2.resize(image, (1280, 720), interpolation=cv2.INTER_AREA)
+        region = image[15:100, 1080:1170]
+        minimum, _, position, _ = cv2.minMaxLoc(cv2.matchTemplate(region, template, cv2.TM_SQDIFF_NORMED))
+        score = 1.0 - minimum
+        if not math.isfinite(score) or score < .92:
+            return None
+        left, top = position[0] + 1080, position[1] + 15
+        box = scale_box((left, top, left + template.shape[1], top + template.shape[0]),
+                        from_resolution=(1280, 720), to_resolution=self.baseline_resolution)
+        button = {"name": "close_spell_details", "text": "图腾法术详情关闭图标",
+                  "confidence": round(score, 5), "bbox": list(box),
+                  "point": [(box[0] + box[2]) // 2, (box[1] + box[3]) // 2]}
+        return {"unit_id": "totem_spell", "title": evidence[0],
+                "stun_seconds": evidence[2], "hitpoints": evidence[4],
+                "anchors": evidence, "close_score": round(score, 5), "button": button}
+
+    def _unit_detail_close(self, path: Path, texts: list[OCRText]) -> dict[str, object] | None:
+        """Expose only the close icon on a sampled current unit detail dialog."""
+        if self.client_version != "18.647.2":
+            return None
+        anchors = {
+            "4级攻城训练营": (("生命值", (650, 110, 830, 180)),
+                          ("持续时间（秒）", (900, 110, 1110, 180)),
+                          ("皮卡超人数量", (650, 190, 840, 250)),
+                          ("法师数量", (900, 190, 1080, 250))),
+            "2级空中战车": (("生命值", (650, 110, 830, 180)),
+                         ("攻击次数", (900, 110, 1080, 180)),
+                         ("亡灵数量", (650, 190, 840, 250)),
+                         ("气球兵数量", (900, 190, 1080, 250))),
+            "1级部队发射器": (("生命值", (650, 110, 830, 180)),
+                           ("持续时间（秒）", (900, 110, 1110, 180)),
+                           ("攻击次数", (650, 190, 840, 250)),
+                           ("巨人数量", (900, 190, 1080, 250))),
+            "4级烈焰熔炉": (("生命值", (650, 110, 830, 155)),
+                          ("1800", (650, 145, 830, 185)),
+                          ("持续时间（秒）", (900, 110, 1110, 155)),
+                          ("60", (900, 145, 1110, 185)),
+                          ("小火怪数量", (650, 190, 840, 235)),
+                          ("22", (650, 220, 840, 260)),
+                          ("小火怪等级", (900, 190, 1080, 235)),
+                          ("4", (900, 220, 1080, 260)),
+                          ("所需空间", (595, 275, 760, 320)),
+                          ("18", (595, 310, 760, 350))),
+        }
+        titles = [item for item in texts if math.isfinite(item.confidence)
+                  and .9 <= item.confidence <= 1
+                  and normalize_label(item.text) in anchors
+                  and self._in_observed_roi(item, (530, 15, 750, 95))]
+        if len(titles) != 1:
+            return None
+        title = normalize_label(titles[0].text)
+        if title == "4级烈焰熔炉" and titles[0].text.strip() != title:
+            return None
+        for label, roi in anchors[title]:
+            if title == "4级烈焰熔炉" and label in {"1800", "60", "22", "4", "18"}:
+                # Do not turn 180.0 or 1.8 into a verified integer by
+                # punctuation normalization. Conflicting OCR in the same
+                # numeric cell also makes the detail unsafe to act on.
+                reads = [item for item in texts if math.isfinite(item.confidence)
+                         and .9 <= item.confidence <= 1
+                         and re.search(r"[0-9]", item.text)
+                         and self._in_observed_roi(item, roi)]
+                if len(reads) != 1 or reads[0].text.strip() != label:
+                    return None
+                continue
+            hits = [item for item in texts if math.isfinite(item.confidence)
+                    and .9 <= item.confidence <= 1
+                    and normalize_label(item.text) == label
+                    and self._in_observed_roi(item, roi)]
+            if not hits or (title == "4级烈焰熔炉" and len(hits) != 1):
+                return None
+        import cv2
+
+        image = read_frame(path, cv2.IMREAD_COLOR)
+        template = read_template(Path(__file__).resolve().parents[2] /
+                                 "assets/catalogs/hero_detail_close_18_647_2.png")
+        if image is None or template is None:
+            return None
+        image = cv2.resize(image, (1280, 720), interpolation=cv2.INTER_AREA)
+        region = image[15:100, 1080:1170]
+        minimum, _, position, _ = cv2.minMaxLoc(cv2.matchTemplate(region, template, cv2.TM_SQDIFF_NORMED))
+        score = 1.0 - minimum
+        if not math.isfinite(score) or score < .92:
+            return None
+        left, top = position[0] + 1080, position[1] + 15
+        box = scale_box((left, top, left + template.shape[1], top + template.shape[0]),
+                        from_resolution=(1280, 720), to_resolution=self.baseline_resolution)
+        button = {"name": "close_unit_details",
+                  "text": ("烈焰熔炉详情关闭图标" if title == "4级烈焰熔炉" else "攻城器械详情关闭图标"),
+                  "confidence": round(score, 5), "bbox": list(box),
+                  "point": [(box[0] + box[2]) // 2, (box[1] + box[3]) // 2]}
+        return {"title": asdict(titles[0]), "close_score": round(score, 5), "button": button}
 
     def _in_observed_roi(self, item: OCRText, roi: tuple[int, int, int, int]) -> bool:
         if item.bbox is None:
@@ -768,7 +1419,14 @@ class ScreenshotRecognizer:
 
             def amount(item: OCRText) -> int | None:
                 if (not math.isfinite(item.confidence) or not max(.9, self.ocr_config.confidence_threshold) <= item.confidence <= 1
-                        or not self._in_observed_roi(item, roi)):
+                        or item.bbox is None or not self._in_observed_roi(item, roi)):
+                    return None
+                number_box = scale_box(item.bbox, from_resolution=self.baseline_resolution,
+                                       to_resolution=(1280, 720))
+                # The map remains visible behind settlement. Small troop/hero
+                # levels can fall inside the broad OCR row, but a loot amount
+                # ends immediately to the left of its resource icon.
+                if not 0 <= left - number_box[2] <= 20 or number_box[3] - number_box[1] < 12:
                     return None
                 return parse_resource_number(item.text)
 
@@ -777,23 +1435,42 @@ class ScreenshotRecognizer:
             if not candidates:
                 read_line = getattr(self.provider, "recognize_line", None)
                 if read_line is not None:
-                    native_roi = scale_box(roi, from_resolution=(1280, 720), to_resolution=resolution)
-                    line = [self._baseline_result(item, resolution) for item in read_line(path, native_roi)]
-                    candidates = [item for item in line if amount(item) is not None]
-                    source = "line_roi"
-                    if not candidates:
-                        from .settlement import locate_number_line
+                    from .settlement import locate_number_line
 
-                        tight_roi = locate_number_line(image, roi)
-                        if tight_roi is not None:
-                            native_roi = scale_box(tight_roi, from_resolution=(1280, 720), to_resolution=resolution)
-                            line = [self._baseline_result(item, resolution) for item in read_line(path, native_roi)]
-                            candidates = [item for item in line if amount(item) is not None]
-                            source = "glyph_line_roi"
+                    # Line OCR reports the requested crop as its bbox. The broad
+                    # row crop cannot prove that its text came from the amount
+                    # beside this icon; only localized glyphs can do that.
+                    tight_roi = locate_number_line(image, roi)
+                    if tight_roi is not None:
+                        native_roi = scale_box(tight_roi, from_resolution=(1280, 720), to_resolution=resolution)
+                        line = [self._baseline_result(item, resolution) for item in read_line(path, native_roi)]
+                        candidates = [item for item in line if amount(item) is not None]
+                        source = "glyph_line_roi"
+                    if (not candidates and name == "gold"
+                            and self.client_version == "18.647.2"
+                            and any(normalize_label(item.text) == "失败" for item in texts)
+                            and any(normalize_label(item.text) == "领取奖励" for item in texts)):
+                        # The first bright gold digit on this claim layout lies
+                        # just outside the tight white-component box. Keep the
+                        # pixel-localized row, but reread its full icon-anchored
+                        # current line rather than repairing the OCR string.
+                        wide_roi = (left - 127, top, left - 4, bottom - 4)
+                        wide_glyph_roi = locate_number_line(image, wide_roi)
+                        if (wide_glyph_roi is not None
+                                and wide_roi[0] <= wide_glyph_roi[0] < wide_glyph_roi[2] <= wide_roi[2]
+                                and wide_roi[1] <= wide_glyph_roi[1] < wide_glyph_roi[3] <= wide_roi[3]):
+                            native_roi = scale_box(wide_roi, from_resolution=(1280, 720), to_resolution=resolution)
+                            wide_line = [self._baseline_result(item, resolution)
+                                         for item in read_line(path, native_roi)]
+                            candidates = [item for item in wide_line if amount(item) is not None]
+                            source = "current_claim_icon_anchored_full_glyph_line_roi"
             if len(candidates) == 1:
                 item = candidates[0]
                 loot[name] = amount(item)
                 evidence["loot"][name] = {**asdict(item), "source": source, "resource_icon": icon}
+                if source == "current_claim_icon_anchored_full_glyph_line_roi":
+                    evidence["loot"][name]["line_roi_at_1280x720"] = wide_roi
+                    evidence["loot"][name]["localized_glyph_roi_at_1280x720"] = wide_glyph_roi
         percentages = [item for item in texts if self._in_observed_roi(item, (570, 95, 715, 145))
                        and re.fullmatch(r"\s*\d{1,3}\s*[%％]\s*", item.text)]
         percentage = None
@@ -809,10 +1486,49 @@ class ScreenshotRecognizer:
             ("received", {"您得到了", "您得到", "lootgained"}, (555, 275, 730, 330)),
             ("losses", {"损耗的部队", "损耗部队"}, (550, 450, 735, 495)),
             ("return", {"回营", "returnhome"}, (520, 570, 760, 675)),
+            ("claim", {"领取奖励"}, (525, 580, 760, 660)),
         ):
-            matches = [item for item in texts if normalize_label(item.text) in labels and self._in_observed_roi(item, roi)]
+            matches = []
+            for item in texts:
+                if not self._in_observed_roi(item, roi):
+                    continue
+                label = normalize_label(item.text)
+                # Current OCR appends d/nd to the Chinese received title in this ROI.
+                if label in labels or (name == "received" and re.fullmatch(r"您得到了?(?:d|nd)", label)):
+                    matches.append(item)
             if matches:
                 anchors[name] = asdict(max(matches, key=lambda item: item.confidence))
+        if ("received" not in anchors and {"defeat", "losses", "return"} <= anchors.keys()
+                and "victory" not in anchors):
+            # In the current two-row defeat layout, a clan name behind the title
+            # can be merged into the same OCR box. Read only the foreground title
+            # from this frame; an arbitrary ASCII suffix is not a valid anchor.
+            merged_titles = [item for item in texts if item.bbox is not None
+                             and math.isfinite(item.confidence)
+                             and max(.9, self.ocr_config.confidence_threshold) <= item.confidence <= 1
+                             and self._in_observed_roi(item, (555, 275, 730, 330))
+                             and re.fullmatch(r"您得到了?[a-z]+", normalize_label(item.text))]
+            read_line = getattr(self.provider, "recognize_line", None)
+            if len(merged_titles) == 1 and callable(read_line):
+                box = scale_box(merged_titles[0].bbox, from_resolution=self.baseline_resolution,
+                                to_resolution=(1280, 720))
+                if 595 <= box[0] <= 604 and 300 <= box[1] <= 307 and 667 < box[2] <= 730 and 323 <= box[3] <= 330:
+                    roi = (597, 302, 667, 328)
+                    native_roi = scale_box(roi, from_resolution=(1280, 720), to_resolution=resolution)
+                    line = [self._baseline_result(item, resolution) for item in read_line(path, native_roi)]
+                    evidence["received_title_recheck"] = {
+                        "frame": str(path), "line_roi_at_1280x720": roi,
+                        "merged_full_ocr": asdict(merged_titles[0]), "readings": [asdict(item) for item in line],
+                    }
+                    if len(line) == 1:
+                        item = line[0]
+                        line_box = None if item.bbox is None else scale_box(
+                            item.bbox, from_resolution=self.baseline_resolution, to_resolution=(1280, 720))
+                        if (line_box == roi and math.isfinite(item.confidence)
+                                and max(.9, self.ocr_config.confidence_threshold) <= item.confidence <= 1
+                                and normalize_label(item.text) in {"您得到了", "您得到"}):
+                            anchors["received"] = {**asdict(item), "source": "current_title_line_roi",
+                                                   "frame": str(path), "line_roi_at_1280x720": roi}
         stars = 0 if "defeat" in anchors and "victory" not in anchors and percentage is not None and percentage < 50 else None
         if stars == 0:
             evidence["stars"] = {"source": "explicit_defeat_result", "result": anchors["defeat"]}
@@ -831,7 +1547,10 @@ class ScreenshotRecognizer:
             line = gray[y:y + 2, 340:940].max(axis=0)
             above = gray[y - 4:y - 2, 340:940].mean(axis=0)
             below = gray[y + 3:y + 5, 340:940].mean(axis=0)
-            if float(((line - np.maximum(above, below)) > 40).mean()) >= .75:
+            # The current two-row defeat has a real gold divider whose ridge
+            # covers 72% of this span against a busy map; the old 75% gate
+            # discarded that row and invalidated the otherwise anchored layout.
+            if float(((line - np.maximum(above, below)) > 40).mean()) >= .7:
                 separator_rows.append(y)
         row_groups = []
         for y in sorted(set(separator_rows)):
@@ -850,6 +1569,13 @@ class ScreenshotRecognizer:
         complete_result = len(anchors) == 4 and stars == 0 and rows_complete and not bonus_marker
         if complete_result and ordered_icons == list(resources) and all(value is not None for value in loot.values()):
             layout = "regular_defeat_three_rows_v1"
+        elif ({"defeat", "received", "losses", "claim"} == anchors.keys()
+              and stars == 0 and rows_complete and ordered_icons == list(resources)
+              and all(value is not None for value in loot.values())
+              and not any(("bonus" in item.text.lower() or "额外" in item.text or
+                           ("奖励" in item.text and normalize_label(item.text) != "领取奖励"))
+                          for item in texts)):
+            layout = "defeat_with_claim_three_rows_v1"
         elif (complete_result and ordered_icons == ["gold", "elixir"]
               and all(loot[name] is not None for name in ("gold", "elixir"))
               and icon_scores.get("dark_elixir", 1) < .75
@@ -868,15 +1594,37 @@ class ScreenshotRecognizer:
             evidence["bonus"] = {"source": "verified_no_bonus_layout", "layout": layout,
                                  "requires_inventory_reconciliation": True,
                                  "anchors": anchors, "separator_rows": separators}
-        if {"victory", "received", "losses", "return"} <= anchors.keys() and "defeat" not in anchors:
+        event_reward = None
+        if layout == "defeat_with_claim_three_rows_v1":
+            labels = [item for item in texts if normalize_label(item.text) == "酸腐圣水"
+                      and math.isfinite(item.confidence) and item.confidence >= .95
+                      and self._in_observed_roi(item, (265, 355, 370, 395))]
+            amounts = [item for item in texts if re.fullmatch(r"\d+", item.text.strip())
+                       and math.isfinite(item.confidence) and item.confidence >= .95
+                       and self._in_observed_roi(item, (290, 382, 360, 425))]
+            hsv = cv2.cvtColor(image[388:422, 260:300], cv2.COLOR_BGR2HSV)
+            teal_fraction = float(((hsv[:, :, 0] >= 75) & (hsv[:, :, 0] <= 105)
+                                   & (hsv[:, :, 1] >= 100) & (hsv[:, :, 2] >= 100)).mean())
+            if len(labels) == len(amounts) == 1 and teal_fraction >= .2:
+                event_reward = {"kind": "acid_elixir", "amount": int(amounts[0].text),
+                                "inventory_verified": False, "formal_acceptance": False,
+                                "label": asdict(labels[0]), "number": asdict(amounts[0]),
+                                "teal_icon_fraction": teal_fraction,
+                                "frame": str(path), "frame_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+        evidence["event_reward"] = event_reward
+        if {"victory", "received", "losses"} <= anchors.keys() and ({"return", "claim"} & anchors.keys()) and "defeat" not in anchors:
             bonus, bonus_evidence = self._settlement_bonus(path, image, texts, resolution)
             evidence["bonus"] = bonus_evidence
             if (stars is not None and rows_complete and ordered_icons == list(resources)
                     and all(value is not None for value in (*loot.values(), *bonus.values()))):
                 layout = "victory_with_bonus_three_rows_v1"
         evidence["resource_icons"] = icons
+        evidence["resource_icon_scores"] = icon_scores
+        evidence["anchors"] = anchors
+        evidence["separator_rows"] = separators
         evidence["layout"] = layout
-        return {"loot": loot, "bonus": bonus, "percentage": percentage, "stars": stars, "evidence": evidence}
+        return {"loot": loot, "bonus": bonus, "percentage": percentage, "stars": stars,
+                "event_reward": event_reward, "evidence": evidence}
 
     def _settlement_bonus(self, path: Path, image, texts: list[OCRText], resolution: tuple[int, int]) -> tuple[dict, dict]:
         from .settlement import recognize_bonus_icons
@@ -922,6 +1670,50 @@ class ScreenshotRecognizer:
         timers = [item for item in texts if self._in_observed_roi(item, (530, 30, 750, 95)) and parse_countdown(item.text) is not None]
         timer = max(timers, key=lambda item: item.confidence) if timers else None
         image = cv2.resize(read_frame(path, cv2.IMREAD_COLOR), (1280, 720), interpolation=cv2.INTER_AREA)
+        count_texts = list(texts)
+        local_count_proofs: dict[OCRText, dict[str, object]] = {}
+        local_count_conflicts: set[OCRText] = set()
+        threshold = max(.9, self.ocr_config.confidence_threshold)
+        line_reader = getattr(self.provider, "recognize_line_image", None)
+        if self.client_version == "18.647.2" and callable(line_reader):
+            for anchor in texts:
+                if (anchor.bbox is None or type(anchor.confidence) not in (int, float)
+                        or not math.isfinite(anchor.confidence)
+                        or not self.ocr_config.confidence_threshold <= anchor.confidence < threshold
+                        or not self._in_observed_roi(anchor, (60, 588, 1230, 627))
+                        or not re.fullmatch(r"[xX×]\s*[1-9][0-9]*", anchor.text.strip())):
+                    continue
+                left, top, right, bottom = scale_box(
+                    anchor.bbox, from_resolution=self.baseline_resolution, to_resolution=(1280, 720))
+                if not (15 <= right - left <= 60 and 18 <= bottom - top <= 40):
+                    continue
+                roi = (max(0, left - 6), max(585, top - 6), min(1280, right + 6), min(632, bottom + 6))
+                x0, y0, x1, y1 = roi
+                if not (20 <= x1 - x0 <= 72 and 20 <= y1 - y0 <= 47):
+                    continue
+                try:
+                    reads = line_reader(image[y0:y1, x0:x1])
+                except OCRError:
+                    continue
+                if not isinstance(reads, list) or len(reads) != 1:
+                    continue
+                local = reads[0]
+                if (not isinstance(local, OCRText) or type(local.confidence) not in (int, float)
+                        or not math.isfinite(local.confidence) or not threshold <= local.confidence <= 1
+                        or not re.fullmatch(r"[xX×]\s*[1-9][0-9]*", local.text.strip())):
+                    continue
+                proof = OCRText(local.text, local.confidence, anchor.bbox)
+                strong_near = [item for item in texts if item.bbox is not None
+                               and type(item.confidence) in (int, float)
+                               and math.isfinite(item.confidence) and threshold <= item.confidence <= 1
+                               and self._in_observed_roi(item, roi)]
+                if strong_near and all(item.text.strip() == local.text.strip() for item in strong_near):
+                    continue  # Existing high-confidence OCR already proves this header.
+                count_texts.append(proof)
+                local_count_proofs[proof] = {"source": "same_frame_local_header_ocr", "frame": str(path),
+                                             "roi": list(roi), "weak_anchor": asdict(anchor)}
+                if strong_near:
+                    local_count_conflicts.add(proof)
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv, np.array([75, 65, 60]), np.array([170, 255, 255]))
         contours, _ = cv2.findContours(mask[585:720], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -964,7 +1756,7 @@ class ScreenshotRecognizer:
             if colored_bottom(left, right) is None:
                 return False
             counts = []
-            for item in texts:
+            for item in count_texts:
                 if (item.bbox is None or not math.isfinite(item.confidence)
                         or not max(.9, self.ocr_config.confidence_threshold) <= item.confidence <= 1
                         or not re.fullmatch(r"[xX×]\s*[0-9]+", item.text.strip())):
@@ -1027,15 +1819,101 @@ class ScreenshotRecognizer:
             if bottom is not None:
                 boxes.append((left, top + 595, right, bottom))
 
+        if self.client_version == "18.647.2":
+            # A connected blue toolbar can start a card at the preceding
+            # card's *right* border. That edge has the wrong direction, yet
+            # its wide coloured contour and count still look plausible.
+            # Refine only a complete, independently named troop card with one
+            # current strong header, its own opposite long edges and bottom.
+            from .unit_catalog import recognize_card_identity
+
+            corrected = []
+            for left, top, right, bottom in boxes:
+                box = (left, top, right, bottom)
+                headers_here = []
+                for item in count_texts:
+                    if (item.bbox is None or type(item.confidence) not in (int, float) or
+                            not math.isfinite(item.confidence) or
+                            not threshold <= item.confidence <= 1 or
+                            not re.fullmatch(r"[xX×]\s*[1-9][0-9]*", item.text.strip())):
+                        continue
+                    header = scale_box(item.bbox, from_resolution=self.baseline_resolution,
+                                       to_resolution=(1280, 720))
+                    center = (header[0] + header[2]) / 2
+                    if left < center < right and 588 <= (header[1] + header[3]) / 2 <= 627:
+                        headers_here.append(item)
+                if not (590 <= top <= 605 and bottom == 711):
+                    corrected.append(box)
+                    continue
+                if len(headers_here) != 1:
+                    if edge_direction[left] >= 150:
+                        corrected.append(box)
+                    continue
+                identity = recognize_card_identity(image, box, "troop", surface="battle",
+                                                   client_version=self.client_version)
+                if (identity.get("unit_id") is None or identity.get("version_verified") is not True or
+                        identity.get("template_client_version") != self.client_version or
+                        type(identity.get("confidence")) not in (int, float) or
+                        not math.isfinite(identity["confidence"]) or identity["confidence"] < .97):
+                    if edge_direction[left] >= 150:
+                        corrected.append(box)
+                    continue
+                candidates = []
+                for actual_left in range(left, min(left + 11, right - 79)):
+                    if (edge_direction[actual_left] < 150 or edge_direction[right - 1] > -150 or
+                            not supported_sides(actual_left, right) or
+                            colored_bottom(actual_left, right) != bottom):
+                        continue
+                    actual = (actual_left, top, right, bottom)
+                    candidates.append((float(edge_direction[actual_left]), actual))
+                if candidates:
+                    actual = max(candidates, key=lambda row: row[0])[1]
+                    named = recognize_card_identity(image, actual, "troop", surface="battle",
+                                                    client_version=self.client_version)
+                    if (named.get("unit_id") == identity["unit_id"] and
+                            named.get("version_verified") is True and
+                            named.get("template_client_version") == self.client_version and
+                            type(named.get("confidence")) in (int, float) and
+                            math.isfinite(named["confidence"]) and named["confidence"] >= .97):
+                        corrected.append(actual)
+                elif edge_direction[left] >= 150:
+                    corrected.append(box)
+                # A named contour beginning at its neighbour's negative
+                # right edge is not a card when no own left edge survives.
+            boxes = corrected
+
+        # Adjacent spell art can extend a coloured contour a few pixels into
+        # its neighbour. Rebuild only collided groups from independent current
+        # quantities; otherwise the final overlap guard rejects the whole group.
+        collision_groups = []
+        for group in _colliding_card_groups(boxes):
+            left, right = min(box[0] for box in group), max(box[2] for box in group)
+            anchors = [item for item in count_texts if item.bbox is not None
+                       and math.isfinite(item.confidence)
+                       and threshold <= item.confidence <= 1
+                       and re.fullmatch(r"[xX×]\s*[1-9][0-9]*", item.text.strip())
+                       and self._in_observed_roi(item, (left, 588, right, 627))]
+            centers = [sum(scale_box(item.bbox, from_resolution=self.baseline_resolution,
+                                     to_resolution=(1280, 720))[x] for x in (0, 2)) / 2
+                       for item in anchors]
+            if len(anchors) < 2 or any(abs(a - b) < 40 for index, a in enumerate(centers)
+                                       for b in centers[index + 1:]):
+                continue
+            boxes = [box for box in boxes if box not in group]
+            collision_groups.append((left, right, anchors))
+
         from .hero_state import _match
 
-        hero_templates = sorted((Path(__file__).resolve().parents[2] / "assets/templates").glob("battle_hero_pet_*.png"))
+        hero_templates = sorted(
+            path for path in (Path(__file__).resolve().parents[2] / "assets/templates").glob(
+                "battle_hero_pet_*.png")
+            if not path.name.endswith("_18_647_2.png") or self.client_version == "18.647.2")
 
         # A known pet icon can locate a header obscured by map colors, but the
         # card still needs its own two long side borders and a complete bottom.
         # Blue map backgrounds can join both card bodies and headers. Explicit
         # quantities provide independent anchors, still requiring actual borders.
-        for item in texts:
+        for item in count_texts:
             if (not self._in_observed_roi(item, (60, 588, 1230, 627))
                     or not math.isfinite(item.confidence) or not max(.9, self.ocr_config.confidence_threshold) <= item.confidence <= 1
                     or not re.fullmatch(r"[xX×]\s*[0-9]+", item.text.strip())):
@@ -1046,14 +1924,57 @@ class ScreenshotRecognizer:
                 continue
             right = max(range(max(4, text_box[2] - 4), min(1277, text_box[2] + 7)),
                         key=lambda x: -edge_direction[x - 1])
-            left = max(range(max(3, right - 105), right - 79), key=lambda x: edge_direction[x])
-            if not left < center < right or edge_direction[left] < 150 or edge_direction[right - 1] > -150:
-                continue
-            if not supported_sides(left, right):
-                continue
-            bottom = colored_bottom(left, right)
-            if bottom is not None:
+            # The strongest left gradient may be the right border of an
+            # already located neighbour. Try the remaining observed edges in
+            # strength order, while keeping every independent card check.
+            left_candidates = sorted(range(max(3, right - 105), right - 79),
+                                     key=lambda x: edge_direction[x], reverse=True)
+            for left in left_candidates:
+                if (any(box[0] <= left < box[2] for box in boxes)
+                        or not left < center < right
+                        or edge_direction[left] < 150 or edge_direction[right - 1] > -150):
+                    continue
+                if not (supported_sides(left, right) or edge_backed_card(left, right)):
+                    continue
+                bottom = colored_bottom(left, right)
+                if bottom is None or any(min(right, box[2]) > max(left, box[0]) for box in boxes):
+                    continue
+                if left != left_candidates[0]:
+                    # A secondary edge needs a versioned portrait as well as
+                    # its own sides, bottom and current-frame quantity.
+                    from .unit_catalog import recognize_card_identity
+                    identities = [recognize_card_identity(
+                        image, (left, 595, right, bottom), kind, surface="battle",
+                        client_version=self.client_version) for kind in ("troop", "spell")]
+                    if sum(identity["unit_id"] is not None and identity["confidence"] >= .97
+                           and identity.get("version_verified") is True for identity in identities) != 1:
+                        continue
                 boxes.append((left, 595, right, bottom))
+                break
+
+        if collision_groups:
+            from .unit_catalog import recognize_card_identity
+
+            for group_left, group_right, anchors in collision_groups:
+                recovered = [box for box in boxes if group_left <= box[0] and box[2] <= group_right]
+                valid = len(recovered) == len(anchors) and all(
+                    not any(min(box[2], other[2]) > max(box[0], other[0])
+                            for other in recovered if other != box)
+                    and supported_sides(box[0], box[2])
+                    and colored_bottom(box[0], box[2]) is not None
+                    and edge_direction[box[0]] >= 150 and edge_direction[box[2] - 1] <= -150
+                    and sum(1 for item in anchors if box[0] <
+                            sum(scale_box(item.bbox, from_resolution=self.baseline_resolution,
+                                          to_resolution=(1280, 720))[x] for x in (0, 2)) / 2
+                            < box[2]) == 1
+                    and sum(identity["unit_id"] is not None and identity["version_verified"] is True
+                            and identity["confidence"] >= .97
+                            for identity in (recognize_card_identity(
+                                image, box, kind, surface="battle", client_version=self.client_version)
+                                for kind in ("troop", "spell"))) == 1
+                    for box in recovered)
+                if not valid:
+                    boxes = [box for box in boxes if box not in recovered]
 
         for template_path in hero_templates:
             match = _match(image, template_path, (0, 595, 1280, 646), mask_kind="pet")
@@ -1119,7 +2040,7 @@ class ScreenshotRecognizer:
         from .unit_catalog import CATALOG_ROOT, recognize_card_identity, template_manifest
 
         phase_cards = []
-        catalog = template_manifest()
+        catalog = template_manifest(client_version=self.client_version)
         if self.client_version == catalog["client"]:
             # Duke's unequipped card can lose the top-left coloured icon, which
             # splits its contour. Its versioned face only proposes a location;
@@ -1214,7 +2135,7 @@ class ScreenshotRecognizer:
         for index, box in enumerate(sorted(boxes)):
             baseline_box = scale_box(box, from_resolution=(1280, 720), to_resolution=self.baseline_resolution)
             count_roi = (box[0], 588, box[2], 627)
-            counts = [item for item in texts if self._in_observed_roi(item, count_roi)
+            counts = [item for item in count_texts if self._in_observed_roi(item, count_roi)
                       and math.isfinite(item.confidence) and max(.9, self.ocr_config.confidence_threshold) <= item.confidence <= 1
                       and re.fullmatch(r"[xX×]\s*[0-9]+", item.text.strip())]
             count = counts[0] if len(counts) == 1 else None
@@ -1285,6 +2206,16 @@ class ScreenshotRecognizer:
                 identity = {"unit_id": None, "confidence": event_portrait["confidence"],
                             "reason": "unversioned_event_portrait_anonymous",
                             "evidence": [event_portrait], "version_verified": False}
+            if count in local_count_proofs and (
+                count in local_count_conflicts or kind not in {"troop", "spell"}
+                or identity.get("unit_id") is None or identity.get("version_verified") is not True
+                or identity.get("template_client_version") != self.client_version
+                or type(identity.get("confidence")) not in (int, float)
+                or not math.isfinite(identity["confidence"]) or identity["confidence"] < .97
+                or colored_bottom(box[0], box[2]) is None
+                or not (supported_sides(box[0], box[2]) or edge_backed_card(box[0], box[2]))
+            ):
+                count = None
             slots.append({
                 "index": index, "kind": kind, "bbox": list(baseline_box),
                 "unit_id": identity["unit_id"], "confidence": identity["confidence"],
@@ -1296,7 +2227,8 @@ class ScreenshotRecognizer:
                              "hero_pet_icon": hero_evidence,
                              "clan_badge": clan_evidence,
                              "event_portrait": event_portrait if is_event else None,
-                             "count": asdict(count) if count is not None else None},
+                             "count": ({**asdict(count), **local_count_proofs.get(count, {})}
+                                       if count is not None else None)},
             })
             slots[-1]["evidence"]["identity"] = identity
         return {"phase": "scout" if scene == SCENE_ENEMY_VILLAGE else "active",
@@ -1379,45 +2311,107 @@ class ScreenshotRecognizer:
 
     def _village_resources(
         self, path: Path, results: list[OCRText], source_resolution: tuple[int, int],
+        *, new_home_hud: bool = False,
     ) -> tuple[dict[str, int | None], dict[str, object]]:
         width, height = self.baseline_resolution
         # These HUD bands are proportional to the screenshot, independent of village pan/zoom.
-        bands = {"gold": (0.025, 0.085), "elixir": (0.12, 0.18), "dark_elixir": (0.215, 0.28), "gems": (0.305, 0.365)}
-        line_rois = {
-            "gold": (1008, 19, 1210, 60), "elixir": (1008, 87, 1210, 128),
-            "dark_elixir": (1064, 153, 1210, 195), "gems": (1130, 220, 1210, 262),
-        }
+        if new_home_hud:
+            bands = {"gold": (.025, .085), "elixir": (.095, .155),
+                     "dark_elixir": (.165, .22), "gems": (.235, .29)}
+            line_rois = {
+                "gold": (1008, 19, 1240, 60), "elixir": (1008, 69, 1240, 111),
+                "dark_elixir": (1064, 115, 1240, 158), "gems": (1130, 164, 1240, 208),
+            }
+        else:
+            bands = {"gold": (.025, .085), "elixir": (.12, .18),
+                     "dark_elixir": (.215, .28), "gems": (.305, .365)}
+            line_rois = {
+                "gold": (1008, 19, 1210, 60), "elixir": (1008, 87, 1210, 128),
+                "dark_elixir": (1064, 153, 1210, 195), "gems": (1130, 220, 1210, 262),
+            }
         values: dict[str, int | None] = {name: None for name in bands}
         evidence: dict[str, object] = {}
         for name, (top, bottom) in bands.items():
             candidates = []
             source = "full_ocr"
+            tight_evidence = None
+            row_items = []
             for item in results:
                 if item.bbox is None:
                     continue
                 left, y1, right, y2 = item.bbox
+                if (new_home_hud and item.confidence >= max(.9, self.ocr_config.confidence_threshold)
+                        and width * .78 <= left < right <= line_rois[name][2]
+                        and top * height <= (y1 + y2) / 2 <= bottom * height):
+                    row_items.append(item)
                 value = parse_resource_number(item.text)
                 if value is None and name != "gems":
                     ratio = parse_capacity(item.text)
                     value = ratio[0] if ratio is not None else None
                 if value is not None and left >= width * 0.78 and top * height <= (y1 + y2) / 2 <= bottom * height:
                     candidates.append((item.confidence, value, item))
-            if not candidates:
+            # An adjacent malformed fragment cannot make the remaining numeric
+            # fragment a complete balance by itself.
+            if new_home_hud and len(row_items) > len(candidates) and row_items:
+                continue
+            if not candidates or (new_home_hud and (name == "gold" or len(candidates) > 1)):
                 read_line = getattr(self.provider, "recognize_line", None)
                 if read_line is not None:
                     source_roi = scale_box(line_rois[name], from_resolution=(1280, 720), to_resolution=source_resolution)
-                    for result in filter_ocr_results(read_line(path, source_roi), max(0.9, self.ocr_config.confidence_threshold)):
+                    line_candidates = []
+                    fixed_reads = read_line(path, source_roi)
+                    for result in filter_ocr_results(fixed_reads, max(0.9, self.ocr_config.confidence_threshold)):
                         value = parse_resource_number(result.text)
                         if value is None and name != "gems":
                             ratio = parse_capacity(result.text)
                             value = ratio[0] if ratio is not None else None
                         if value is not None:
-                            candidates.append((result.confidence, value, self._baseline_result(result, source_resolution)))
-                    source = "line_roi"
+                            line_candidates.append((result.confidence, value, self._baseline_result(result, source_resolution)))
+                    segmented = (_segmented_hud_number(candidates, line_rois[name],
+                                                       max(.9, self.ocr_config.confidence_threshold))
+                                 if new_home_hud and len(row_items) == 2 else None)
+                    fixed_conflict = False
+                    if line_candidates:
+                        if new_home_hud and len(candidates) > 1:
+                            # The established fixed ROI can verify any number of
+                            # numeric fragments. Tight ROI is limited to two.
+                            fragments = "".join(
+                                re.sub(r"\D", "", item.text)
+                                for _, _, item in sorted(candidates, key=lambda candidate: candidate[2].bbox[0])
+                            )
+                            fixed_conflict = any(str(candidate[1]) != fragments for candidate in line_candidates)
+                            line_candidates = ([] if fixed_conflict else [
+                                candidate for candidate in line_candidates if str(candidate[1]) == fragments
+                            ])
+                        elif new_home_hud and name == "gold" and candidates:
+                            line_candidates = [candidate for candidate in line_candidates
+                                               if len(str(candidate[1])) >= len(str(candidates[0][1]))]
+                        if line_candidates:
+                            candidates = line_candidates
+                            source = "line_roi"
+                    if segmented is not None and not line_candidates and not fixed_conflict:
+                        fragments, tight_box = segmented
+                        tight_roi = scale_box(tight_box, from_resolution=(1280, 720), to_resolution=source_resolution)
+                        tight_reads = filter_ocr_results(
+                            read_line(path, tight_roi), max(.9, self.ocr_config.confidence_threshold),
+                        )
+                        if len(tight_reads) == 1 and str(parse_resource_number(tight_reads[0].text)) == fragments:
+                            segment_items = [asdict(item) for _, _, item in candidates]
+                            candidates = [(tight_reads[0].confidence, int(fragments),
+                                           self._baseline_result(tight_reads[0], source_resolution))]
+                            source = "tight_line_roi"
+                            tight_evidence = {"frame": str(path), "roi": list(tight_box),
+                                              "full_fragments": segment_items,
+                                              "fixed_line_readings": [asdict(item) for item in fixed_reads]}
+            if new_home_hud and source != "line_roi" and len(candidates) != 1:
+                # The new wide balance can be split into overlapping OCR fragments.
+                candidates = []
             if candidates:
                 _, value, item = max(candidates, key=lambda candidate: candidate[0])
                 values[name] = value
                 evidence[name] = {**asdict(item), "source": source}
+                if tight_evidence is not None:
+                    evidence[name].update(tight_evidence)
         return values, evidence
 
     def _village_resource_capacities(self, texts: list[OCRText]) -> dict[str, int | None]:

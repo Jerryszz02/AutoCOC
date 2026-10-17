@@ -1,0 +1,254 @@
+{
+  "client_version": "18.647.2",
+  "derivation": "cv2 resize to 1280x720 INTER_AREA then exact crop [585:720,40:1240]; outside toolbar omitted",
+  "source_group": "single preview; heldout frames are distinct captures, not independent battles",
+  "frames": [
+    {
+      "fixture": "current_hero_toolbar_00012-battle-candidate.png",
+      "fixture_sha256": "151aef868b6717b8e9b21630c96314378f0e9d6adb1405e742a45972ed30f22b",
+      "source_frame": "reports/completion-20261015/collections/20261015-234304-archer-preview-session/frames/00012-battle-candidate.png",
+      "source_sha256": "4193937c1da6ea5314a5b909d006b86cec351c2a5e8c20ac96bd8872b9d806e9",
+      "ocr": [
+        {
+          "text": "x10",
+          "confidence": 0.99523,
+          "bbox": [
+            82,
+            592,
+            131,
+            621
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99517,
+          "bbox": [
+            194,
+            592,
+            228,
+            622
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99625,
+          "bbox": [
+            294,
+            595,
+            324,
+            620
+          ]
+        },
+        {
+          "text": "x2",
+          "confidence": 0.99648,
+          "bbox": [
+            384,
+            592,
+            422,
+            621
+          ]
+        },
+        {
+          "text": "x3",
+          "confidence": 0.9935,
+          "bbox": [
+            479,
+            592,
+            519,
+            621
+          ]
+        },
+        {
+          "text": "x6",
+          "confidence": 0.99476,
+          "bbox": [
+            1092,
+            592,
+            1134,
+            622
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.99722,
+          "bbox": [
+            1190,
+            592,
+            1231,
+            622
+          ]
+        }
+      ]
+    },
+    {
+      "fixture": "current_hero_toolbar_00013-scout-camera-ready.png",
+      "fixture_sha256": "3d1dd41f6c982bc79433f9215c7e3c20ca932f81384f4500093d9390afada0dd",
+      "source_frame": "reports/completion-20261015/collections/20261015-234304-archer-preview-session/frames/00013-scout-camera-ready.png",
+      "source_sha256": "659813c3c684ebd4ffd48e095503b68bc529024e7faadf1137c29a78a3d11f5a",
+      "ocr": [
+        {
+          "text": "x10",
+          "confidence": 0.99523,
+          "bbox": [
+            82,
+            592,
+            131,
+            621
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99517,
+          "bbox": [
+            194,
+            592,
+            228,
+            622
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99625,
+          "bbox": [
+            294,
+            595,
+            324,
+            620
+          ]
+        },
+        {
+          "text": "x2",
+          "confidence": 0.99648,
+          "bbox": [
+            384,
+            592,
+            422,
+            621
+          ]
+        },
+        {
+          "text": "x3",
+          "confidence": 0.99356,
+          "bbox": [
+            479,
+            592,
+            519,
+            621
+          ]
+        },
+        {
+          "text": "x6",
+          "confidence": 0.99476,
+          "bbox": [
+            1092,
+            592,
+            1134,
+            622
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.99517,
+          "bbox": [
+            1190,
+            591,
+            1231,
+            622
+          ]
+        }
+      ]
+    },
+    {
+      "fixture": "current_hero_toolbar_00014-vision-collection-exit-fresh.png",
+      "fixture_sha256": "47cbb8942eb92441b6d22c8a635c65b580087266d449ef5c7dde6cb2222c8c01",
+      "source_frame": "reports/completion-20261015/collections/20261015-234304-archer-preview-session/frames/00014-vision-collection-exit-fresh.png",
+      "source_sha256": "3b1cb94346b49f6efb11e967fd01579464b842b77aac800f860d955bc595832a",
+      "ocr": [
+        {
+          "text": "x10",
+          "confidence": 0.99523,
+          "bbox": [
+            82,
+            592,
+            131,
+            621
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99312,
+          "bbox": [
+            195,
+            594,
+            228,
+            621
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99625,
+          "bbox": [
+            294,
+            595,
+            324,
+            620
+          ]
+        },
+        {
+          "text": "x2",
+          "confidence": 0.99648,
+          "bbox": [
+            384,
+            592,
+            422,
+            621
+          ]
+        },
+        {
+          "text": "x3",
+          "confidence": 0.9935,
+          "bbox": [
+            479,
+            592,
+            519,
+            621
+          ]
+        },
+        {
+          "text": "x6",
+          "confidence": 0.99476,
+          "bbox": [
+            1092,
+            592,
+            1134,
+            622
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.99509,
+          "bbox": [
+            1190,
+            591,
+            1231,
+            622
+          ]
+        }
+      ]
+    }
+  ],
+  "hero_pet_anchor": {
+    "template": "assets/templates/battle_hero_pet_1_18_647_2.png",
+    "sha256": "f63e802e8eb0cd4e8843b0cef0d04736d509120fad2c3fa9d1040dee5d81517b",
+    "source_frame": "reports/completion-20261015/collections/20261015-234304-archer-preview-session/frames/00012-battle-candidate.png",
+    "source_sha256": "4193937c1da6ea5314a5b909d006b86cec351c2a5e8c20ac96bd8872b9d806e9",
+    "baseline_crop_xyxy": [
+      746,
+      600,
+      784,
+      640
+    ],
+    "method": "exact crop of current preview pet icon; runtime additionally requires card edges, bottom, and versioned hero portrait"
+  }
+}

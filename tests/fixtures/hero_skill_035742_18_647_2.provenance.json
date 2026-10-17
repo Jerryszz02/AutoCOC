@@ -1,0 +1,171 @@
+{
+  "client_version": "18.647.2",
+  "source_kind": "agent_visual_prototype",
+  "human_ground_truth": false,
+  "dynamic_event_validation": false,
+  "note": "All frames are from one battle; the 25 to 27 interval exceeds the dynamic event window. Ready source 25 has held-out frames 23/24; used source 27 has later same-battle frames 28/29. Transition frame 26 is negative, never a used proof.",
+  "derivation": "Decode original native 2560x1440 PNG; resize to 1280x720 with cv2.INTER_AREA; crop exact source_bbox_1280. Fixture zeros all pixels outside baseline y=515..719.",
+  "assets": {
+    "hero_warden_18_647_2_ready_book.png": {
+      "source_frame": "reports/completion-20261015/probes/20261016-035742-manual-probed-skill/frames/00025-manual-skill-fresh-action-check.png",
+      "source_sha256": "1a19172dec983bc8744d197575ed4f6d760eb56312843d11d24f6b5b975b876e",
+      "source_bbox_1280": [
+        650,
+        530,
+        690,
+        567
+      ],
+      "asset_sha256": "190fb656fc9dc3c9731e3d22419159c868206cc030de37b822e5c4576fafe682",
+      "independent_holdout_frames": [
+        23,
+        24
+      ]
+    },
+    "hero_warden_18_647_2_ready_card.png": {
+      "source_frame": "reports/completion-20261015/probes/20261016-035742-manual-probed-skill/frames/00025-manual-skill-fresh-action-check.png",
+      "source_sha256": "1a19172dec983bc8744d197575ed4f6d760eb56312843d11d24f6b5b975b876e",
+      "source_bbox_1280": [
+        680,
+        626,
+        729,
+        680
+      ],
+      "asset_sha256": "817777c0885735d1f442bf0ae07ae4cb0ca67073108cb387b2b592f981ff35e0",
+      "independent_holdout_frames": [
+        23,
+        24
+      ]
+    },
+    "hero_warden_18_647_2_used_book.png": {
+      "source_frame": "reports/completion-20261015/probes/20261016-035742-manual-probed-skill/frames/00027-manual-skill-after-2.png",
+      "source_sha256": "07b28a38a067d27d9e5ab90a08cca182ff71a600062a9daea84f7bf0e0ea3979",
+      "source_bbox_1280": [
+        650,
+        530,
+        690,
+        567
+      ],
+      "asset_sha256": "c62908d7895be1ecec8c1786271b702e9bf1afc7c138aee4f552565a81434781",
+      "independent_holdout_frames": [
+        28,
+        29
+      ]
+    },
+    "hero_warden_18_647_2_used_card.png": {
+      "source_frame": "reports/completion-20261015/probes/20261016-035742-manual-probed-skill/frames/00027-manual-skill-after-2.png",
+      "source_sha256": "07b28a38a067d27d9e5ab90a08cca182ff71a600062a9daea84f7bf0e0ea3979",
+      "source_bbox_1280": [
+        680,
+        626,
+        729,
+        680
+      ],
+      "asset_sha256": "80c160a95ac0aa65c40b810ae54573532f87e0cee686958e7ad12c97a5e0de98",
+      "independent_holdout_frames": [
+        28,
+        29
+      ]
+    },
+    "grand_warden_battle_used_035742_18_647_2.png": {
+      "source_frame": "reports/completion-20261015/probes/20261016-035742-manual-probed-skill/frames/00027-manual-skill-after-2.png",
+      "source_sha256": "07b28a38a067d27d9e5ab90a08cca182ff71a600062a9daea84f7bf0e0ea3979",
+      "source_bbox_1280": [
+        676,
+        632,
+        713,
+        673
+      ],
+      "asset_sha256": "a795790cf761cacef62e5d38661f097efdede804a05b1479bed8309caafabbba",
+      "independent_holdout_frames": [
+        28,
+        29
+      ]
+    }
+  },
+  "fixtures": {
+    "hero_skill_035742_00023_18_647_2.png": {
+      "source_frame": "reports/completion-20261015/probes/20261016-035742-manual-probed-skill/frames/00023-manual-skill-before-1.png",
+      "source_sha256": "12bc48b3aac1c7ca8fa9cfcc742466f10643416d4f791c2da80386ac7ef3386d",
+      "fixture_sha256": "01f65f314355528b87efb0b6430a6a2ea975fc67d4ed335f17abceaf5e43ecc4",
+      "retained_roi_1280": [
+        0,
+        515,
+        1280,
+        720
+      ],
+      "purpose": "ready_holdout"
+    },
+    "hero_skill_035742_00024_18_647_2.png": {
+      "source_frame": "reports/completion-20261015/probes/20261016-035742-manual-probed-skill/frames/00024-manual-skill-before-2.png",
+      "source_sha256": "836e2e3c4678ed3cabe70b460c4e6edb8432ba39ed545c1dbcdb5845158ed38a",
+      "fixture_sha256": "69d888e7001fec2f4f195c97df4a9af4fc492d3e9b7c46cafb5ee8b9cea0cd89",
+      "retained_roi_1280": [
+        0,
+        515,
+        1280,
+        720
+      ],
+      "purpose": "ready_holdout"
+    },
+    "hero_skill_035742_00025_18_647_2.png": {
+      "source_frame": "reports/completion-20261015/probes/20261016-035742-manual-probed-skill/frames/00025-manual-skill-fresh-action-check.png",
+      "source_sha256": "1a19172dec983bc8744d197575ed4f6d760eb56312843d11d24f6b5b975b876e",
+      "fixture_sha256": "18b63b2e222a59e5146b80af490e811067c80a56a85fdc7311efe21d294500a7",
+      "retained_roi_1280": [
+        0,
+        515,
+        1280,
+        720
+      ],
+      "purpose": "template_source"
+    },
+    "hero_skill_035742_00026_18_647_2.png": {
+      "source_frame": "reports/completion-20261015/probes/20261016-035742-manual-probed-skill/frames/00026-manual-skill-after-1.png",
+      "source_sha256": "ff331b2a7810a36c5875e7e180693ce135313592da5d58f4bca7bc4733262303",
+      "fixture_sha256": "48a65bb2be522b3467f87cc0af57697dfb34cedb5ebe821379bd4ca92f068b30",
+      "retained_roi_1280": [
+        0,
+        515,
+        1280,
+        720
+      ],
+      "purpose": "transition_negative"
+    },
+    "hero_skill_035742_00027_18_647_2.png": {
+      "source_frame": "reports/completion-20261015/probes/20261016-035742-manual-probed-skill/frames/00027-manual-skill-after-2.png",
+      "source_sha256": "07b28a38a067d27d9e5ab90a08cca182ff71a600062a9daea84f7bf0e0ea3979",
+      "fixture_sha256": "e30c4fbc2ac350671feaf4daf995dc2738e393554742db12d19f78dd7b6aacad",
+      "retained_roi_1280": [
+        0,
+        515,
+        1280,
+        720
+      ],
+      "purpose": "template_source"
+    },
+    "hero_skill_035742_00028_18_647_2.png": {
+      "source_frame": "reports/completion-20261015/probes/20261016-035742-manual-probed-skill/frames/00028-battle-settlement.png",
+      "source_sha256": "0449077c55ae36e7dfc0e33eaee2e2bd19f298fd61a26732b81ab95328450182",
+      "fixture_sha256": "a983a5baf3c812b0404ca065b2bf83400ba28175eb812c7f04c606f831275319",
+      "retained_roi_1280": [
+        0,
+        515,
+        1280,
+        720
+      ],
+      "purpose": "used_holdout"
+    },
+    "hero_skill_035742_00029_18_647_2.png": {
+      "source_frame": "reports/completion-20261015/probes/20261016-035742-manual-probed-skill/frames/00029-battle-settlement.png",
+      "source_sha256": "47de770c4537e7a9db06a6acdb0e7d5c92225ef33517fcd74e000e09612fcf6f",
+      "fixture_sha256": "cf477c6c81c938a209c7f396069307f34404cd989c280ad1b7b4950356e4935f",
+      "retained_roi_1280": [
+        0,
+        515,
+        1280,
+        720
+      ],
+      "purpose": "used_holdout"
+    }
+  }
+}

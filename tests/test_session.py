@@ -1,4 +1,5 @@
 from dataclasses import replace
+import hashlib
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -90,12 +91,27 @@ class SessionTests(unittest.TestCase):
         self.assertTrue(self.session.last_snapshot.screenshot_path.exists())
         self.assertEqual(self.session.last_snapshot.observations["evidence_retention"], "retained")
 
+    def test_account_in_use_interrupts_both_wait_paths_without_input(self):
+        for bounded in (False, True):
+            with self.subTest(bounded=bounded):
+                self.session.evidence_budget = (EvidenceBudget(self.session.directory / "frames", 300)
+                                                if bounded else None)
+                self.recognizer.recognize.side_effect = lambda path: SceneSnapshot("account_in_use", .95, path)
+                before = self.capture.capture_screenshot_artifact.call_count
+                with self.assertRaisesRegex(FlowError, "account_in_use"):
+                    self.session.wait_for({"village"}, timeout_sec=20)
+                self.assertEqual(self.capture.capture_screenshot_artifact.call_count, before + 1)
+                self.assertEqual(self.session.last_snapshot.scene, "account_in_use")
+                self.assertTrue(self.session.last_snapshot.screenshot_path.exists())
+        self.adb.run.assert_not_called()
+        self.assertEqual(self.session.action_count, 0)
+
     def package_calls(self):
         return [call for call in self.adb.run.call_args_list
                 if call.args and call.args[0] == ["shell", "dumpsys", "package", self.config.game.package_name]]
 
     def test_unknown_or_low_confidence_observation_cannot_click(self) -> None:
-        for scene, confidence in (("unknown", 0.99), ("village", 0.79)):
+        for scene, confidence in (("unknown", 0.99), ("account_in_use", 0.99), ("village", 0.79)):
             with self.subTest(scene=scene, confidence=confidence):
                 self.recognizer.recognize.side_effect = lambda path: SceneSnapshot(scene, confidence, Path(path))
                 snapshot = self.session.observe()
@@ -129,17 +145,23 @@ class SessionTests(unittest.TestCase):
 
     def test_observation_records_capture_method_and_full_capture_elapsed_time(self) -> None:
         self.capture.capture_screenshot_artifact.side_effect = lambda path: ScreenshotCapture(
-            path, 2560, 1440, .91, capture_method="raw_rgba", capture_elapsed_sec=.91)
+            path, 2560, 1440, .91, capture_method="raw_rgba", capture_elapsed_sec=.91,
+            requested_at_utc="2026-10-15T18:00:00+00:00")
         snapshot = self.session.observe()
         self.assertEqual(snapshot.observations["capture_method"], "raw_rgba")
         self.assertEqual(snapshot.observations["capture_elapsed_sec"], .91)
         self.assertEqual(self.events()[0]["observations"]["capture_method"], "raw_rgba")
         self.assertEqual(self.events()[0]["observations"]["capture_elapsed_sec"], .91)
+        self.assertEqual(snapshot.observations["captured_at_utc"], "2026-10-15T18:00:00+00:00")
+        self.assertEqual(self.events()[0]["observations"]["captured_at_utc"], "2026-10-15T18:00:00+00:00")
+        self.assertEqual(snapshot.observations["capture_timestamp_basis"], "capture_request_start")
 
     def test_legacy_screenshot_artifact_keeps_elapsed_time_without_inventing_method(self) -> None:
         snapshot = self.session.observe()
         self.assertEqual(snapshot.observations["capture_method"], "unknown")
         self.assertEqual(snapshot.observations["capture_elapsed_sec"], .01)
+        self.assertNotIn("captured_at_utc", snapshot.observations)
+        self.assertNotIn("capture_timestamp_basis", snapshot.observations)
 
     def test_observation_times_capture_and_recognition_separately(self):
         def capture(path):
@@ -175,6 +197,169 @@ class SessionTests(unittest.TestCase):
             purpose="troop_count", slot=slot, previous=previous)
         self.assertEqual(snapshot.observations["observed_at_monotonic"], self.clock.now)
         self.assertIs(self.session.last_snapshot, snapshot)
+
+    def test_line_boundary_wait_uses_new_capture_and_battle_route(self):
+        previous = self.session.observe("line-zoom-verified")
+        self.clock.advance(.1)
+        current = self._boundary_capture_for_enrichment()
+        self.recognizer.recognize_battle.assert_called_once_with(
+            current.screenshot_path, purpose="line_boundary_wait", slot=None, previous=previous)
+        self.recognizer.recognize.assert_called_once()
+        self.assertNotEqual(current.screenshot_path, previous.screenshot_path)
+        self.assertGreater(current.observations["observed_at_monotonic"],
+                           previous.observations["observed_at_monotonic"])
+        self.assertIs(self.session.last_snapshot, current)
+
+    def _boundary_capture_for_enrichment(self):
+        def capture(path):
+            requested = self.clock.now
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"captured-pixels-" + path.name.encode("ascii"))
+            self.clock.advance(.02)
+            return ScreenshotCapture(path, 2560, 1440, .02,
+                requested_at_monotonic=requested,
+                pixels_ready_at_monotonic=requested + .01,
+                requested_at_utc="2026-10-16T23:00:42+00:00",
+                frame_id=f"real-{path.name}")
+
+        self.capture.capture_screenshot_artifact.side_effect = capture
+        self.recognizer.recognize_battle.side_effect = lambda path, **kwargs: SceneSnapshot(
+            "enemy_village", .99, Path(path),
+            {"recognition_scope": "line_boundary_wait", "fast_fallback": False})
+        self.recognizer.recognize.side_effect = lambda path, **kwargs: SceneSnapshot(
+            "enemy_village", .95, Path(path), {"battle": {"phase": "scout"}})
+        return self.session.observe("line-boundary", purpose="line_boundary_wait")
+
+    def test_enrich_current_boundary_capture_uses_original_pixels_and_time(self):
+        fast = self._boundary_capture_for_enrichment()
+        original = dict(fast.observations)
+        before_captures = self.capture.capture_screenshot_artifact.call_count
+        before_frames = self.session.frame_number
+        self.clock.advance(.4)
+        full = self.session.enrich_current_boundary_capture(fast, expires_at=self.clock.now + 10)
+        self.assertIs(self.session.last_snapshot, full)
+        self.assertIsNot(full, fast)
+        self.assertEqual(full.screenshot_path, fast.screenshot_path)
+        self.assertEqual(self.capture.capture_screenshot_artifact.call_count, before_captures)
+        self.assertEqual(self.session.frame_number, before_frames)
+        self.assertEqual(self.session.action_count, 0)
+        for key in ("observed_at_monotonic", "requested_at_monotonic", "pixels_ready_at_monotonic",
+                    "captured_at_utc", "capture_timestamp_basis", "frame_id"):
+            self.assertEqual(full.observations[key], original[key])
+        self.recognizer.recognize.assert_called_once_with(
+            fast.screenshot_path, captured_at=original["observed_at_monotonic"])
+        events = self.events()
+        self.assertEqual([item["kind"] for item in events],
+                         ["observation", "recognition_enrichment"])
+        self.assertEqual(events[-1]["frame_sha256"], hashlib.sha256(fast.screenshot_path.read_bytes()).hexdigest())
+        self.assertEqual(events[-1]["frame_id"], original["frame_id"])
+        self.assertEqual(events[-1]["observed_at_monotonic"], original["observed_at_monotonic"])
+        with self.assertRaisesRegex(FlowError, "obsolete"):
+            self.session._validate_snapshot(fast)
+        self.session._validate_snapshot(full)
+
+    def test_enrichment_rejects_old_changed_missing_and_input_intervened(self):
+        for change in ("old_object", "new_capture", "same_size_pixel_change", "missing_pixels",
+                       "metadata", "input"):
+            with self.subTest(change=change):
+                fast = self._boundary_capture_for_enrichment()
+                if change == "old_object":
+                    candidate = replace(fast)
+                else:
+                    candidate = fast
+                if change == "new_capture":
+                    self.session.observe("another")
+                elif change == "same_size_pixel_change":
+                    value = fast.screenshot_path.read_bytes()
+                    fast.screenshot_path.write_bytes(value[:-1] + bytes([value[-1] ^ 1]))
+                elif change == "missing_pixels":
+                    fast.screenshot_path.unlink()
+                elif change == "metadata":
+                    fast.observations["frame_id"] = "different"
+                elif change == "input":
+                    self.session.action_count += 1
+                with self.assertRaises(FlowError):
+                    self.session.enrich_current_boundary_capture(candidate, expires_at=self.clock.now + 10)
+                self.assertIsNone(self.session.last_snapshot)
+
+    def test_enrichment_rejects_uncertain_input_even_without_action_count(self):
+        fast = self._boundary_capture_for_enrichment()
+        with patch.object(self.session.context, "tap_xy", side_effect=AdbError("uncertain transport")):
+            with self.assertRaisesRegex(AdbError, "uncertain transport"):
+                self.session.tap(fast, (100, 200), reason="uncertain test input")
+        self.assertEqual(self.session.action_count, 0)
+        with self.assertRaisesRegex(FlowError, "no longer current"):
+            self.session.enrich_current_boundary_capture(fast, expires_at=self.clock.now + 10)
+        self.assertIsNone(self.session.last_snapshot)
+
+    def test_enrichment_rejects_expiry_before_and_after_full_read(self):
+        fast = self._boundary_capture_for_enrichment()
+        with self.assertRaisesRegex(FlowError, "deadline expired"):
+            self.session.enrich_current_boundary_capture(fast, expires_at=self.clock.now)
+        self.assertIsNone(self.session.last_snapshot)
+        fast = self._boundary_capture_for_enrichment()
+        self.recognizer.recognize.side_effect = lambda path, **kwargs: (
+            self.clock.advance(3), SceneSnapshot("enemy_village", .95, Path(path), {}))[1]
+        with self.assertRaisesRegex(FlowError, "deadline expired"):
+            self.session.enrich_current_boundary_capture(fast, expires_at=self.clock.now + 2)
+        self.assertIsNone(self.session.last_snapshot)
+        fast = self._boundary_capture_for_enrichment()
+        self.clock.advance(31)
+        with self.assertRaisesRegex(FlowError, "deadline expired"):
+            self.session.enrich_current_boundary_capture(fast, expires_at=self.clock.now + 10)
+        self.assertIsNone(self.session.last_snapshot)
+
+    def test_enrichment_needs_real_capture_provenance_and_unchanged_full_metadata(self):
+        self.recognizer.recognize_battle.side_effect = lambda path, **kwargs: SceneSnapshot(
+            "enemy_village", .95, Path(path),
+            {"recognition_scope": "line_boundary_wait", "fast_fallback": False})
+        with self.assertRaisesRegex(FlowError, "provenance is incomplete"):
+            self.session.observe("line-boundary", purpose="line_boundary_wait")
+        self.assertIsNone(self.session.last_snapshot)
+        for key, value in (("frame_id", "invented"), ("observed_at_monotonic", 999),
+                           ("pixels_ready_at_monotonic", 999)):
+            with self.subTest(key=key):
+                fast = self._boundary_capture_for_enrichment()
+                self.recognizer.recognize.side_effect = lambda path, **kwargs: SceneSnapshot(
+                    "enemy_village", .95, Path(path), {key: value})
+                with self.assertRaisesRegex(FlowError, "full output changed capture metadata"):
+                    self.session.enrich_current_boundary_capture(fast, expires_at=self.clock.now + 10)
+                self.assertIsNone(self.session.last_snapshot)
+
+    def test_enrichment_event_failure_cannot_publish_actionable_snapshot(self):
+        fast = self._boundary_capture_for_enrichment()
+        with patch.object(self.session, "event", side_effect=OSError("log failed")):
+            with self.assertRaisesRegex(OSError, "log failed"):
+                self.session.enrich_current_boundary_capture(fast, expires_at=self.clock.now + 10)
+        self.assertIsNone(self.session.last_snapshot)
+
+    def test_enrichment_rejects_bad_full_output_and_mid_read_changes(self):
+        for failure in ("wrong_path", "weak", "fast_scope", "fallback", "exception",
+                        "new_capture", "input", "pixel_change"):
+            with self.subTest(failure=failure):
+                fast = self._boundary_capture_for_enrichment()
+
+                def full(path, **kwargs):
+                    if failure == "exception":
+                        raise RuntimeError("reader failed")
+                    if failure == "new_capture":
+                        self.recognizer.recognize.side_effect = lambda new_path, **kw: SceneSnapshot(
+                            "village", .95, Path(new_path))
+                        self.session.observe("intervening")
+                    elif failure == "input":
+                        self.session.action_count += 1
+                    elif failure == "pixel_change":
+                        path.write_bytes(b"different-pixels")
+                    return SceneSnapshot("unknown" if failure == "weak" else "enemy_village",
+                        .1 if failure == "weak" else .95,
+                        Path("different.png") if failure == "wrong_path" else Path(path),
+                        {"recognition_scope": "line_boundary_wait"} if failure == "fast_scope" else
+                        {"fast_fallback": True} if failure == "fallback" else {})
+
+                self.recognizer.recognize.side_effect = full
+                with self.assertRaises((FlowError, RuntimeError)):
+                    self.session.enrich_current_boundary_capture(fast, expires_at=self.clock.now + 10)
+                self.assertIsNone(self.session.last_snapshot)
 
     def test_stale_or_noncurrent_snapshot_cannot_click(self) -> None:
         previous = self.session.observe("previous")
@@ -535,6 +720,7 @@ class SessionTests(unittest.TestCase):
             model.metadata = {"validation": {"status": "evaluated", "report_id": "offline-1"}}
         with patch("autococ.session.resolve_game_display", return_value=DisplayTarget(2, "physical-two")), \
                 patch("autococ.session.ScreenshotRecognizer") as recognizer, \
+                patch("autococ.model_release.require_released_model", return_value={}), \
                 patch("autococ.model_vision.SceneModel", return_value=scene_model) as load_scene, \
                 patch("autococ.model_vision.BuildingModel", return_value=building_model) as load_building:
             session = GameSession.connect(config, self.adb, "test-device", self.root / "vision-run", launch=False)

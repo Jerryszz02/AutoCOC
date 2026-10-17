@@ -1,0 +1,22 @@
+{
+  "client_version": "18.647.2",
+  "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-192541-589533-3b457584\\frames\\00012-line-zoom-verified.png",
+  "source_sha256": "1fcf2d3032feba61deb8d7b081206a115f6bf0301ed2b64194bf4e3b3e342f9c",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "native_preserved_xyxy": [
+    360,
+    1140,
+    590,
+    1440
+  ],
+  "native_preserved_pixel_sha256": "6c7b931fd18ecdd8039b87d2e3670c1e6c03e4197eed28be789156ecf8ee8fb5",
+  "output_sha256": "8eab8a8cc3ef7ba3c89b7311e59aa9ee183667b0809ac24f8d54cc6052b78b34",
+  "output_preserved_pixel_sha256": "6c7b931fd18ecdd8039b87d2e3670c1e6c03e4197eed28be789156ecf8ee8fb5",
+  "outside_preserved_area": "black masked",
+  "events_source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-192541-589533-3b457584\\events.jsonl",
+  "events_sha256": "e83d7c3cf185865819941719d57fa1883c95a8488b9f8621800cc590c0971c35",
+  "purpose": "Anonymized battle toolbar development fixture; source12 saved source and post22 live failure, not human truth or formal heldout."
+}
