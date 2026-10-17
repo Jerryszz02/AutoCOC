@@ -1,0 +1,36 @@
+{
+  "source_run": "20261017-041151-957581-a04a2fd0",
+  "client_version": "18.647.2",
+  "retained_roi_native": [
+    250,
+    1120,
+    870,
+    1440
+  ],
+  "mask": "all pixels outside ROI exactly zero; ROI exact native source pixels",
+  "scope": "post-count/card regression only; no camera equivalence claim because map pixels masked",
+  "events_source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-041151-957581-a04a2fd0\\events.jsonl",
+  "events_sha256": "f4d7ef74d2536bf1534dddc6c5143e90919044c37130c85ae7f0e1e95d2a4539",
+  "report_source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\run-20261017-041151-957581-a04a2fd0.json",
+  "report_sha256": "7939675e063f98e6a32c56f4e90cc2326c410840fa91c5c4bf147efd1691d06a",
+  "assets": {
+    "00028-toolbar.png": {
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-041151-957581-a04a2fd0\\frames\\00028-line-boundary.png",
+      "source_sha256": "d89fd1abf1e20f90d3d19f214b80b1d7d22c2fe682a53a01c58da36f1e4d6997",
+      "fixture_sha256": "37c9a91265392491237e565927be6d9d54ea2419f132be716fc49a15294c1017",
+      "retained_pixel_sha256": "f20bfa2688f9e4525817d346caa5354b2edc741193d32dddd7c040ea2d83f3f3"
+    },
+    "00035-toolbar.png": {
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-041151-957581-a04a2fd0\\frames\\00035-mixed-dragon-post-0.png",
+      "source_sha256": "cff6fdb274dea8bbbcec7074ab3936d8f47f57c2b0aa60f78eba0aec8e3c1420",
+      "fixture_sha256": "e4bf1e7f80f23314dca618379faaed6fe88b7f91048e8430da16ffc06fa956a2",
+      "retained_pixel_sha256": "14a1a787eba4060b3968c379afca6e6df30d84c4b7fa3876e1d953ca562bbfcf"
+    },
+    "00036-toolbar.png": {
+      "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-041151-957581-a04a2fd0\\frames\\00036-mixed-dragon-post-1.png",
+      "source_sha256": "0d0e4db8b80b9da0fb1c9b2f87c53eed25bacdd854aa5fcc13344e89d3cc8197",
+      "fixture_sha256": "d1329dea328a9a8b0ae8ead774ce5ffc2ede1e2a4fd43c326b143d6c8defaa2b",
+      "retained_pixel_sha256": "40bf9ac62e4c8142630beed5f2b5c75abd9d3b95a3b8c089b73f012cfedaf3c3"
+    }
+  }
+}

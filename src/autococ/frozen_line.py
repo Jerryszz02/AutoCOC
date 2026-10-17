@@ -196,8 +196,8 @@ def _closed_card_border(current: Any, bbox: tuple[int, int, int, int]) -> dict |
             "bottom_contrast": bottom_contrast}
 
 
-def _closed_dragon_card_border_18_647_2(current: Any,
-                                         bbox: tuple[int, int, int, int]) -> dict | None:
+def _closed_dragon_card_border_primary_18_647_2(current: Any,
+                                                 bbox: tuple[int, int, int, int]) -> dict | None:
     """Recognize the complete rounded gray dragon card in this client layout.
 
     This only proposes a header ROI. Fresh x0 OCR, saved portrait matching and
@@ -360,6 +360,172 @@ def _closed_dragon_card_border_18_647_2(current: Any,
             "lower_outline": {"connectivity": 4, "gradient_min": 40,
                               "bottom_gradient_max": -40,
                               "connected_pixels": len(connected)}}
+
+
+def _closed_dragon_shifted_gray_border_18_647_2(
+        current: Any, bbox: tuple[int, int, int, int]) -> dict | None:
+    """Prove the sampled 88px spent card whose physical left rim moved one pixel.
+
+    The source slot and count ROI stay fixed. This is a separate complete gray
+    outline proof, not a tolerance added to the existing strong-edge shape.
+    """
+    from collections import deque
+
+    import cv2
+    import numpy as np
+
+    source_left, top, right, bottom = bbox
+    left = source_left - 1
+    if (current.shape[:2] != (720, 1280) or right - source_left != 88 or
+            not (590 <= top <= 600 and 705 <= bottom <= 715) or
+            left < 2 or right >= 1278):
+        return None
+    gray = cv2.cvtColor(current, cv2.COLOR_BGR2GRAY)
+    side = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    vertical = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+
+    def bands(x: int) -> list[float]:
+        return [float(np.median(band)) for band in np.array_split(side[625:695, x], 7)]
+
+    left_bands, right_bands = bands(left), bands(right - 1)
+    # The left rim must be uniquely at source_left-1. The two adjacent columns
+    # cannot independently satisfy the same seven-band edge proof.
+    if (min(left_bands) < 175 or max(left_bands) > 300 or
+            min(bands(source_left)) >= 175 or min(bands(source_left + 1)) >= 175 or
+            max(right_bands) > -160 or min(right_bands) < -300):
+        return None
+    hsv = cv2.cvtColor(current, cv2.COLOR_BGR2HSV)
+    inner = hsv[top + 32:bottom - 20, left + 20:right - 20]
+    if (inner.size == 0 or float(np.median(inner[:, :, 1])) > 5 or
+            not 35 <= float(np.median(inner[:, :, 2])) <= 90):
+        return None
+
+    # Every row of each rounded upper corner must follow a signed ridge from
+    # the inset to the proved straight side. The weaker corner threshold is
+    # confined to this gray-card variant and paired with a complete top rim.
+    def upper_corner_trace(left_side: bool) -> tuple[int, ...] | None:
+        def has_edge(y: int, inset: int) -> bool:
+            if left_side:
+                return bool(side[y, left + inset] >= 90)
+            return bool(side[y, right - 1 - inset] <= -90)
+
+        paths = {(inset,) for inset in range(1, 4) if has_edge(top + 3, inset)}
+        for y in range(top + 4, top + 8):
+            paths = {path + (inset,) for path in paths for inset in range(4)
+                     if (path[-1] >= inset and path[-1] - inset <= 1 and
+                         (y != top + 4 or inset >= 1) and has_edge(y, inset))}
+            if not paths:
+                return None
+        return next((path for path in sorted(paths) if path[-1] == 0), None)
+
+    upper_left, upper_right = upper_corner_trace(True), upper_corner_trace(False)
+    if upper_left is None or upper_right is None:
+        return None
+    top_ridge = vertical[top:top + 2, left + 4:right - 4]
+    top_columns = np.max(top_ridge, axis=0)
+    top_rows = np.argmax(top_ridge, axis=0)
+    top_central_min = float(np.min(vertical[top, left + 8:right - 8]))
+    left_join = float(vertical[top + 2, left + 3])
+    right_join = float(vertical[top + 2, right - 4])
+    if (top_central_min < 250 or float(np.min(top_columns)) < 140 or
+            int(np.max(np.abs(np.diff(top_rows)))) > 1 or
+            left_join < 140 or right_join < 140 or
+            float(np.min(side[top + 7:625, left])) < 60 or
+            float(np.max(side[top + 7:625, right - 1])) > -60):
+        return None
+    # Scalar ridge, join and corner checks can each pass while the join is
+    # severed from the ridge. Follow only their signed, thresholded pixels as
+    # one eight-connected upper outline between the two straight-side ends.
+    upper_rim = np.zeros((8, right - left), dtype=np.bool_)
+    upper_rim[:2, 4:-4] = top_ridge >= 140
+    upper_rim[2, 3] = left_join >= 140
+    upper_rim[2, -4] = right_join >= 140
+    upper_rim[3:8, :4] = side[top + 3:top + 8, left:left + 4] >= 90
+    upper_rim[3:8, -4:] = side[top + 3:top + 8, right - 4:right] <= -90
+    upper_start = (7, 0)
+    upper_end = (7, right - left - 1)
+    if not (upper_rim[upper_start] and upper_rim[upper_end]):
+        return None
+    upper_connected = {upper_start}
+    upper_pending = deque([upper_start])
+    while upper_pending:
+        row, col = upper_pending.popleft()
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                yy, xx = row + dy, col + dx
+                if (0 <= yy < upper_rim.shape[0] and 0 <= xx < upper_rim.shape[1] and
+                        upper_rim[yy, xx] and (yy, xx) not in upper_connected):
+                    upper_connected.add((yy, xx))
+                    upper_pending.append((yy, xx))
+    if upper_end not in upper_connected:
+        return None
+    left_edge, right_edge = float(np.median(left_bands)), float(np.median(right_bands))
+    y = bottom - 7
+    if (side[y, left] > .7 * left_edge or
+            side[y, right - 1] < .75 * right_edge):
+        return None
+
+    rim = np.zeros((bottom - 623, right - left), dtype=np.bool_)
+    for y in range(625, bottom):
+        rim[y - 624, :9] |= side[y, left:left + 9] >= 40
+        rim[y - 624, -9:] |= side[y, right - 9:right] <= -40
+    for y in range(bottom - 4, bottom - 2):
+        rim[y - 624, 5:-5] |= vertical[y, left + 5:right - 5] <= -40
+    seed = (650 - 624, 0)
+    opposite = (650 - 624, right - left - 1)
+    center = (bottom - 3 - 624, (right - left) // 2)
+    if not (rim[seed] and rim[opposite] and rim[center]):
+        return None
+    connected = {seed}
+    pending = deque([seed])
+    while pending:
+        row, col = pending.popleft()
+        for point in ((row - 1, col), (row + 1, col), (row, col - 1), (row, col + 1)):
+            yy, xx = point
+            if (0 <= yy < rim.shape[0] and 0 <= xx < rim.shape[1] and
+                    rim[point] and point not in connected):
+                connected.add(point)
+                pending.append(point)
+    if opposite not in connected or center not in connected:
+        return None
+    for y in range(625, bottom):
+        row = y - 624
+        if (not any((row, x) in connected for x in range(9)) or
+                not any((row, x) in connected for x in range(right - left - 9, right - left))):
+            return None
+    bottom_bands = []
+    for segment in np.array_split(np.arange(left + 8, right - 8), 5):
+        strengths = [max((-float(vertical[y, x]) for y in range(bottom - 4, bottom - 2)
+                          if (y - 624, x - left) in connected), default=0.)
+                     for x in segment]
+        bottom_bands.append(min(strengths))
+    if min(bottom_bands) < 100:
+        return None
+    return {"method": "18.647.2_dragon_shifted_gray_closed_card",
+            "source_card_bbox": list(bbox),
+            "physical_card_bbox": [left, top, right, bottom],
+            "physical_offset_from_source": [-1, 0, 0, 0],
+            "left_side_bands": left_bands, "right_side_bands": right_bands,
+            "gray_inner_saturation_median": float(np.median(inner[:, :, 1])),
+            "gray_inner_value_median": float(np.median(inner[:, :, 2])),
+            "upper_outline": {"left_inset": upper_left, "right_inset": upper_right,
+                              "central_gradient_min": top_central_min,
+                              "ridge_gradient_min": float(np.min(top_columns)),
+                              "corner_join_gradient_min": min(left_join, right_join),
+                              "connected_columns": len(top_columns),
+                              "connectivity": 8,
+                              "connected_pixels": len(upper_connected)},
+            "lower_outline": {"connectivity": 4, "connected_pixels": len(connected),
+                              "bottom_inner_gradient_bands": bottom_bands,
+                              "bottom_inner_gradient_min": min(bottom_bands)}}
+
+
+def _closed_dragon_card_border_18_647_2(current: Any,
+                                         bbox: tuple[int, int, int, int]) -> dict | None:
+    original = _closed_dragon_card_border_primary_18_647_2(current, bbox)
+    if original is not None:
+        return original
+    return _closed_dragon_shifted_gray_border_18_647_2(current, bbox)
 
 
 def _post_troop_reading(session: Any, post_path: Any, source_path: str,
