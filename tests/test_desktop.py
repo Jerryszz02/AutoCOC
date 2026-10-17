@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event
+from types import SimpleNamespace
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -10,11 +12,151 @@ from autococ.config import load_config
 from autococ.desktop import (DesktopController, RunOptions, desktop_config, load_options,
                              report_history, report_text, save_options)
 from autococ.errors import ConfigError
+from autococ.objectives import GoalProgress
 from autococ.reporting import RunStats
 from autococ.routine_config import GoalConfig, ResourceFilter, RoutineConfig, TaskSpec
 
 
 class DesktopTests(unittest.TestCase):
+    def test_event_check_preflight_is_explicit_and_uses_single_worker_slot(self):
+        controller = DesktopController()
+        adapter = Path(__file__).resolve().parents[1] / "assets/catalogs/rift_event_18_647_2.adapter.toml"
+        with patch.object(controller, "_run_event_check") as worker:
+            controller.start_event_check(self.path, self.options, str(adapter))
+            controller.thread.join(3)
+        worker.assert_called_once()
+        self.assertEqual(worker.call_args.args[1], adapter)
+        self.assertFalse(worker.call_args.args[0].runtime.dry_run)
+        with self.assertRaises(ConfigError):
+            controller.start_event_check(self.path, self.options, "")
+        controller.thread = SimpleNamespace(is_alive=lambda: True)
+        with self.assertRaises(RuntimeError):
+            controller.start_event_check(self.path, self.options, str(adapter))
+
+    def test_event_check_normal_and_stop_keep_navigation_only_receipts(self):
+        from autococ.scene import SceneSnapshot
+        from autococ.errors import FlowError, StopRequested
+        from autococ.flow import verify_home as production_verify_home
+        from autococ.reporting import TaskResult
+        adapter = Path(__file__).resolve().parents[1] / "assets/catalogs/rift_event_18_647_2.adapter.toml"
+        config = desktop_config(self.path, self.options)
+        template = config.vision.template_dir / "daily_event_calendar_18_647_2.png"
+        template.parent.mkdir(parents=True, exist_ok=True)
+        template.write_bytes(b"mock template bytes")
+
+        def run_case(*, interrupted=False, changed_gems=False, unknown=False, repeated_home=False,
+                     inactive_reason=None, client_version="18.647.2", startup_scene=None):
+            controller = DesktopController()
+            session = SimpleNamespace(action_count=2, client_version=client_version, client_version_code=186472,
+                                      deadline=time.monotonic() + 600, task_deadline=time.monotonic() + 600)
+            session.begin_task = Mock()
+            session.check_deadline = Mock()
+            session.close = Mock()
+            serial = 0
+            def shot(gems=231):
+                nonlocal serial
+                serial += 1
+                path = session.directory / "frames" / f"{serial:05d}.png"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(f"frame-{serial}".encode())
+                return SceneSnapshot("village", .99, path, {"village_type": "home",
+                    "buttons": [{"name": "attack"}, {"name": "shop"}],
+                    "observed_at_monotonic": time.monotonic() + serial / 10,
+                    "resources": {"gold": 100, "elixir": 200, "dark_elixir": 3, "gems": gems}})
+            def connect(_config, _adb, _serial, directory, **_kwargs):
+                session.directory = directory
+                (directory / "events.jsonl").write_text("", encoding="utf-8")
+                return session
+            home_calls = []
+            home_frames = []
+            def home(_session):
+                home_calls.append(True)
+                captured = shot(232 if changed_gems and len(home_calls) > 1 else 231)
+                home_frames.append(captured)
+                return captured
+            def observe(_label):
+                if startup_scene == "stopped" and _label == "launch-home-check":
+                    raise StopRequested("interrupted by user")
+                if startup_scene in {"disconnected", "account_in_use"} and _label == "launch-home-check":
+                    captured = shot()
+                    return SceneSnapshot(startup_scene, .99, captured.screenshot_path, captured.observations)
+                return home_frames[-1] if repeated_home else shot(232 if changed_gems else 231)
+            session.observe = Mock(side_effect=observe)
+            progress = (GoalProgress(False, reason=inactive_reason, available=False) if inactive_reason else
+                        GoalProgress(False, 13925, 16000, "in_progress"))
+            reader = Mock(side_effect=(StopRequested("interrupted by user") if interrupted else
+                                       FlowError("account_in_use") if unknown else None),
+                          return_value=progress)
+            startup = TaskResult("launch", "succeeded", "home", evidence=[self.path])
+            recovery = TaskResult("recover", "failed" if startup_scene == "account_in_use" else "succeeded",
+                                  "account_in_use" if startup_scene == "account_in_use" else "single_retry_and_village_verified",
+                                  evidence=[self.path], metrics={"retry_actions": 0 if startup_scene == "account_in_use" else 1})
+            verify_patch = (patch("autococ.flow.verify_home", wraps=production_verify_home) if startup_scene
+                            else patch("autococ.flow.verify_home", return_value=startup))
+            with (patch("autococ.desktop.DeviceManager") as manager,
+                  patch("autococ.session.GameSession.connect", side_effect=connect),
+                  patch("autococ.flow.return_to_village", side_effect=home),
+                  patch("autococ.flow.recover_connection", return_value=recovery) as recover,
+                  verify_patch as verify,
+                  patch("autococ.objectives.read_progress", reader)):
+                manager.return_value.connect.return_value.serial = "mock"
+                controller._run_event_check(config, adapter)
+                if client_version != "18.647.2":
+                    verify.assert_not_called()
+                if startup_scene in {"disconnected", "account_in_use"}:
+                    recover.assert_called_once()
+            started = controller.events.get_nowait()
+            finished = controller.events.get_nowait()
+            result = finished["result"]
+            self.assertEqual(started["kind"], "event_check_started")
+            self.assertEqual(finished["kind"], "event_check_finished")
+            self.assertEqual(json.loads((Path(finished["output"]) / "summary.json").read_text(encoding="utf-8")), result)
+            self.assertEqual(result["battle_inputs"], 0)
+            self.assertEqual(result["claim_inputs"], 0)
+            self.assertEqual(result["army_edit_inputs"], 0)
+            self.assertFalse(result["formal_acceptance"])
+            return result, len(home_calls), reader.call_count, session
+
+        success, homes, calls, session = run_case()
+        self.assertEqual((success["status"], success["returned_home"], homes, calls),
+                         ("completed", True, 2, 1))
+        self.assertEqual(len(success["home_after"]), 2)
+        self.assertEqual((success["client_version_code"], success["device_serial"], success["game_package"]),
+                         (186472, "mock", config.game.package_name))
+        self.assertEqual(success["baseline_resolution"], list(config.game.baseline_resolution))
+        self.assertEqual(success["effective_config_overrides"]["adb.manual_serial"], config.adb.manual_serial)
+        self.assertEqual(success["effective_config_overrides"]["device.serial"], "mock")
+        self.assertEqual(success["effective_config_overrides"]["client.version"], "18.647.2")
+        session.close.assert_called_once()
+        stopped, homes, calls, _ = run_case(interrupted=True)
+        self.assertEqual((stopped["status"], stopped["returned_home"], homes, calls),
+                         ("cancelled", False, 1, 1))
+        changed, homes, calls, _ = run_case(changed_gems=True)
+        self.assertEqual((changed["status"], changed["returned_home"], homes, calls),
+                         ("failed", False, 2, 1))
+        uncertain, homes, calls, _ = run_case(unknown=True)
+        self.assertEqual((uncertain["status"], uncertain["returned_home"], homes, calls),
+                         ("failed", False, 1, 1))
+        repeated, homes, calls, _ = run_case(repeated_home=True)
+        self.assertEqual((repeated["status"], repeated["returned_home"], homes, calls),
+                         ("failed", False, 2, 1))
+        idle, homes, calls, _ = run_case(startup_scene="disconnected")
+        self.assertEqual((idle["status"], idle["startup"]["metrics"]["retry_actions"], homes, calls),
+                         ("completed", 1, 2, 1))
+        occupied, homes, calls, _ = run_case(startup_scene="account_in_use")
+        self.assertEqual((occupied["status"], homes, calls), ("failed", 0, 0))
+        stopped, homes, calls, _ = run_case(startup_scene="stopped")
+        self.assertEqual((stopped["status"], homes, calls), ("cancelled", 0, 0))
+        wrong_version, homes, calls, _ = run_case(client_version="0.0")
+        self.assertEqual((wrong_version["status"], homes, calls), ("failed", 0, 0))
+        self.assertIn("version", wrong_version["reason"])
+        inactive, homes, calls, _ = run_case(inactive_reason="event_inactive")
+        self.assertEqual((inactive["status"], inactive["reason"], homes, calls),
+                         ("skipped", "event_inactive", 2, 1))
+        other, homes, calls, _ = run_case(inactive_reason="unverified")
+        self.assertEqual((other["status"], other["reason"], homes, calls),
+                         ("failed", "unverified", 2, 1))
+
     def test_picker_uses_same_worker_slot_and_passes_stop_callback(self):
         controller = DesktopController()
         output = self.root / "picker-run"

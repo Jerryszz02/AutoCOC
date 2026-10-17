@@ -32,6 +32,7 @@ class AutoCOCApp:
         self.closing = False
         self.active = False
         self.picker_active = False
+        self.event_check_active = False
         self.progress_state = {}
         self.report_path: Path | None = None
         self.history: dict[str, tuple[Path, dict]] = {}
@@ -452,6 +453,15 @@ class AutoCOCApp:
         else:
             ttk.Label(goal_frame, text="进度适配 TOML").grid(row=1, column=0, sticky="w", pady=2)
             ttk.Entry(goal_frame, textvariable=values["adapter_path"], width=32).grid(row=1, column=1, sticky="w", padx=8, pady=2)
+            if kind == "event":
+                ttk.Button(goal_frame, text="选择当前版活动预设",
+                           command=lambda task=task_id: self._choose_current_event_adapter(task)).grid(
+                               row=1, column=2, sticky="w", padx=8)
+                self.event_check_button = ttk.Button(goal_frame, text="实机只读检查进度",
+                                                     command=self.start_event_check)
+                self.event_check_button.grid(row=1, column=3, sticky="w")
+                ttk.Label(goal_frame, text="仅打开并读取活动进度后回村；不会开战、领奖或配兵。",
+                          style="Muted.TLabel").grid(row=3, column=0, columnspan=4, sticky="w")
             ttk.Label(goal_frame, text="进度目标").grid(row=2, column=0, sticky="w", pady=2)
             ttk.Entry(goal_frame, textvariable=values["target"], width=22).grid(row=2, column=1, sticky="w", padx=8, pady=2)
             if kind == "clan_games":
@@ -469,6 +479,11 @@ class AutoCOCApp:
         flags = self.full_flags[task_id]
         self.task_fields[task_id]["full_resources"].set(
             ",".join(name for name in ("gold", "elixir", "dark_elixir") if flags[name].get()))
+
+    def _choose_current_event_adapter(self, task_id: str) -> None:
+        path = Path(__file__).resolve().parents[2] / "assets/catalogs/rift_event_18_647_2.adapter.toml"
+        self.task_fields[task_id]["adapter_path"].set(str(path))
+        self.status.set("已选择当前版活动适配文件；仍需显式启动只读检查或活动任务。")
 
     def _load_strategy_file(self) -> None:
         name = filedialog.askopenfilename(parent=self.root, title="选择打法 TOML", filetypes=[("TOML", "*.toml")])
@@ -682,6 +697,7 @@ class AutoCOCApp:
             return
         self.active = True
         self.picker_active = False
+        self.event_check_active = False
         self._running_controls(True)
         self.task_table.delete(*self.task_table.get_children())
         for task in (spec.id for spec in options.routine.tasks if spec.enabled):
@@ -717,15 +733,39 @@ class AutoCOCApp:
             return
         self.active = True
         self.picker_active = True
+        self.event_check_active = False
         self._running_controls(True)
         self.picker_status.set(f"实机采集中，原始证据目录：{output}")
         self.status.set("正在实机只读采集；停止后仍需检查设备界面。")
         self.badge.configure(text="军队采集中")
 
+    def start_event_check(self) -> None:
+        try:
+            adapter_path = self.task_fields["event"]["adapter_path"].get().strip()
+            if not adapter_path:
+                raise ValueError("请先选择当前活动适配文件")
+            # An explicit read-only check is independent of enabled daily
+            # tasks and unfinished battle settings in the editor.
+            options = replace(RunOptions.from_config(load_config(self.config_path)),
+                              serial=self.values["serial"].get(), routine=None, dry_run=False)
+            self.controller.start_event_check(self.config_path, options, adapter_path)
+        except (AutoCOCError, OSError, ValueError, RuntimeError) as exc:
+            messagebox.showerror("无法检查活动进度", str(exc), parent=self.root)
+            return
+        self.active = True
+        self.picker_active = False
+        self.event_check_active = True
+        self._running_controls(True)
+        self.pages.select(0)
+        self.status.set("正在实机只读检查活动进度；不会开战、领奖或配兵。")
+        self.badge.configure(text="活动进度检查中")
+
     def stop(self) -> None:
         self.controller.stop()
         self.stop_button.state(["disabled"])
         self.picker_stop_button.state(["disabled"])
+        if hasattr(self, "event_check_button") and self.event_check_button.winfo_exists():
+            self.event_check_button.state(["disabled"])
         self.status.set("停止请求已发送，等待当前有时限的调用返回并保存报告。")
         self.badge.configure(text="正在停止")
 
@@ -737,6 +777,8 @@ class AutoCOCApp:
         self.stop_button.state(["!disabled"] if running else ["disabled"])
         self.picker_start_button.state(["disabled"] if running else ["!disabled"])
         self.picker_stop_button.state(["!disabled"] if running and self.picker_active else ["disabled"])
+        if hasattr(self, "event_check_button") and self.event_check_button.winfo_exists():
+            self.event_check_button.state(["disabled"] if running else ["!disabled"])
 
     def _poll(self) -> None:
         for _ in range(200):
@@ -748,6 +790,7 @@ class AutoCOCApp:
         if self.active and not self.controller.running:
             self.active = False
             self.picker_active = False
+            self.event_check_active = False
             self._running_controls(False)
         if self.closing and not self.controller.running:
             self.root.destroy()
@@ -768,6 +811,18 @@ class AutoCOCApp:
             self.picker_status.set(f"{detail} 目录：{event['output']}")
             self.status.set(detail)
             self.badge.configure(text="采集完成" if succeeded else "采集未完成")
+            self._log(detail)
+        elif kind == "event_check_finished":
+            result = event["result"]
+            if result.get("status") == "completed" and result.get("returned_home") is True:
+                progress = result.get("progress") or {}
+                detail = f"活动进度：{progress.get('current')} / {progress.get('target')}；已核验回村。"
+            elif result.get("status") == "skipped" and result.get("returned_home") is True:
+                detail = "当前活动无可用机会；已核验回村。"
+            else:
+                detail = f"活动只读检查未完成：{result.get('reason', '未知')}；请查看当前设备画面。"
+            self.status.set(detail + f" 证据：{event['output']}")
+            self.badge.configure(text="活动检查结束")
             self._log(detail)
         elif kind == "run_started":
             self.progress_state = {}

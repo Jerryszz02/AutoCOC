@@ -13,6 +13,35 @@ from autococ.routine_config import GoalConfig, RoutineConfig, TaskSpec
 
 
 class GUITests(unittest.TestCase):
+    def test_event_adapter_preset_is_explicit_and_custom_path_survives_save(self):
+        self.assertFalse(self.app.task_vars["event"].get())
+        self.assertEqual(self.app.task_fields["event"]["adapter_path"].get(), "")
+        self.app._open_task_config("event")
+        self.app._choose_current_event_adapter("event")
+        selected = self.app.task_fields["event"]["adapter_path"].get()
+        self.assertTrue(selected.endswith("rift_event_18_647_2.adapter.toml"))
+        self.assertFalse(self.app.task_vars["event"].get())
+        self.app.task_fields["event"]["adapter_path"].set("custom/event.toml")
+        self.app._save()
+        self.app._load()
+        self.assertEqual(self.app.task_fields["event"]["adapter_path"].get(), "custom/event.toml")
+
+    def test_event_progress_check_uses_only_the_explicit_readonly_worker(self):
+        self.app._open_task_config("event")
+        self.app._choose_current_event_adapter("event")
+        self.app.start_event_check()
+        self.controller.start_event_check.assert_called_once()
+        self.controller.start.assert_not_called()
+        self.controller.start_picker.assert_not_called()
+        self.assertTrue(self.app.event_check_active)
+        self.assertTrue(self.app.event_check_button.instate(["disabled"]))
+        self.app._event({"kind": "event_check_finished", "output": "C:/evidence/event",
+                         "result": {"status": "completed", "returned_home": True,
+                                    "progress": {"current": 13925, "target": 16000}}})
+        self.assertIn("13925 / 16000", self.app.status.get())
+        self.app.stop()
+        self.controller.stop.assert_called_once_with()
+
     def test_picker_action_is_explicit_and_separate_from_daily_start(self):
         output = self.path.parent / "new-picker-run"
         self.app.picker_output.set(str(output))

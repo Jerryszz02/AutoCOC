@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
+import hashlib
 import json
 import logging
+import math
 from pathlib import Path
 from queue import Queue
 from threading import Event, Thread
+import time
 from uuid import uuid4
 
 from .config import AppConfig, ProfileConfig, VisionAgentConfig, load_config, load_vision_agent
@@ -17,7 +20,7 @@ from .strategies import STRATEGIES
 from .errors import ConfigError, StopRequested
 from .flow import FlowRunner
 from .reporting import RunStats, TaskResult, summarize_run, write_report
-from .routine_config import RoutineConfig, default_routine, routine_from_dict, routine_to_dict
+from .routine_config import GoalConfig, RoutineConfig, TaskSpec, default_routine, routine_from_dict, routine_to_dict
 
 
 TASK_LABELS = {"launch": "连接与启动", "collect": "收集资源", "request": "请求增援",
@@ -272,6 +275,183 @@ class DesktopController:
                              args=(config_path, output, max_troop_pages, limit_sec),
                              name="AutoCOC-picker-collector", daemon=False)
         self.thread.start()
+
+    def start_event_check(self, path: Path, options: RunOptions, adapter_path: str) -> None:
+        """Explicit live, read-only event progress check in the shared worker slot."""
+        if self.running:
+            raise RuntimeError("已有任务正在运行")
+        from .objectives import load_adapter
+
+        config = desktop_config(path, replace(options, dry_run=False))
+        selected = Path(adapter_path.strip()) if isinstance(adapter_path, str) and adapter_path.strip() else None
+        if selected is None:
+            raise ConfigError("请显式选择当前活动进度适配文件")
+        selected = selected if selected.is_absolute() else config.source_path.parent / selected
+        selected = selected.resolve()
+        adapter = load_adapter(selected)
+        if adapter.kind != "event":
+            raise ConfigError("只读活动检查只能使用活动适配文件")
+        self.stop_event.clear()
+        self.thread = Thread(target=self._run_event_check, args=(config, selected),
+                             name="AutoCOC-event-progress-check", daemon=False)
+        self.thread.start()
+
+    def _run_event_check(self, config: AppConfig, adapter_path: Path) -> None:
+        """Use the bounded startup recovery, then navigate with the production reader."""
+        from .flow import return_to_village, verify_home
+        from .objectives import load_adapter, read_progress
+        from .session import GameSession
+
+        def sha(path: Path) -> str:
+            return hashlib.sha256(path.read_bytes()).hexdigest()
+
+        def safe_sha(path: Path) -> str | None:
+            try:
+                return sha(path)
+            except OSError:
+                return None
+
+        def home_record(snapshot) -> dict:
+            buttons = snapshot.observations.get("buttons")
+            if (snapshot.scene != "village" or snapshot.observations.get("village_type") != "home"
+                    or not math.isfinite(snapshot.confidence)
+                    or snapshot.confidence < .8 or not isinstance(buttons, list)
+                    or any(sum(isinstance(row, dict) and row.get("name") == name for row in buttons) != 1
+                           for name in ("attack", "shop"))):
+                raise ValueError("HOME 双导航入口未核验")
+            return {"frame": str(snapshot.screenshot_path), "sha256": sha(Path(snapshot.screenshot_path)),
+                    "observed_at_monotonic": snapshot.observations.get("observed_at_monotonic"),
+                    "resources": snapshot.observations.get("resources")}
+
+        directory = config.runtime.report_dir / f"event-check-{uuid4().hex}"
+        template = None
+        source_paths = {name: Path(__file__).with_name(name) for name in
+                        ("desktop.py", "gui.py", "objectives.py", "flow.py", "session.py")}
+        result = {"schema": "desktop_event_readonly_check_v1", "status": "failed",
+                  "reason": "not_started", "returned_home": False, "formal_acceptance": False,
+                  "battle_inputs": 0, "claim_inputs": 0, "army_edit_inputs": 0,
+                  "config_path": str(config.source_path), "adapter_path": str(adapter_path),
+                  "config_sha256_before": None, "adapter_sha256_before": None,
+                  "entry_template_path": None,
+                  "entry_template_sha256_before": None,
+                  "source_sha256_before": None,
+                  "device_serial": None, "client_version": None, "client_version_code": None,
+                  "game_package": config.game.package_name,
+                  "baseline_resolution": list(config.game.baseline_resolution),
+                  "effective_config_overrides": {"adb.manual_serial": config.adb.manual_serial,
+                                                 "runtime.dry_run": config.runtime.dry_run},
+                  "progress": None, "home_before": None, "home_after": [], "action_count": 0}
+        session = None
+        self.events.put({"kind": "event_check_started", "output": str(directory)})
+        try:
+            config.runtime.report_dir.mkdir(parents=True, exist_ok=True)
+            directory.mkdir(exist_ok=False)
+            if self.stop_event.is_set():
+                raise StopRequested("interrupted by user")
+            adapter = load_adapter(adapter_path)
+            if adapter.kind != "event":
+                raise ConfigError("只读活动检查只能使用活动适配文件")
+            template = config.vision.template_dir / f"{adapter.entry_template}.png" if adapter.entry_template else None
+            result["entry_template_path"] = str(template) if template else None
+            result["config_sha256_before"] = sha(config.source_path)
+            result["adapter_sha256_before"] = sha(adapter_path)
+            if template is not None:
+                result["entry_template_sha256_before"] = sha(template)
+            result["source_sha256_before"] = {name: sha(path) for name, path in source_paths.items()}
+            manager = DeviceManager(config)
+            device = manager.connect()
+            result["device_serial"] = device.serial
+            if self.stop_event.is_set():
+                raise StopRequested("interrupted by user")
+            session = GameSession.connect(config, manager.adb, device.serial, directory,
+                                          launch=True, stop_event=self.stop_event)
+            session.begin_task()
+            session.deadline = min(session.deadline, time.monotonic() + 120)
+            session.task_deadline = min(session.task_deadline, session.deadline)
+            result["client_version"] = session.client_version
+            result["client_version_code"] = session.client_version_code
+            result["effective_config_overrides"].update({"device.serial": device.serial,
+                                                          "client.version": session.client_version,
+                                                          "client.version_code": session.client_version_code})
+            if adapter.client_versions and session.client_version not in adapter.client_versions:
+                raise ConfigError("Current client version is outside progress adapter applicability")
+            startup = verify_home(session)
+            result["startup"] = {"status": startup.status, "reason": startup.reason,
+                                 "metrics": startup.metrics,
+                                 "evidence": [str(path) for path in startup.evidence]}
+            if startup.status != "succeeded":
+                raise ValueError(f"Startup HOME verification failed: {startup.reason}")
+            # The startup result can be a recovery receipt; this capture must be
+            # a fresh HOME frame before the progress reader begins navigation.
+            first = return_to_village(session)
+            result["home_before"] = home_record(first)
+            task = TaskSpec("event_check", "event", goal=GoalConfig(adapter_path=str(adapter_path)))
+            progress = read_progress(session, task)
+            result["progress"] = {"available": progress.available, "completed": progress.completed,
+                                  "current": progress.current, "target": progress.target,
+                                  "reason": progress.reason, "values": progress.values,
+                                  "evidence": [str(path) for path in progress.evidence]}
+            # The production reader already returns HOME. Require two further
+            # fresh HOME captures before calling the round trip verified.
+            after_first = return_to_village(session)
+            after_second = session.observe("event-check-home-confirm-2")
+            homes = [home_record(shot) for shot in (after_first, after_second)]
+            result["home_after"] = homes
+            sequence = [result["home_before"], *homes]
+            times = [row["observed_at_monotonic"] for row in sequence]
+            if (len({row["frame"] for row in sequence}) != 3
+                    or any(type(value) not in (int, float) or not math.isfinite(value) for value in times)
+                    or not times[0] < times[1] < times[2]):
+                raise ValueError("HOME 原帧顺序或独立性未核验")
+            before_resources = result["home_before"]["resources"]
+            if (not isinstance(before_resources, dict)
+                    or not all(isinstance(row["resources"], dict) for row in homes)
+                    or type(before_resources.get("gems")) is not int
+                    or any(type(row["resources"].get("gems")) is not int or
+                           row["resources"]["gems"] != before_resources["gems"] for row in homes)
+                    or homes[0]["resources"] != homes[1]["resources"]):
+                raise ValueError("HOME 库存双帧或前后宝石核对失败")
+            session.check_deadline()
+            if (sha(config.source_path) != result["config_sha256_before"]
+                    or sha(adapter_path) != result["adapter_sha256_before"]
+                    or (template is not None and sha(template) != result["entry_template_sha256_before"])
+                    or {name: sha(path) for name, path in source_paths.items()} != result["source_sha256_before"]):
+                raise ValueError("配置或适配文件在检查期间改变")
+            status = ("completed" if progress.available else
+                      "skipped" if progress.reason == "event_inactive" else "failed")
+            result.update(status=status,
+                          reason=progress.reason, returned_home=True, gems_unchanged=True)
+        except StopRequested as exc:
+            result.update(status="cancelled", reason=str(exc))
+        except Exception as exc:
+            result["reason"] = f"{type(exc).__name__}: {exc}"
+        finally:
+            if session is not None:
+                result["action_count"] = session.action_count
+                try:
+                    session.close()
+                except Exception as exc:
+                    result.update(status="failed", reason=f"session_close_failed:{type(exc).__name__}",
+                                  returned_home=False)
+            if directory.is_dir():
+                result["frames"] = [{"path": str(path), "sha256": safe_sha(path)}
+                                    for path in sorted((directory / "frames").glob("*.png"))]
+                events = directory / "events.jsonl"
+                result["events_sha256"] = safe_sha(events) if events.is_file() else None
+                result["config_sha256_after"] = safe_sha(config.source_path)
+                result["adapter_sha256_after"] = safe_sha(adapter_path)
+                result["entry_template_sha256_after"] = safe_sha(template) if template else None
+                result["source_sha256_after"] = {name: safe_sha(path) for name, path in source_paths.items()}
+                changed = any(result[key + "_before"] is not None and
+                              result[key + "_before"] != result[key + "_after"]
+                              for key in ("config_sha256", "adapter_sha256", "entry_template_sha256", "source_sha256"))
+                if changed or any(row["sha256"] is None for row in result["frames"]):
+                    result.update(status="failed", reason="source_config_or_adapter_changed_during_event_check",
+                                  returned_home=False)
+                with (directory / "summary.json").open("x", encoding="utf-8") as stream:
+                    json.dump(result, stream, ensure_ascii=False, indent=2, default=str)
+                    stream.write("\n")
+            self.events.put({"kind": "event_check_finished", "result": result, "output": str(directory)})
 
     def _run_picker(self, config_path: Path, output: Path, pages: int, limit_sec: int) -> None:
         from .picker_collection import collect_picker
