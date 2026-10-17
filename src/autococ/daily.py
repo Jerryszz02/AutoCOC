@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+import math
 import time
 from uuid import uuid4
 
@@ -67,73 +68,247 @@ def _ore_inventory_task(session, spec) -> TaskResult:
 
 
 def _event_reward_task(session, spec) -> TaskResult:
-    """Run one selected free claim and keep UI evidence separate from inventory."""
+    """Reconcile one free claim against ore balances in the same task session."""
     from .event_rewards import close_reward_track, claim_one_free_reward, open_reward_track
+    from .ore_navigation import read_current_ore_inventory
 
     end = min(session.deadline, session.task_deadline,
               time.monotonic() + spec.max_duration_sec)
+    amounts = {"shiny": 1250, "glowy": 115}
+    expected_amount = amounts[spec.free_reward_target]
+    before = None
+    after = None
+    before_home = None
+    after_home = None
     opened = None
     claim = None
     closed = None
     failure = None
     close_failure = None
+    delta = None
+    verified = False
+    known_home = False
 
-    def timeout(*, reserve_sec=0):
-        remaining = end - time.monotonic() - reserve_sec
-        if remaining <= 0:
-            raise FlowError("Event reward task has no safe time remaining")
-        return min(20, remaining)
+    def remaining() -> float:
+        session.check_deadline()
+        return end - time.monotonic()
 
+    def account_blocked() -> bool:
+        current = getattr(session, "last_snapshot", None)
+        if current is None:
+            return False
+        observations = current.observations
+        ocr = observations.get("ocr")
+        if current.scene == "account_in_use" or observations.get("account_in_use") is not None:
+            return True
+        return isinstance(ocr, list) and any(
+            "另一个设备正在连接这个村庄" in str(item.get("text", ""))
+            for item in ocr if isinstance(item, dict))
+
+    def stable_ores(receipt: dict) -> dict[str, dict[str, int]]:
+        inventory = receipt.get("inventory") if isinstance(receipt, dict) else None
+        homes = receipt.get("home_evidence") if isinstance(receipt, dict) else None
+        if (not isinstance(receipt, dict)
+                or receipt.get("status") != "stable_inventory_read"
+                or receipt.get("returned_home") is not True
+                or not isinstance(inventory, dict)
+                or inventory.get("status") != "stable_inventory_read"
+                or not isinstance(inventory.get("frames"), list)
+                or len(inventory["frames"]) != 2
+                or not isinstance(homes, list) or len(homes) != 2):
+            raise FlowError("Event reward ore inventory read is incomplete")
+        ores = inventory.get("ores")
+        if not isinstance(ores, dict) or set(ores) != {"shiny", "glowy", "starry"}:
+            raise FlowError("Event reward ore balances are incomplete")
+        capacities = {"shiny": 50000, "glowy": 5000, "starry": 1000}
+        for name, capacity in capacities.items():
+            value = ores[name]
+            if (not isinstance(value, dict) or type(value.get("amount")) is not int
+                    or type(value.get("capacity")) is not int
+                    or value["capacity"] != capacity
+                    or not 0 <= value["amount"] <= capacity):
+                raise FlowError("Event reward ore balance or capacity is invalid")
+        return ores
+
+    def home_resources(receipt: dict) -> dict:
+        current = getattr(session, "last_snapshot", None)
+        last = receipt["home_evidence"][-1]
+        if (current is None or current.scene != "village"
+                or current.observations.get("village_type") != "home"
+                or current.observations.get("resource_source") != "village_inventory"
+                or account_blocked() or not isinstance(last, dict)
+                or last.get("frame") != str(current.screenshot_path)
+                or last.get("frame_id") != current.observations.get("frame_id")):
+            raise FlowError("Event reward ore read did not finish at its bound HOME")
+        resources = current.observations.get("resources")
+        names = ("gold", "elixir", "dark_elixir", "gems")
+        if (not isinstance(resources, dict)
+                or any(type(resources.get(name)) is not int or resources[name] < 0
+                       for name in names)):
+            raise FlowError("Event reward HOME resources are incomplete")
+        observed_at = last.get("observed_at_monotonic")
+        if (type(observed_at) not in (int, float) or not math.isfinite(observed_at)
+                or current.observations.get("observed_at_monotonic") != observed_at):
+            raise FlowError("Event reward HOME capture time is missing")
+        return {"frame": last["frame"], "frame_id": last["frame_id"],
+                "frame_sha256": last.get("frame_sha256"),
+                "observed_at_monotonic": observed_at,
+                "resources": {name: resources[name] for name in names}}
+
+    def finish(status: str, reason: str) -> TaskResult:
+        frames = []
+        for receipt in (before, after):
+            if not isinstance(receipt, dict):
+                continue
+            selected = receipt.get("selected")
+            inventory = receipt.get("inventory")
+            close = receipt.get("close")
+            if isinstance(selected, dict) and selected.get("frame"):
+                frames.append(selected["frame"])
+            if isinstance(inventory, dict):
+                frames.extend(item["frame"] for item in (inventory.get("frames") or [])
+                              if isinstance(item, dict) and item.get("frame"))
+            if isinstance(close, dict) and close.get("frame"):
+                frames.append(close["frame"])
+            frames.extend(item["frame"] for item in (receipt.get("home_evidence") or [])
+                          if isinstance(item, dict) and item.get("frame"))
+        if isinstance(opened, dict):
+            frames.extend(opened[key] for key in ("entry_frame", "frame") if opened.get(key))
+        if isinstance(claim, dict):
+            frames.extend(item["path"] for item in (claim.get("frames") or [])
+                          if isinstance(item, dict) and item.get("path"))
+        if isinstance(closed, dict) and closed.get("frame"):
+            frames.append(closed["frame"])
+        current = getattr(session, "last_snapshot", None)
+        if current is not None and not frames:
+            frames.append(str(current.screenshot_path))
+        captured = (current.observations.get("observed_at_monotonic")
+                    if current is not None else None)
+        current_home = (current is not None and current.scene == "village"
+                        and current.observations.get("village_type") == "home"
+                        and current.observations.get("resource_source") == "village_inventory"
+                        and type(captured) in (int, float) and math.isfinite(captured)
+                        and 0 <= time.monotonic() - captured <= 8
+                        and not account_blocked())
+        returned_home = bool(known_home and current_home)
+        metrics = {"receipt_kind": "event_reward", "target": spec.free_reward_target,
+                   "before_ore_read": before, "after_ore_read": after,
+                   "before_home": before_home, "after_home": after_home,
+                   "opened": opened, "claim": claim, "closed": closed,
+                   "ore_delta": delta, "ui_claim_acknowledged": bool(
+                       isinstance(claim, dict) and claim.get("ui_claim_acknowledged") is True),
+                   "reward_inventory_verified": verified,
+                   "account_verified": False, "formal_success": False,
+                   "returned_home": returned_home,
+                   "failure": failure, "close_failure": close_failure}
+        return TaskResult(spec.id, status, reason,
+                          evidence=[Path(path) for path in dict.fromkeys(frames)], metrics=metrics)
+
+    # Two complete 90s inventory reads and three bounded 20s UI stages.
+    # The task/global deadlines are shared; no phase can extend either one.
+    current = getattr(session, "last_snapshot", None)
+    captured = current.observations.get("observed_at_monotonic") if current is not None else None
+    known_home = (current is not None and current.scene == "village"
+                  and current.observations.get("village_type") == "home"
+                  and current.observations.get("resource_source") == "village_inventory"
+                  and type(captured) in (int, float) and math.isfinite(captured)
+                  and 0 <= time.monotonic() - captured <= 8 and not account_blocked())
+    if remaining() < 240:
+        return finish("limited", "event_reward_full_reconciliation_budget_insufficient")
+
+    known_home = False
     try:
-        # Keep a closing window before any optional claim input.
-        opened = open_reward_track(session, timeout_sec=timeout(reserve_sec=20))
-        claim = claim_one_free_reward(session, spec.free_reward_target, enabled=True,
-                                      timeout_sec=timeout(reserve_sec=20))
+        before = read_current_ore_inventory(session, timeout_sec=90)
+        before_ores = stable_ores(before)
+        before_home = home_resources(before)
+        known_home = True
     except StopRequested:
         raise
     except Exception as exc:
         failure = f"{type(exc).__name__}: {exc}"
-    finally:
-        current = getattr(session, "last_snapshot", None)
-        current_track = (current is not None and current.scene == "popup"
-                         and isinstance(current.observations.get("event_reward_track"), dict))
-        if opened is not None or current_track:
-            try:
-                closed = close_reward_track(session, timeout_sec=timeout())
-            except Exception as exc:
-                close_failure = f"{type(exc).__name__}: {exc}"
+        return finish("failed", failure)
 
-    frames = []
-    if isinstance(opened, dict) and opened.get("frame"):
-        frames.append(opened["frame"])
-    if isinstance(claim, dict):
-        frames.extend(frame["path"] for frame in claim.get("frames", [])
-                      if isinstance(frame, dict) and frame.get("path"))
-    if isinstance(closed, dict) and closed.get("frame"):
-        frames.append(closed["frame"])
-    evidence = [Path(path) for path in dict.fromkeys(frames)]
-    metrics = {"receipt_kind": "event_reward", "target": spec.free_reward_target,
-               "opened": opened, "claim": claim, "closed": closed,
-               "ui_claim_acknowledged": bool(claim and claim.get("ui_claim_acknowledged") is True),
-               "reward_inventory_verified": False, "formal_success": False,
-               "returned_home": bool(closed and closed.get("status") == "home"),
-               "failure": failure, "close_failure": close_failure}
-    if close_failure or (opened is not None and not metrics["returned_home"]):
-        return TaskResult(spec.id, "failed", "event_reward_close_unverified",
-                          evidence=evidence, metrics=metrics)
+    current_amount = before_ores[spec.free_reward_target]["amount"]
+    capacity = before_ores[spec.free_reward_target]["capacity"]
+    if capacity - current_amount < expected_amount:
+        return finish("skipped", "event_reward_target_capacity_insufficient")
+    if remaining() < 150:
+        return finish("limited", "event_reward_post_read_budget_insufficient")
+
+    known_home = False
+    try:
+        opened = open_reward_track(session, timeout_sec=20)
+        if remaining() < 130:
+            failure = "event_reward_claim_and_after_read_budget_insufficient"
+        else:
+            claim = claim_one_free_reward(session, spec.free_reward_target, enabled=True,
+                                          timeout_sec=20)
+    except StopRequested:
+        raise
+    except Exception as exc:
+        failure = f"{type(exc).__name__}: {exc}"
+
+    # Only a recognized current track is safe to close. An occupied account is
+    # terminal and must not turn an uncertain claim into another input.
+    current = getattr(session, "last_snapshot", None)
+    current_track = (current is not None and current.scene == "popup"
+                     and isinstance(current.observations.get("event_reward_track"), dict))
+    if account_blocked():
+        failure = "event_reward_account_in_use"
+        return finish("failed", failure)
+    if opened is not None or current_track:
+        try:
+            available = remaining()
+            if available <= 0:
+                raise FlowError("Event reward has no time to close its track")
+            closed = close_reward_track(session, timeout_sec=min(20, available))
+            known_home = closed.get("status") == "home"
+        except StopRequested:
+            raise
+        except Exception as exc:
+            close_failure = f"{type(exc).__name__}: {exc}"
+
+    if close_failure or (opened is not None and not (closed and closed.get("status") == "home")):
+        return finish("failed", "event_reward_close_unverified")
     if failure:
-        return TaskResult(spec.id, "failed", failure, evidence=evidence, metrics=metrics)
+        return finish("failed", failure)
     if not isinstance(claim, dict):
-        return TaskResult(spec.id, "failed", "event_reward_claim_unknown",
-                          evidence=evidence, metrics=metrics)
+        return finish("failed", "event_reward_claim_unknown")
     if claim.get("status") == "no_opportunity":
-        return TaskResult(spec.id, "skipped", "event_reward_no_opportunity",
-                          evidence=evidence, metrics=metrics)
-    if claim.get("status") == "ui_acknowledged":
-        return TaskResult(spec.id, "limited", "event_reward_ui_acknowledged_inventory_unverified",
-                          evidence=evidence, metrics=metrics)
-    return TaskResult(spec.id, "failed", "event_reward_claim_unknown",
-                      evidence=evidence, metrics=metrics)
+        return finish("skipped", "event_reward_no_opportunity")
+    if not claim.get("input_attempted"):
+        return finish("failed", "event_reward_claim_unknown")
+
+    known_home = False
+    try:
+        if remaining() <= 0:
+            raise FlowError("Event reward has no time for the after inventory read")
+        after = read_current_ore_inventory(session, timeout_sec=min(90, remaining()))
+        after_ores = stable_ores(after)
+        after_home = home_resources(after)
+        known_home = True
+        delta = {name: after_ores[name]["amount"] - before_ores[name]["amount"]
+                 for name in ("shiny", "glowy", "starry")}
+        expected = {name: expected_amount if name == spec.free_reward_target else 0
+                    for name in delta}
+        verified = (claim.get("status") == "ui_acknowledged"
+                    and claim.get("ui_claim_acknowledged") is True
+                    and claim.get("input_sent") is True
+                    and delta == expected
+                    and before_home["observed_at_monotonic"] < after_home["observed_at_monotonic"]
+                    and before_home["frame"] != after_home["frame"]
+                    and before_home["frame_id"] != after_home["frame_id"]
+                    and not ({item["frame"] for item in before["inventory"]["frames"]}
+                             & {item["frame"] for item in after["inventory"]["frames"]})
+                    and before_home["resources"] == after_home["resources"])
+    except StopRequested:
+        raise
+    except Exception as exc:
+        failure = f"{type(exc).__name__}: {exc}"
+        return finish("failed", failure)
+    if verified:
+        return finish("limited", "event_reward_delta_verified_account_unverified")
+    return finish("failed", "event_reward_claim_or_delta_unverified")
 
 
 def validate_routine_files(config, routine):
