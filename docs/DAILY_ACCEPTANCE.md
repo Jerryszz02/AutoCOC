@@ -1,5 +1,7 @@
 # 日常助手交付与实机证据
 
+项目内 `collect-picker` 已在干净提交 `bf13c1d` 完成新实机采集（0304）：38.854 秒、11 张原帧、6 次菜单点击和 2 次滑动，取得 3 页兵种及法术首屏；四类军队容量、单位及数量前后相同，选中行像素稳定。真实导入 `E:/projects/AutoCOC-training/candidates/picker-20261017-0304-project-v1` 得到 4 张原字节候选、1 个来源组，标签 null、审核 pending、人审/训练就绪/正式验收均 false。根审计 `diagnostics/project-picker-0304-root-v1.json`（SHA-256 `ccc9db0b023f724b7094cbd6192c46d9957fa2f10ed1e013f00e1bcf69c86677`）绑定全部原帧、事件、采集模块/校准资产及导入文件；未改变原始证据。分页到配置上限，不宣称已遍历全部兵种；GUI 仍只有离线测试。结束在军队页，不能计完整日常或战斗验收。
+
 红血、日常预算与项目内采集工具最终组合回归 **465 passed、51 skipped、280 subtests passed**，另 **3** 个预算测试通过。测试收据 `pytest-warden-budget-picker-final-v2-20261017.json`（`2cc46fa281ced733c0139cffc6600b236e019ed53f52b3ada4806ef77b924e66`）；独立审查收据 `diagnostics/warden-budget-picker-independent-review-v1.json`（`e4cb7ee610075ee172af256280df2c0a9d40fc12cc1c5cca262b9d1390140399`），两项已确认 P2 已修、无剩余已确认 P1/P2。实际原图回放收据 `diagnostics/warden-red-023658-original-replay-v1.json`（`c8adc38fbe5889b015b11100ecce9428a787dd44df0d6baf2dd32ca7879b38d1`）只证明当前像素识别，未模拟或实施游戏技能输入，不追补正式实机成功。
 
 最新 `bf6da19 /023658` 已完整核验 20 次投放，气球/飞龙试探 10.754 秒、主力批次 3.691 秒；咏王红血未被旧存活门接受，技能未输入，原任务判失败。实际双帧结算 **0 星、45%**，自动回村、库存精确对账，净 **+151,723 金币、+202,617 圣水、+2,550 黑油、0 宝石**；最后库存 **21,885,737 / 8,266,057 / 410,714 / 227**。62 帧、10 次普通点击、250.137 秒，一次搜索费 1,700，累计开发搜索费 149,600。审计 `diagnostics/mixed-battle-023658-root-v1.json`（SHA-256 `b37a3149889579156028b26b25075962c989277ed207ff6109828082d3b1f27d`）。3 张技能前 raw 只是运行前指定的训练候选，没有点击后帧、R 事件或正式验收；本场也没有触发初始军队身份重观。完整部署不等于整场自动成功或胜局。
