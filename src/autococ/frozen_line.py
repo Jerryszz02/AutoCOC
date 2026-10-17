@@ -196,6 +196,82 @@ def _closed_card_border(current: Any, bbox: tuple[int, int, int, int]) -> dict |
             "bottom_contrast": bottom_contrast}
 
 
+def _selected_dragon_thin_card_18_647_2(
+        current: Any, bbox: tuple[int, int, int, int]) -> dict | None:
+    """Prove the complete thin selected rim of the sampled 96px dragon slot.
+
+    The generic selected-card detector remains the first choice. This shape
+    has a shifted, one-pixel white left rim; require a unique outer contour,
+    its large enclosed hole, and all four continuous straight segments.
+    """
+    import cv2
+    import numpy as np
+
+    left, top, right, bottom = bbox
+    if (current.shape[:2] != (720, 1280) or right - left != 96 or
+            not (590 <= top <= 600 and 705 <= bottom <= 715) or
+            left < 12 or right > 1270):
+        return None
+    x0, y0 = left - 8, top - 10
+    x1, y1 = right + 6, bottom + 2
+    hsv = cv2.cvtColor(current[y0:y1, x0:x1], cv2.COLOR_BGR2HSV)
+    bright = cv2.inRange(hsv, np.array([0, 0, 190]), np.array([180, 95, 255])) > 0
+    contours, hierarchy = cv2.findContours(bright.astype(np.uint8),
+                                           cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+    if hierarchy is None:
+        return None
+    candidates = []
+    for index, contour in enumerate(contours):
+        if hierarchy[0, index, 3] != -1:  # only an outer contour
+            continue
+        x, y, width, height = cv2.boundingRect(contour)
+        physical = (x + x0, y + y0, x + x0 + width, y + y0 + height)
+        px0, py0, px1, py1 = physical
+        if (not (left + 3 <= px0 <= left + 6 and right + 1 <= px1 <= right + 5 and
+                 top - 10 <= py0 <= top - 2 and bottom - 5 <= py1 <= bottom + 2) or
+                not (80 <= width <= 108 and 105 <= height <= 135) or
+                abs((px0 + px1) / 2 - (left + right) / 2) > 7):
+            continue
+        outer_ratio = float(cv2.contourArea(contour) / (width * height))
+        if outer_ratio < .85:
+            continue
+        child = int(hierarchy[0, index, 2])
+        largest_hole = 0.
+        while child >= 0:
+            largest_hole = max(largest_hole, float(cv2.contourArea(contours[child])))
+            child = int(hierarchy[0, child, 0])
+        hole_ratio = largest_hole / (width * height)
+        if hole_ratio < .8:
+            continue
+        rim = bright[y:y + height, x:x + width]
+        # Exact current-frame pixels, with no interpolation across a broken
+        # side. The outer contour and its hole bind all four segments into one
+        # closed shape, not four unrelated bright strips.
+        if not (np.all(rim[20:height - 10, 0]) and
+                np.all(rim[20:height - 10, width - 1]) and
+                np.all(rim[0, 10:width - 10]) and
+                np.all(rim[height - 1, 10:width - 10])):
+            continue
+        # The source bbox's loose left edge must not hide another equally
+        # complete rim. Only one physical white column may span the old
+        # straight-side range, and it must be this contour's left boundary.
+        left_columns = [column for column in range(left + 3, left + 7)
+                        if np.all(bright[top + 20 - y0:bottom - 10 - y0,
+                                         column - x0])]
+        if left_columns != [px0]:
+            continue
+        candidates.append({"method": "18.647.2_dragon_thin_selected_closed_card",
+                           "bbox": list(physical), "source_card_bbox": list(bbox),
+                           "physical_offset_from_source": [px0 - left, py0 - top,
+                                                           px1 - right, py1 - bottom],
+                           "outer_area_ratio": outer_ratio,
+                           "enclosed_hole_area_ratio": hole_ratio,
+                           "unique_left_white_column": px0,
+                           "continuous_side_pixels": height - 30,
+                           "continuous_horizontal_pixels": width - 20})
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def _closed_dragon_card_border_primary_18_647_2(current: Any,
                                                  bbox: tuple[int, int, int, int]) -> dict | None:
     """Recognize the complete rounded gray dragon card in this client layout.

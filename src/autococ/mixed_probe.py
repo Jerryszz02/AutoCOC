@@ -15,6 +15,7 @@ from .errors import DeploymentError, FlowError, StopRequested
 from .frozen_line import (_COUNT, _cards, _closed_card_border,
                           _closed_dragon_card_border_18_647_2, _count_proves,
                           _digest, _file_sha256, _plan_digest, _post_troop_reading,
+                          _selected_dragon_thin_card_18_647_2,
                           _verify_frozen_line_post, freeze_model_free_line)
 from .prepared_battle import PreparedInput
 from .mixed_roster import MIXED_CORE_COUNTS, mixed_archer_count
@@ -200,6 +201,16 @@ def _probe_count(session: Any, plan: MixedProbePlan, snapshot: Any, unit_id: str
         if not selected:
             raise FlowError(f"Mixed {unit_id} is not independently selected")
         border = selected_card_bbox(snapshot.screenshot_path, bbox, base.frame.resolution)
+        if (border is None and unit_id == "dragon" and bbox[2] - bbox[0] == 96 and
+                base.client_version == "18.647.2" and
+                session.client_version == base.client_version and
+                session.recognizer.client_version == base.client_version):
+            image = cv2.resize(read_frame(snapshot.screenshot_path), (1280, 720),
+                               interpolation=cv2.INTER_AREA)
+            thin_border = _selected_dragon_thin_card_18_647_2(image, bbox)
+            if thin_border is not None:
+                border = thin_border["bbox"]
+                reading["selected_card_border_evidence"] = thin_border
         if border is None:
             raise ProbeSelectionPending(f"Mixed selected {unit_id} lacks a closed card border")
         reading["selected_card_border"] = list(border)
