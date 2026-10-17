@@ -298,7 +298,9 @@ class ScreenshotRecognizer:
             # disconnect's retry button or the village HUD behind the modal.
             scene, confidence, reasons = SCENE_UNKNOWN, 0.0, ["account_in_use_dialog_incomplete"]
         event_panel = None
-        if self.client_version == "18.647.2" and account_in_use is None and not account_claim_visible:
+        # The event page remains visible behind an idle-disconnection modal.
+        if (self.client_version == "18.647.2" and account_in_use is None
+                and not account_claim_visible and scene != SCENE_DISCONNECTED):
             anchors = {}
             for name, label, roi in (("title", "活动", (590, 25, 690, 90)),
                                      ("close", "X", (1010, 15, 1100, 100)),

@@ -579,6 +579,40 @@ class SceneTests(unittest.TestCase):
                          {"gold": None, "elixir": None, "dark_elixir": None, "gems": None})
         self.assertIsNone(snapshot.observations["resource_source"])
 
+    def test_idle_disconnect_over_event_panel_keeps_only_current_retry(self) -> None:
+        import cv2
+        import numpy as np
+
+        provider = Mock()
+        recognizer = ScreenshotRecognizer(provider=provider)
+        recognizer.client_version = "18.647.2"
+        background = [
+            OCRText("活动", .9997, (609, 36, 672, 75)),
+            OCRText("X", .99448, (1030, 30, 1078, 75)),
+            OCRText("今日活动", .99968, (214, 100, 281, 124)),
+            OCRText("商店", .99996, (1190, 376, 1234, 404)),
+            OCRText("建造", .99829, (1176, 674, 1216, 700)),
+        ]
+        message = OCRText("因为太久没有进行操作，您已断开连接。", .99975,
+                          (330, 334, 648, 358))
+        retry = OCRText("重新载入游戏", .99995, (332, 408, 431, 429))
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "anonymized-idle-dialog.png"
+            cv2.imwrite(str(path), np.zeros((720, 1280, 3), dtype=np.uint8))
+            for label, button, expected in (
+                ("current", retry, ["retry"]),
+                ("missing", None, []),
+                ("weak", OCRText(retry.text, .7, retry.bbox), []),
+                ("outside_dialog", OCRText(retry.text, .99995, (20, 408, 119, 429)), []),
+            ):
+                with self.subTest(label=label):
+                    provider.recognize.return_value = background + [message] + ([button] if button else [])
+                    snapshot = recognizer.recognize(path)
+                    self.assertEqual(snapshot.scene, "disconnected")
+                    self.assertIsNone(snapshot.observations["event_panel"])
+                    self.assertEqual([item["name"] for item in snapshot.observations["buttons"]], expected)
+                    self.assertIsNone(snapshot.observations["resource_source"])
+
     def test_current_event_panel_cannot_override_account_ownership_dialog(self) -> None:
         directory = Path(__file__).parent / "fixtures/event_rewards_18_647_2"
         path = directory / "entry_panel.png"
