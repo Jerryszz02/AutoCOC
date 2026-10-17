@@ -131,3 +131,13 @@ python -B scripts/collect_scene_samples.py --config C:\captures\live.toml --outp
 拍图前写入 `prospective.json` 并在输出父目录预留 session/group，拒绝同一父目录中的重复身份；结束写入原图和事件哈希及源码/配置指纹。`TRAIN`/`VAL` 仅是预声明候选归属，`labels=null`、`leakage_independence_verified=false`、`admitted_to_training=false`。先做真实图复核、版本核对和近重复/关联组审计，再由既有数据工具导入；不同采集会话不能自动算独立组，发现跨拆分关联时隔离，不能移动候选以改善分数。Agent 复核不会变成人工真值。
 
 2026-10-17 的 `20261017-0927-train-d39dabf` 已实际完成 18 帧、6 次导航、55.764 秒，军队和前后 HOME 库存相同；审计 `reports/completion-20261015/diagnostics/scene-route-d39dabf-0927-root-v1.json`。原始候选保持未标注，运行时场景输出不能当作标签；后续 Agent 逐图复核、旧拆分保持和实际增量训练单独记录。
+
+## 0927 场景原型增量快照与训练
+
+Root 随后逐张查看上述 18 张原 PNG 并单独批准 Agent 视觉标签：8 张 `village`、4 张 `search`、4 张 `training` 纳入 TRAIN；第 14/15 张因聊天侧栏和部落战卡的遮挡状态不能仅凭静态图确定，保留原图并隔离、标签为 null。旧 TRAIN 村庄参考和军队页近似图也经原图复核，两个旧 TRAIN 组保守关联为同一泄漏组；不宣称相同对手或配兵。首次构建在两对跨组近重复检查处拒绝，失败目录保留；取得独立来源绑定的关联收据后才重新构建。没有调用自动 `split`，旧 train/val/test 的 63 条分配及其 63 个图像、63 个注释文件字节不变。
+
+新快照 `E:/projects/AutoCOC-training/datasets/current-scene-prototype-20261017-0927-v1` 为 **59 train / 9 val / 11 test**，其中新增 16 张只进 train、2 张隔离；SHA256SUMS 的 SHA-256 为 `bd0219f64eb20d75ea5ce2ec3b2286bf8ce724d0f12895ebe0d54e4c83a27f0e`。在已推送且干净的 `55ee3dc335920ab1e76d2db573d863e80691fe2c` 源码上，用本地权重、seed 42、batch 8、MobileNetV3-Small、320×192 和固定 recipe3 最多 20 epoch 新训，实际完成 16 epoch，最佳为 epoch 8，validation NLL `0.1608283817`。导出的 ONNX 在全部 9 张 VAL 图上同输入 parity 9/9，最大绝对误差 `5.245e-6`。
+
+固定运行阈值下 VAL 接受 **5/9**、拒绝 **4/9**，相同旧 VAL 上旧包为 2/9；这只说明此原型在该验证集上的覆盖变化。VAL 仍仅含 `battle`、`enemy_village`、`settlement` 三类，均来自一个旧来源组，新增的 `village/search/training` 没有 VAL 覆盖。因此质量准入未通过，包保持 `prototype_only`、`runtime_enabled=false`，没有实机模型验收。根审计见 `reports/completion-20261015/diagnostics/s-scene-incremental-0927-root-v1.json`（SHA-256 `ef1e2f373caf6cc8506ea9d351c0b645b6e1fcc0a4df4b93e0f559a96143650b`），构建/训练原始回执在 `reports/completion-20261015/tools/scene_incremental_0927_v1/runs/`。
+
+旧 TEST 只用于标准完整性哈希、schema 和近重复检查，没有作为模型输入、推理、评估或选模依据；但准备脚本时曾误打印 `CS-174504-00001` 的一条旧 TEST manifest/annotation 记录，故**不能称为零 TEST 语义接触**。没有查看 TEST 像素，也没有据此改标签、拆分或阈值；该事件保留在外部执行报告中。上述复核均为 `agent_visual`，不冒充真人逐图确认或正式数据。
