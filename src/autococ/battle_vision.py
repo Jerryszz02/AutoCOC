@@ -54,7 +54,10 @@ def _preparation_timer_aligned(box: tuple | list, label_box: tuple | list,
     # ordinary countdown recognition; neither path may invent a new timer.
     allowed_overlap = min(14 * height / 720, (label_box[3] - label_box[1]) * .40,
                           (box[3] - box[1]) * .25)
-    return (-allowed_overlap <= box[1] - label_box[3] <= height * .10 and
+    # The current HUD timer is immediately below or slightly overlaps its
+    # heading. A base-building level 64px lower was otherwise treated as a
+    # second strong timer; keep nearby conflicting numbers inside this band.
+    return (-allowed_overlap <= box[1] - label_box[3] <= min(height * .10, 40 * height / 720) and
             abs((box[0] + box[2] - label_box[0] - label_box[2]) / 2) <= width * .07)
 
 

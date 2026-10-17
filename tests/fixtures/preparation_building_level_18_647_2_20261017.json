@@ -1,0 +1,119 @@
+{
+  "client_version": "18.647.2",
+  "purpose": "Development-only current-frame countdown geometric conflict replay, agent-reviewed not human/formal ground truth",
+  "source_events": "reports/completion-20261015/live/20261017-011418-499548-15d483bc/events.jsonl",
+  "source_events_sha256": "8762a52595da254763732a01c932cb75164112ca94ede21d257ebb0b3439b365",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "native_preserved_xyxy": [
+    1150,
+    0,
+    1420,
+    240
+  ],
+  "cached_ocr_filter": "Unmodified original full OCR items with bbox wholly within baseline x575..710 y0..120; only the same native pixels are retained in the masked PNG.",
+  "frames": [
+    {
+      "fixture": "preparation_building_level_00038_18_647_2_20261017.png",
+      "fixture_sha256": "7494a991b55f303e25f77e596846cfc5a912e3dc69f4445db761014130eaf42e",
+      "source_frame": "reports/completion-20261015/live/20261017-011418-499548-15d483bc/frames/00038-battle-candidate.png",
+      "source_sha256": "821b2e2be62b8945d819d4de9bc5574f995d163c1b959a09bcdfde6df847413c",
+      "cached_ocr": [
+        {
+          "text": "开战倒计时",
+          "confidence": 0.99977,
+          "bbox": [
+            582,
+            14,
+            680,
+            40
+          ]
+        },
+        {
+          "text": "29秒",
+          "confidence": 0.99957,
+          "bbox": [
+            599,
+            35,
+            682,
+            78
+          ]
+        }
+      ],
+      "observed_at_monotonic": 1237961.1040534,
+      "frame_id": "e272e5cce56645069b93e1a8df4ab62b"
+    },
+    {
+      "fixture": "preparation_building_level_00039_18_647_2_20261017.png",
+      "fixture_sha256": "ef706eb6063aa4eea636f96f164120b99570a8195d8f660af99fa09b0303c696",
+      "source_frame": "reports/completion-20261015/live/20261017-011418-499548-15d483bc/frames/00039-scout-camera-ready.png",
+      "source_sha256": "926bc1684f2d842088a29b8f33ecf482ff5dd33891f77ae24e5a890580d317c7",
+      "cached_ocr": [
+        {
+          "text": "开战倒计时",
+          "confidence": 0.99977,
+          "bbox": [
+            582,
+            14,
+            680,
+            40
+          ]
+        },
+        {
+          "text": "25秒",
+          "confidence": 0.99996,
+          "bbox": [
+            598,
+            34,
+            681,
+            78
+          ]
+        },
+        {
+          "text": "42",
+          "confidence": 1.0,
+          "bbox": [
+            610,
+            104,
+            620,
+            114
+          ]
+        }
+      ],
+      "observed_at_monotonic": 1237964.758087,
+      "frame_id": "4eec04c711e744e9bf8d3ae6e12c1287"
+    },
+    {
+      "fixture": "preparation_building_level_00040_18_647_2_20261017.png",
+      "fixture_sha256": "99e282e52f0b1b583301568e46c14b4c1dc61a7a95f419814d0b85ed493d5fcf",
+      "source_frame": "reports/completion-20261015/live/20261017-011418-499548-15d483bc/frames/00040-continuous-line-failure-check.png",
+      "source_sha256": "38d93eaf88091c03969074e19b0c2a0c78ad2f26093984313def15885c7df9d4",
+      "cached_ocr": [
+        {
+          "text": "开战倒计时",
+          "confidence": 0.99977,
+          "bbox": [
+            582,
+            14,
+            680,
+            40
+          ]
+        },
+        {
+          "text": "22秒",
+          "confidence": 0.99981,
+          "bbox": [
+            598,
+            34,
+            681,
+            78
+          ]
+        }
+      ],
+      "observed_at_monotonic": 1237967.6747867,
+      "frame_id": "6183798909ef4b19bcced72a963f127d"
+    }
+  ]
+}
