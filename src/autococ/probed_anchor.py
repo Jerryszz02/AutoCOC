@@ -459,9 +459,29 @@ def _spent_balloon_dark_border(current: Any, bbox: tuple[int, int, int, int]) ->
     # Rows beyond the closed outline belong to the moving battlefield. Their
     # texture is diagnostic only: the versioned core, connected sides/corners
     # and contrast immediately below the stroke already prove the card edge.
-    if np.any(rebound < 7):
+    low_rebound_positions = np.flatnonzero(rebound < 7)
+    low_rebound_columns = int(low_rebound_positions.size)
+    # A small moving dark patch below the otherwise complete outline can
+    # obscure columns within one central interval at most eight pixels wide;
+    # individual pixels in that interval may still pass. Keep the old
+    # all-column rule otherwise and require a near-exact versioned core.
+    local_background_patch = (low_rebound_columns > 0 and core_max_error <= 1 and
+                              low_rebound_columns <= 8 and
+                              24 <= int(low_rebound_positions[0]) and
+                              int(low_rebound_positions[-1]) < 48 and
+                              int(low_rebound_positions[-1] - low_rebound_positions[0]) < 8 and
+                              float(rebound.min()) >= 3 and
+                              float(np.percentile(rebound, 10)) >= 7)
+    if low_rebound_columns and not local_background_patch:
         return None
-    return {"method": "spent_balloon_versioned_bottom_shape", "left_edge": left_edge,
+    return {"method": ("spent_balloon_versioned_bottom_shape_local_background"
+                       if local_background_patch else "spent_balloon_versioned_bottom_shape"),
+            "low_rebound_columns": low_rebound_columns,
+            "low_rebound_span": ([int(low_rebound_positions[0]),
+                                  int(low_rebound_positions[-1])]
+                                 if low_rebound_columns else None),
+            "lower_rebound_p10": float(np.percentile(rebound, 10)),
+            "left_edge": left_edge,
             "right_edge": right_edge, "dark_row": bottom,
             "corner_endpoints": [left_position, right_position],
             "core_template_sha256": template_sha, "core_max_error": core_max_error,
