@@ -12,13 +12,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from training.vision.data import (DatasetError, export, import_annotations,
                                   import_legacy, inspect, load_taxonomy, read_jsonl,
                                   split, stage_sources, validate, write_jsonl)
+from training.vision.picker_candidates import import_picker_candidates
 
 
 def parser() -> argparse.ArgumentParser:
     cli = argparse.ArgumentParser(description=__doc__)
     commands = cli.add_subparsers(dest="command", required=True)
-    for name in ("import-legacy", "import-annotations", "stage", "inspect", "validate", "split", "export"):
+    for name in ("import-legacy", "import-annotations", "import-picker-candidates", "stage", "inspect", "validate", "split", "export"):
         command = commands.add_parser(name)
+        if name == "import-picker-candidates":
+            command.add_argument("--source-run", type=Path, required=True)
+            command.add_argument("--output", type=Path, required=True)
+            continue
         if name == "stage":
             command.add_argument("--source", nargs=2, metavar=("ROOT", "MANIFEST"),
                                  type=Path, action="append", required=True)
@@ -68,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "import-legacy":
             report = import_legacy(args.root, args.legacy, args.output)
+        elif args.command == "import-picker-candidates":
+            report = import_picker_candidates(args.source_run, args.output)
         elif args.command == "stage":
             report = stage_sources(args.source, args.output)
         elif args.command == "import-annotations":
