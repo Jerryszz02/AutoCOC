@@ -150,6 +150,7 @@ def home_navigation_verified(snapshot) -> bool:
     if not isinstance(anchors, dict) or set(anchors) != set(RESOURCE_NAMES) or not (
             isinstance(balances, dict) and isinstance(evidence, dict)):
         return False
+    supplemented = 0
     for name in RESOURCE_NAMES:
         anchor = anchors[name]
         if not isinstance(anchor, dict):
@@ -160,12 +161,31 @@ def home_navigation_verified(snapshot) -> bool:
                 or sum(row == item for row in ocr if isinstance(row, dict)) != 1
                 or not _inside(item.get("bbox"), RESOURCE_ROIS[name])
                 or type(item.get("confidence")) not in (int, float)
-                or not .95 <= item["confidence"] <= 1):
+                or not .9 <= item["confidence"] <= 1):
             return False
         # Reparse the full OCR text rather than trusting a copied numeric field.
         from .vision import parse_resource_number
         if (parse_resource_number(str(item.get("text", ""))) != value
                 or not isinstance(evidence[name], dict)
                 or parse_resource_number(str(evidence[name].get("text", ""))) != value):
+            return False
+        line = anchor.get("line_verification")
+        if item["confidence"] >= .95:
+            if line is not None:
+                return False
+            continue
+        supplemented += 1
+        if supplemented != 1 or not isinstance(line, dict):
+            return False
+        expected_roi = list(RESOURCE_ROIS[name])
+        factor = source_resolution[0] // BASELINE[0]
+        native_roi = [coordinate * factor for coordinate in expected_roi]
+        line_ocr = line.get("ocr")
+        if (line.get("roi_baseline") != expected_roi or line.get("roi_native") != native_roi
+                or not isinstance(line_ocr, dict)
+                or line_ocr.get("bbox") not in (native_roi, tuple(native_roi))
+                or type(line_ocr.get("confidence")) not in (int, float)
+                or not .95 <= line_ocr["confidence"] <= 1
+                or parse_resource_number(str(line_ocr.get("text", ""))) != value):
             return False
     return True

@@ -155,25 +155,51 @@ def recognize_village_type(screenshot_path: str | Path, *, client_version: str |
     return result
 
 
-def _current_home_full_ocr_resources(texts: list[OCRText]) -> dict[str, dict] | None:
-    """Require four separate, complete OCR numbers at current HOME HUD rows."""
+def _current_home_full_ocr_resources(
+    texts: list[OCRText], path: Path, source_resolution: tuple[int, int],
+    line_reader,
+) -> dict[str, dict] | None:
+    """Require four complete HUD numbers; independently verify one weak row."""
     anchors: dict[str, dict] = {}
+    supplemented = 0
     for name in RESOURCE_NAMES:
         roi = RESOURCE_ROIS[name]
-        matches = []
+        row_items = []
         for item in texts:
             if (item.bbox is None or type(item.confidence) not in (int, float)
-                    or not .95 <= item.confidence <= 1
+                    or not .9 <= item.confidence <= 1
                     or not (roi[0] <= item.bbox[0] < item.bbox[2] <= roi[2]
                             and roi[1] <= item.bbox[1] < item.bbox[3] <= roi[3])):
                 continue
-            value = parse_resource_number(item.text)
-            if value is not None:
-                matches.append((item, value))
-        if len(matches) != 1:
+            row_items.append(item)
+        if len(row_items) != 1:
             return None
-        item, value = matches[0]
+        item = row_items[0]
+        value = parse_resource_number(item.text)
+        if value is None:
+            return None
         anchors[name] = {"ocr": asdict(item), "value": value}
+        if item.confidence >= .95:
+            continue
+        supplemented += 1
+        if supplemented != 1 or not callable(line_reader):
+            return None
+        native_roi = scale_box(roi, from_resolution=(1280, 720), to_resolution=source_resolution)
+        # RapidOCR's line bbox is the requested crop, not glyph localization.
+        # The independent tight full-image OCR bbox above provides geometry.
+        line_items = line_reader(path, native_roi)
+        if not isinstance(line_items, list) or len(line_items) != 1:
+            return None
+        line = line_items[0]
+        if (not isinstance(line, OCRText) or type(line.confidence) not in (int, float)
+                or not .95 <= line.confidence <= 1
+                or parse_resource_number(line.text) != value
+                or line.bbox != native_roi):
+            return None
+        anchors[name]["line_verification"] = {
+            "roi_baseline": list(roi), "roi_native": list(native_roi),
+            "ocr": asdict(line),
+        }
     return anchors
 
 
@@ -421,15 +447,17 @@ class ScreenshotRecognizer:
                       and Path(str(village_type_evidence.get("template", ""))).name in {
                           "village_home_battle_18_647_2.png",
                           "village_home_battle_checklist_18_647_2.png"}):
-                    anchors = _current_home_full_ocr_resources(texts)
+                    with path.open("rb") as source:
+                        frame_sha256 = hashlib.file_digest(source, "sha256").hexdigest()
+                    anchors = _current_home_full_ocr_resources(
+                        texts, path, resolution, getattr(self.provider, "recognize_line", None))
                     if anchors is not None:
                         resources, evidence = self._village_resources(
                             path, texts, resolution, new_home_hud=True)
-                        if all(resources.get(name) == anchors[name]["value"] and name in evidence
-                               for name in RESOURCE_NAMES):
+                        if (all(resources.get(name) == anchors[name]["value"] and name in evidence
+                                for name in RESOURCE_NAMES) and
+                                hashlib.sha256(path.read_bytes()).hexdigest() == frame_sha256):
                             template = Path(str(village_type_evidence["template"]))
-                            with path.open("rb") as source:
-                                frame_sha256 = hashlib.file_digest(source, "sha256").hexdigest()
                             with template.open("rb") as source:
                                 template_sha256 = hashlib.file_digest(source, "sha256").hexdigest()
                             home_hud_proof = {

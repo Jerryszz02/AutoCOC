@@ -20,6 +20,7 @@ from autococ.vision import ScreenshotRecognizer
 FIXTURES = Path(__file__).parent / "fixtures"
 PROMO = FIXTURES / "home_promo_current_18_647_2.png"
 MODAL = FIXTURES / "home_event_modal_current_18_647_2.png"
+LOW_ELIXIR = FIXTURES / "home_low_elixir_current_18_647_2.png"
 HOME_OCR = [
     OCRText("28370645", .99979, (1090, 25, 1220, 52)),
     OCRText("16 093 534", .96815, (1094, 71, 1220, 101)),
@@ -27,6 +28,14 @@ HOME_OCR = [
     OCRText("241", .99999, (1176, 174, 1220, 199)),
     OCRText("建造", .99998, (1174, 674, 1217, 700)),
 ]
+LOW_OCR = [
+    OCRText("28459753", .99998, (1094, 24, 1220, 52)),
+    OCRText("16 109662", .94444, (1100, 74, 1220, 100)),
+    OCRText("470 000", .95488, (1115, 123, 1217, 148)),
+    OCRText("241", .99999, (1176, 174, 1220, 199)),
+    OCRText("建造", .99998, (1174, 674, 1217, 700)),
+]
+ELIXIR_ROI = (1008, 69, 1240, 111)
 
 
 class HomeEvidenceTests(unittest.TestCase):
@@ -37,6 +46,17 @@ class HomeEvidenceTests(unittest.TestCase):
         recognizer = ScreenshotRecognizer(provider=provider)
         recognizer.client_version = version
         return recognizer.recognize(path)
+
+    def _recognize_low(self, *, rows=None, line=None):
+        provider = Mock()
+        provider.recognize.return_value = list(LOW_OCR if rows is None else rows)
+        provider.recognize_line.side_effect = lambda _path, roi: (
+            [] if roi != ELIXIR_ROI else
+            [OCRText("16109662", .9818, ELIXIR_ROI)] if line is None else line)
+        recognizer = ScreenshotRecognizer(provider=provider)
+        recognizer.client_version = "18.647.2"
+        shot = recognizer.recognize(LOW_ELIXIR)
+        return shot, provider
 
     def test_animated_shop_caption_has_source_bound_read_only_home(self):
         shot = self._recognize()
@@ -59,6 +79,60 @@ class HomeEvidenceTests(unittest.TestCase):
         self.assertIsNone(shot.observations["home_hud_proof"])
         self.assertEqual({button["name"] for button in shot.observations["buttons"]}, {"attack", "shop"})
         self.assertTrue(home_navigation_verified(shot))
+
+    def test_one_low_full_ocr_row_requires_matching_independent_line(self):
+        shot, provider = self._recognize_low()
+        self.assertEqual(shot.scene, "village")
+        self.assertTrue(home_navigation_verified(shot))
+        anchor = shot.observations["home_hud_proof"]["resources"]["elixir"]
+        self.assertEqual(anchor["ocr"]["confidence"], .94444)
+        self.assertEqual(anchor["line_verification"]["ocr"]["confidence"], .9818)
+        self.assertEqual(anchor["line_verification"]["roi_native"], list(ELIXIR_ROI))
+        self.assertEqual(shot.observations["resources"]["elixir"], 16109662)
+        self.assertEqual(sum(call.args[1] == ELIXIR_ROI for call in
+                             provider.recognize_line.call_args_list), 1)
+
+    def test_low_row_rejects_missing_conflicting_or_untrusted_line(self):
+        for line in (
+            [],
+            [OCRText("16109663", .99, ELIXIR_ROI)],
+            [OCRText("16109662", .94999, ELIXIR_ROI)],
+            [OCRText("16109662", .99, (0, 0, 10, 10))],
+            [OCRText("16109662", .99, ELIXIR_ROI), OCRText("16109662", .99, ELIXIR_ROI)],
+            [OCRText("16x09662", .99, ELIXIR_ROI)],
+        ):
+            with self.subTest(line=line):
+                shot, _ = self._recognize_low(line=line)
+                self.assertEqual(shot.scene, "unknown")
+                self.assertFalse(home_navigation_verified(shot))
+        for rows in (
+            LOW_OCR[:1] + [OCRText("16 109662", .89999, LOW_OCR[1].bbox)] + LOW_OCR[2:],
+            LOW_OCR[:1] + [OCRText("16x09662", .94444, LOW_OCR[1].bbox)] + LOW_OCR[2:],
+            LOW_OCR + [OCRText("16 109663", .94, LOW_OCR[1].bbox)],
+            [OCRText(LOW_OCR[0].text, .94, LOW_OCR[0].bbox)] + LOW_OCR[1:],
+        ):
+            with self.subTest(rows=rows):
+                shot, _ = self._recognize_low(rows=rows)
+                self.assertEqual(shot.scene, "unknown")
+                self.assertFalse(home_navigation_verified(shot))
+
+    def test_line_proof_binds_raw_and_line_text_value_and_rois(self):
+        shot, _ = self._recognize_low()
+        mutations = [
+            lambda o: o["home_hud_proof"]["resources"]["elixir"]["line_verification"].__setitem__(
+                "roi_native", [0, 0, 10, 10]),
+            lambda o: o["home_hud_proof"]["resources"]["elixir"]["line_verification"]["ocr"].__setitem__(
+                "text", "16109663"),
+            lambda o: o["home_hud_proof"]["resources"]["elixir"]["line_verification"]["ocr"].__setitem__(
+                "confidence", .94999),
+            lambda o: o["home_hud_proof"]["resources"]["elixir"].__setitem__("value", 16109663),
+            lambda o: o["home_hud_proof"]["resources"]["elixir"].pop("line_verification"),
+        ]
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                observations = deepcopy(shot.observations)
+                mutation(observations)
+                self.assertFalse(home_navigation_verified(replace(shot, observations=observations)))
 
     def test_missing_conflicting_or_relocated_independent_anchors_reject(self):
         variants = [
