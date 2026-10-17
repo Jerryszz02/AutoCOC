@@ -83,7 +83,8 @@ def _current_warden(session: Any, snapshot: Any) -> dict[str, object]:
             "verified": (identity.get("version_verified") is True
                          and identity.get("unit_id") == HERO_ID
                          and state.get("deployed") is True
-                         and state.get("evidence", {}).get("health_bar") is not None
+                         and (state.get("evidence", {}).get("health_bar") is not None
+                              or state.get("evidence", {}).get("red_health_bar") is not None)
                          and tuple(locator["bbox"]) == tuple(state.get("slot_bbox") or ())) }
 
 

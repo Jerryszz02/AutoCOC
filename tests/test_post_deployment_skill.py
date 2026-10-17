@@ -96,15 +96,27 @@ class PostDeploymentSkillTests(unittest.TestCase):
              patch("autococ.post_deployment_skill._minimum_zoom_motion", return_value=True):
             return execute_post_deployment_hero_skill(session, deployed, hero_id=hero_id, delay_sec=delay)
 
-    def test_real_camera_borderline_allows_one_observation_but_dead_hp_never_taps(self):
+    def test_real_camera_borderline_allows_one_observation_but_empty_hp_never_taps(self):
         deployed = stabilization_snapshot(25, deployment=True)
-        session = FakeSession(deployed, [stabilization_snapshot(26), stabilization_snapshot(27)])
-        with patch("autococ.post_deployment_skill.foreground_package",
-                   return_value="com.supercell.clashofclans"):
-            latest, receipt = execute_post_deployment_hero_skill(session, deployed,
-                                                                 hero_id="grand_warden", delay_sec=0)
-        self.assertEqual(latest.screenshot_path.name,
-                         "hero_skill_stabilization_054932_00027_18_647_2.png")
+        original = stabilization_snapshot(27)
+        # The original frame has 13 pixels of solid red HP, not an empty bar.
+        # Erase only its interior for an explicit synthetic no-live-HP negative;
+        # keep the real map pixels for the camera stabilization replay.
+        image = cv2.imdecode(np.fromfile(original.screenshot_path, np.uint8), cv2.IMREAD_COLOR)
+        sx, sy = image.shape[1] / 1280, image.shape[0] / 720
+        image[round(573 * sy):round(582 * sy), round(655 * sx):round(726 * sx)] = 0
+        with TemporaryDirectory() as directory:
+            empty_path = Path(directory) / "empty-hp-after-stabilization.png"
+            cv2.imencode(".png", image)[1].tofile(empty_path)
+            empty_frame = replace(original, screenshot_path=empty_path)
+            session = FakeSession(deployed, [stabilization_snapshot(26), empty_frame])
+            with patch("autococ.post_deployment_skill.foreground_package",
+                       return_value="com.supercell.clashofclans"):
+                latest, receipt = execute_post_deployment_hero_skill(session, deployed,
+                                                                     hero_id="grand_warden", delay_sec=0)
+            self.assertEqual(receipt["stabilization"]["second"]["sha256"],
+                             hashlib.sha256(empty_path.read_bytes()).hexdigest())
+        self.assertEqual(latest.screenshot_path.name, "empty-hp-after-stabilization.png")
         self.assertEqual(receipt["reason"], "current_warden_ready_with_live_hp_unverified")
         self.assertFalse(receipt["attempted"])
         self.assertEqual(session.taps, [])
@@ -112,7 +124,6 @@ class PostDeploymentSkillTests(unittest.TestCase):
         first = receipt["stabilization"]["first"]
         second = receipt["stabilization"]["second"]
         self.assertEqual(first["sha256"], hashlib.sha256(stabilization_snapshot(26).screenshot_path.read_bytes()).hexdigest())
-        self.assertEqual(second["sha256"], hashlib.sha256(stabilization_snapshot(27).screenshot_path.read_bytes()).hexdigest())
         self.assertLess(first["capture_request_monotonic"], second["capture_request_monotonic"])
         first_motion = receipt["stabilization"]["first_motion"]
         second_motion = receipt["stabilization"]["second_motion"]
@@ -125,8 +136,8 @@ class PostDeploymentSkillTests(unittest.TestCase):
         self.assertFalse(receipt["target_before"]["verified"])
 
     def test_one_bounded_stabilization_can_authorize_only_second_fresh_ready_card(self):
-        # Synthetic state-machine timing only: the real 054932 second frame had
-        # no live HP and is covered by the separate negative replay above.
+        # Synthetic state-machine timing only; the real 054932 second frame has
+        # low red HP. The explicit empty-HP negative above must still refuse it.
         deployed = snapshot(23, deployment=True)
         session = FakeSession(deployed, [snapshot(25), snapshot(24), snapshot(27)])
         with patch("autococ.post_deployment_skill.foreground_package",

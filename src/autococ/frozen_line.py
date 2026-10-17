@@ -981,7 +981,8 @@ def _verify_frozen_line_post(session: Any, plan: FrozenLinePlan, receipt: dict,
             state = item["state"]
             hero_evidence = state.get("evidence") or {}
             identity = hero_evidence.get("portrait_identity") or {}
-            health = hero_evidence.get("health_bar") or hero_evidence.get("yellow_health_bar") or {}
+            health = (hero_evidence.get("health_bar") or hero_evidence.get("yellow_health_bar")
+                      or hero_evidence.get("red_health_bar") or {})
             hero_frame_details.append({"unit_id": item["unit_id"], "verified": item["verified"],
                                        "locator_bbox": (item["card_locator"] or {}).get("bbox"),
                                        "state": state.get("state"), "deployed": state.get("deployed"),

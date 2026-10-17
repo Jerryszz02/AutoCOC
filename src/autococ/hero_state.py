@@ -203,7 +203,13 @@ def recognize_hero_state(
                 if yellow_health is not None:
                     break
     evidence["yellow_health_bar"] = yellow_health
-    if health is not None or yellow_health is not None:
+    red_health = None
+    if client_version == "18.647.2" and unit_id == "grand_warden" and health is None and yellow_health is None:
+        located = evidence.get("closed_card")
+        if located is not None and tuple(located["bbox"]) == box:
+            red_health = _current_warden_red_health_bar(hsv, gray, box)
+    evidence["red_health_bar"] = red_health
+    if health is not None or yellow_health is not None or red_health is not None:
         result.update(state="deployed", deployed=True, defeated=False)
     elif selected is not None:
         result["state"] = "selected"
@@ -212,7 +218,7 @@ def recognize_hero_state(
         # A gray face by itself is only an identity candidate, never an ability
         # transition. Require the live HP frame and the independently closed
         # card located again in this same screenshot.
-        if unit_id != "grand_warden" or health is None:
+        if unit_id != "grand_warden" or (health is None and red_health is None):
             evidence["ability_phase_reason"] = "current_warden_equipment_or_live_hp_unverified"
             return result
         located = evidence.get("closed_card") or locate_current_deployed_hero_card(
@@ -529,3 +535,57 @@ def _yellow_health_bar(hsv, gray, pet_bbox: list[int], *, frame_width: int = 78)
                 "frame_support": [top_support, bottom_support, *sides],
                 "fill_density": round(float(area / (width * height)), 5)}
     return None
+
+
+def _current_warden_red_health_bar(hsv, gray, box: tuple[int, int, int, int]) -> dict | None:
+    """Current Warden's low HP: a closed outline AND a solid red left fill.
+
+    The empty part is translucent battlefield art. Neither red map pixels nor
+    the outline itself can stand in for the interior fill. The caller has
+    already independently located this version's closed Warden card.
+    """
+    import numpy as np
+
+    left, top, right, bottom = box
+    if right - left != 89 or bottom - top != 116:
+        return None
+    x0, x1 = left + 6, right - 9
+    y0, y1 = top - 23, top - 13
+    if x0 < 0 or y0 < 0 or x1 >= hsv.shape[1] or y1 >= hsv.shape[0]:
+        return None
+    roi = hsv[y0:y1 + 1, x0:x1 + 1]
+    red = (((roi[:, :, 0] <= 10) | (roi[:, :, 0] >= 170))
+           & (roi[:, :, 1] >= 170) & (roi[:, :, 2] >= 130))
+    # Ignore the rounded corner pixels, but require each complete straight
+    # edge; a pair of detached horizontal red lines is insufficient.
+    edges = [float(red[0, 1:-1].mean()), float(red[-1, 1:-1].mean()),
+             float(red[2:-1, :2].any(axis=1).mean()),
+             float(red[2:-1, -2:].any(axis=1).mean())]
+    outline_phase = "red"
+    if min(edges) < .95:
+        # The sampled outline blinks between red and dark while the interior
+        # fill remains visible. Each phase must independently enclose it.
+        dark = gray[y0:y1 + 1, x0:x1 + 1] < 65
+        edges = [float(dark[0, 1:-1].mean()), float(dark[-1, 1:-1].mean()),
+                 float(dark[2:-1, :2].all(axis=1).mean()),
+                 float(dark[2:-1, -2:].all(axis=1).mean())]
+        if min(edges) < .95:
+            return None
+        outline_phase = "dark"
+    # Exclude both the red outline and its antialiased inner edge. Low HP
+    # has a left-aligned, dense rectangular prefix, not isolated red clutter.
+    interior = red[2:-2, 2:-2]
+    columns = interior.mean(axis=0) >= .95
+    gaps = np.flatnonzero(~columns)
+    fill_width = int(gaps[0]) if gaps.size else interior.shape[1]
+    if not 8 <= fill_width <= 30:
+        return None
+    suffix = interior[:, fill_width + 2:]
+    if suffix.size == 0 or float(suffix.mean()) > .30:
+        return None
+    return {"method": "18.647.2_warden_solid_red_fill_inside_closed_hp_frame",
+            "fill_bbox": [x0 + 2, y0 + 2, x0 + 2 + fill_width, y1 - 1],
+            "frame_span": [x0, y0, x1 + 1, y1 + 1],
+            "frame_support": edges, "outline_phase": outline_phase,
+            "fill_density": float(interior[:, :fill_width].mean()),
+            "suffix_red_density": float(suffix.mean()), "client_version": "18.647.2"}
