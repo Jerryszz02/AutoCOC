@@ -216,7 +216,20 @@ def _closed_dragon_card_border_18_647_2(current: Any,
     # Seven independent vertical bands must carry both opposite card edges.
     left_bands = [float(np.median(band)) for band in np.array_split(side[625:695, left], 7)]
     right_bands = [float(np.median(band)) for band in np.array_split(side[625:695, right - 1], 7)]
-    if min(left_bands) < 175 or max(right_bands) > -160:
+    strong_gray = min(left_bands) >= 175 and max(right_bands) <= -160
+    # A second sampled spent rendering has a continuous but lower-contrast
+    # right rim. It is grayscale throughout the portrait, unlike the active
+    # card. Keep this as a separate versioned shape; the rounded top and
+    # connected lower rim below must still pass in full.
+    low_gray = False
+    if not strong_gray:
+        hsv = cv2.cvtColor(current, cv2.COLOR_BGR2HSV)
+        inner = hsv[top + 32:bottom - 20, left + 20:right - 20]
+        low_gray = (min(left_bands) >= 140 and max(left_bands) <= 300 and
+                    -160 <= min(right_bands) and max(right_bands) <= -90 and
+                    float(np.median(inner[:, :, 1])) <= 5 and
+                    35 <= float(np.median(inner[:, :, 2])) <= 90)
+    if not strong_gray and not low_gray:
         return None
     left_edge, right_edge = float(np.median(left_bands)), float(np.median(right_bands))
     # The saturated, still-available dragon card has roughly twice the side
@@ -225,6 +238,8 @@ def _closed_dragon_card_border_18_647_2(current: Any,
     # when following the rounded corner over several rows.
     if left_edge > 350 or right_edge < -350:
         return None
+    corner_min = 90 if low_gray else 140
+    side_join_min = 60 if low_gray else 100
     # At the upper corner the one-pixel-wide edge reaches the straight side
     # on either row +5 or +6 in captured 18.647.2 frames. Follow both signed
     # Sobel ridges from the inset at +3/+4 to the side at +7 instead of
@@ -234,8 +249,8 @@ def _closed_dragon_card_border_18_647_2(current: Any,
     def upper_corner_trace(left_side: bool) -> tuple[int, ...] | None:
         def has_edge(y: int, inset: int) -> bool:
             if left_side:
-                return bool(side[y, left + inset] >= 140)
-            return bool(side[y, right - 1 - inset] <= -140)
+                return bool(side[y, left + inset] >= corner_min)
+            return bool(side[y, right - 1 - inset] <= -corner_min)
 
         paths = {(inset,) for inset in range(4)
                  if inset >= 1 and has_edge(top + 3, inset)}
@@ -252,11 +267,31 @@ def _closed_dragon_card_border_18_647_2(current: Any,
     upper_right = upper_corner_trace(False)
     if upper_left is None or upper_right is None:
         return None
+    vertical = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+    upper_horizontal = None
+    if low_gray:
+        # On the low-contrast spent rendering the top rim remains much
+        # stronger than either side. Require one continuous positive ridge
+        # between both rounded corners, including the short diagonal joins.
+        top_ridge = vertical[top:top + 2, left + 4:right - 4]
+        top_columns = np.max(top_ridge, axis=0)
+        top_rows = np.argmax(top_ridge, axis=0)
+        central_min = float(np.min(vertical[top, left + 8:right - 8]))
+        left_join = float(vertical[top + 2, left + 3])
+        right_join = float(vertical[top + 2, right - 4])
+        if (central_min < 250 or np.min(top_columns) < 140 or
+                np.max(np.abs(np.diff(top_rows))) > 1 or
+                left_join < 140 or right_join < 140):
+            return None
+        upper_horizontal = {"central_gradient_min": central_min,
+                            "ridge_gradient_min": float(np.min(top_columns)),
+                            "corner_join_gradient_min": min(left_join, right_join),
+                            "connected_columns": len(top_columns)}
     # Join the trace's straight-side endpoint to the first seven-band sample.
     # The thinner old 89px gray rendering still has at least 123 signed Sobel
     # units on every one of these rows in the independent development frames.
-    if (np.min(side[top + 7:625, left]) < 100 or
-            np.max(side[top + 7:625, right - 1]) > -100):
+    if (np.min(side[top + 7:625, left]) < side_join_min or
+            np.max(side[top + 7:625, right - 1]) > -side_join_min):
         return None
     # Keep the independent lower-corner inward turn unchanged.
     y = bottom - 7
@@ -271,7 +306,6 @@ def _closed_dragon_card_border_18_647_2(current: Any,
     # This does not prove the top rim.
     from collections import deque
 
-    vertical = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
     rim = np.zeros((bottom - 623, right - left), dtype=np.bool_)
     for y in range(625, bottom):
         rim[y - 624, :9] |= side[y, left:left + 9] >= 40
@@ -310,17 +344,19 @@ def _closed_dragon_card_border_18_647_2(current: Any,
                          if (y - 624, x - left) in connected), default=0.)
                      for x in segment]
         bottom_inner_bands.append(min(strengths))
-    if min(bottom_inner_bands) < 40:
+    if min(bottom_inner_bands) < (100 if low_gray else 40):
         return None
-    return {"method": "18.647.2_dragon_rounded_closed_card",
+    return {"method": ("18.647.2_dragon_low_contrast_closed_card" if low_gray else
+                       "18.647.2_dragon_rounded_closed_card"),
             "left_edge": left_edge, "right_edge": right_edge,
             "gray_side_contrast_max": 350,
             "left_side_bands": left_bands, "right_side_bands": right_bands,
             "bottom_inner_gradient_min": min(bottom_inner_bands),
             "bottom_inner_gradient_bands": bottom_inner_bands,
-            "upper_outline": {"gradient_min": 140, "side_join_min": 100,
+            "upper_outline": {"gradient_min": corner_min, "side_join_min": side_join_min,
                               "left_inset": upper_left,
-                              "right_inset": upper_right},
+                              "right_inset": upper_right,
+                              **({"horizontal": upper_horizontal} if low_gray else {})},
             "lower_outline": {"connectivity": 4, "gradient_min": 40,
                               "bottom_gradient_max": -40,
                               "connected_pixels": len(connected)}}
