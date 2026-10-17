@@ -4,7 +4,7 @@
 
 首版运行时、模型加载、Jev 适配、GUI 和报告已有代码。本轮补充数据/训练/导出、独立评估和证据绑定的发布工具，S/B 均已运行真实 32 图冒烟和开发训练，并适配新版日常入口；原型精度、正式模型及新模式实战尚未通过。战中“截图到完整动作 ≤0.5 秒”仍是增强阶段验收目标。
 
-S/R 训练配方现固定为版本 2：头部阶段冻结主干参数和 BatchNorm 统计，微调阶段独立累计早停耐心，恢复签名拒绝旧配方混用。程序修复与真实模型质量分别验收，旧原型结果保留，不因配方修复自动升格。
+S/R 训练配方现固定为版本 3：沿用主干和 BatchNorm 冻结、分阶段早停；宏 F1/最低召回平分时，验证 NLL 至少下降 .001 才替换 checkpoint，恢复签名拒绝旧配方混用。程序修复与真实模型质量分别验收，旧原型结果保留，不因配方修复自动升格。
 
 ## 计划分工
 
@@ -12,7 +12,7 @@ S/R 训练配方现固定为版本 2：头部阶段冻结主干参数和 BatchNo
 | --- | --- | --- |
 | [VISION_AGENT_PLAN.md](VISION_AGENT_PLAN.md) | 产品执行边界、准备/连续投放时间契约、M0–M7 里程碑 | 首版非训练实现及 M2 工具已有；正式数据、M5/M6 和 M7 仍有未完成项 |
 | [VISION_DATA_COLLECTION_PLAN.md](VISION_DATA_COLLECTION_PLAN.md) | 素材矩阵、标签、时序、分组拆分、D0–D4 和跨机交接 | 146 张历史候选图保留；另有版本明确的新采集和 agent_visual 原型快照，正式人工复核、覆盖及冻结未完成 |
-| [VISION_MODEL_TRAINING_PLAN.md](VISION_MODEL_TRAINING_PLAN.md) | S/B 必训模型、R/U 增强模型、训练/导出/评估、T0–T6 | S/B、R-card 原型实际训练/导出已有实录；R-card v2 已训练/导出，16 帧 val 事件仍 0 TP/2 FN，ONNX 与 v1 相同，U 尚无真实权重；正式数据、质量准入和实战未完成 |
+| [VISION_MODEL_TRAINING_PLAN.md](VISION_MODEL_TRAINING_PLAN.md) | S/B 必训模型、R/U 增强模型、训练/导出/评估、T0–T6 | S/B、R-card 原型实际训练/导出已有实录；R-card v4 已训练/导出，16 帧 val 事件仍 0 TP/2 FN，原型继续禁用，U 尚无真实权重；正式数据、质量准入和实战未完成 |
 
 配置与已实现的接口分别以[战前视觉规划说明](../VISION_AGENT.md)、[模型包接口](../MODEL_PACKAGE.md)、[连续投放运行契约](../VISION_AGENT_RUNTIME.md)为准。数据与训练的实际命令见[工具说明](../../training/vision/README.md)；计划目标不等于正式验收结果。
 
@@ -30,7 +30,7 @@ S/R 训练配方现固定为版本 2：头部阶段冻结主干参数和 BatchNo
 
 ## 本次核对与证据边界
 
-- 无模型连续部署已有受约束的单场完整胜局；新快扫在 233306 实机完成部署、技能与回村，但自动结算被星形识别阻断，原失败保留。它不替代正式模型或连续十场/六十分钟验收，当前结果以[进度](../PROGRESS.md)和[日常证据](../DAILY_ACCEPTANCE.md)为准。
+- 无模型连续部署已有受约束的单场完整胜局；050628 已取得完整自动 2 星 70%；后续 072023 两次试探通过，但最终授权超出 12 秒而停止主力，原失败保留。它不替代正式模型或连续十场/六十分钟验收，当前结果以[进度](../PROGRESS.md)和[日常证据](../DAILY_ACCEPTANCE.md)为准。
 
 - 大本营 Agent 原型扩充为 17 张、16 组，保持旧 val/test，新增 6 张仅用于 train；两个架构的训练、导出与 val 对照均已完成，但仍有漏检且缺正式人工数据。原件和数量以[训练工具说明](../../training/vision/README.md)与[当前进度](../PROGRESS.md)为准，不更改正式准入条件。
 - 对照上述计划、[模型加载器](../../src/autococ/model_vision.py)、[评估脚本](../../scripts/evaluate_model_package.py)、[战前执行器](../../src/autococ/prepared_battle.py)、[Jev 适配器](../../src/autococ/jev.py)及已有测试，区分首版代码和后续目标。
