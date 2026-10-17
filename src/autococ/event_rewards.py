@@ -24,17 +24,19 @@ _BASELINE = (1280, 720)
 _TEMPLATES = Path(__file__).resolve().parents[2] / "assets" / "templates"
 _PAGE_ANCHORS = {
     "title": ("裂隙之乱", (350, 20, 500, 90)),
-    "list": ("奖励清单", (145, 235, 260, 275)),
     "paid": ("购买活动令牌", (850, 95, 1145, 165)),
 }
-_POSITION_ANCHORS = {
-    # These upper-track milestones bind the observed horizontal page position.
-    # An empty generic lower pedestal alone cannot identify a claimed reward.
-    "upper_medal_amount": ("600", (400, 210, 475, 250)),
-    "upper_medal": ("裂隙奖章", (390, 240, 485, 280)),
-    "upper_ore_amount": ("95", (710, 210, 780, 250)),
-    "upper_ore": ("璀璨矿石", (690, 240, 790, 280)),
-}
+# The 600/95 centers come from the reviewed original fixture. The 25 center
+# is bound to the settled post-swipe raw frame, not extrapolated from spacing.
+_UPPER_MILESTONES = (
+    ("600", "裂隙奖章", 439),
+    ("95", "璀璨矿石", 746),
+    ("25", "星辉矿石", 1052),
+)
+_UPPER_AMOUNT_ROI = (175, 205, 1115, 250)
+_UPPER_LABEL_ROI = (175, 240, 1115, 285)
+_LIST_ICON_ROI = (178, 197, 237, 242)
+_TARGET_VIEWPORT = (145, 420, 1145, 670)
 _TARGETS = {
     "shiny": {"label": "闪亮矿石", "amount": "1250",
               "text_roi": (670, 455, 810, 530), "claim_roi": (670, 585, 815, 655),
@@ -95,6 +97,71 @@ def _green_fraction(image: np.ndarray, roi: tuple[int, int, int, int]) -> float:
                          & (hsv[:, :, 1] >= 90) & (hsv[:, :, 2] >= 90)))
 
 
+def _center_x(box: list[int] | tuple[int, ...]) -> float:
+    return (box[0] + box[2]) / 2
+
+
+def _upper_position(ocr: list[dict]) -> tuple[int | None, list[dict]]:
+    """Bind one translation from two independent upper amount+label pairs."""
+    pairs = []
+    for index, (amount, label, canonical_center) in enumerate(_UPPER_MILESTONES):
+        numbers = _exact(ocr, amount, _UPPER_AMOUNT_ROI)
+        if len(numbers) != 1:
+            continue
+        center = _center_x(numbers[0]["bbox"])
+        names = [item for item in _exact(ocr, label, _UPPER_LABEL_ROI)
+                 if abs(_center_x(item["bbox"]) - center) <= 22]
+        if len(names) != 1:
+            continue
+        pairs.append({"index": index, "amount": amount, "label": label,
+                      "amount_bbox": list(numbers[0]["bbox"]),
+                      "label_bbox": list(names[0]["bbox"]),
+                      "canonical_center_x": canonical_center,
+                      "observed_center_x": center,
+                      "offset_px": center - canonical_center})
+    if (len(pairs) < 2
+            or not any(pairs[i + 1]["index"] == pairs[i]["index"] + 1
+                       for i in range(len(pairs) - 1))):
+        return None, pairs
+    offsets = [item["offset_px"] for item in pairs]
+    if (max(offsets) - min(offsets) > 6
+            or any(pairs[i + 1]["observed_center_x"] - pairs[i]["observed_center_x"] < 295 * (pairs[i + 1]["index"] - pairs[i]["index"])
+                   for i in range(len(pairs) - 1))):
+        return None, pairs
+    translation = round(sum(offsets) / len(offsets))
+    if abs(translation) <= 3:
+        translation = 0
+    if not -650 <= translation <= 330:
+        return None, pairs
+    if pairs[0]["index"] == 1:
+        # The 600 label can be merged with the fixed list button after a
+        # scroll. Its independent number still corroborates 95/25 location.
+        leading = _exact(ocr, "600", _UPPER_AMOUNT_ROI)
+        if (len(leading) != 1
+                or abs(_center_x(leading[0]["bbox"]) - (439 + translation)) > 8):
+            return None, pairs
+    return translation, pairs
+
+
+def _translated_roi(roi: tuple[int, int, int, int], offset: int) -> tuple[int, int, int, int] | None:
+    shifted = (roi[0] + offset, roi[1], roi[2] + offset, roi[3])
+    if not _box_in(shifted, _TARGET_VIEWPORT):
+        return None
+    return shifted
+
+
+def _translated_empty_score(image: np.ndarray, target: str,
+                            roi: tuple[int, int, int, int]) -> float:
+    # A tiny search tolerates OCR center jitter; no generic pedestal can bind
+    # target identity without two independently named upper milestones.
+    scores = []
+    for correction in range(-3, 4):
+        trial = _translated_roi(roi, correction)
+        if trial is not None:
+            scores.append(_template_score(image, target + "_empty", trial))
+    return max(scores, default=0.0)
+
+
 def _account_claim(ocr: object) -> bool:
     return isinstance(ocr, list) and any(
         "另一个设备正在连接这个村庄" in re.sub(r"\s+", "", str(item.get("text", "")))
@@ -127,15 +194,24 @@ def observe_reward_track(frame_path: str | Path, ocr: list[dict], *,
             return None
         anchors[name] = {"text": label, "bbox": list(matches[0]["bbox"]),
                          "confidence": matches[0]["confidence"]}
-    position_anchors = {}
-    for name, (label, roi) in _POSITION_ANCHORS.items():
-        matches = _exact(ocr, label, roi)
-        if len(matches) == 1:
-            position_anchors[name] = {"text": label, "bbox": list(matches[0]["bbox"]),
-                                      "confidence": matches[0]["confidence"]}
-    position_verified = len(position_anchors) == len(_POSITION_ANCHORS)
-    if position_verified:
-        anchors.update(position_anchors)
+    list_matches = _exact(ocr, "奖励清单", (145, 235, 260, 275))
+    if len(list_matches) > 1:
+        return None
+    if list_matches:
+        anchors["list"] = {"method": "independent_exact_ocr", "text": "奖励清单",
+                           "bbox": list(list_matches[0]["bbox"]),
+                           "confidence": list_matches[0]["confidence"]}
+    else:
+        # This icon remains fixed while reward labels slide behind the button.
+        # Without its versioned asset the merged-label page stays unknown.
+        icon_score = _template_score(image, "list_icon", _LIST_ICON_ROI)
+        if icon_score < .97:
+            return None
+        icon_asset = _TEMPLATES / "event_reward_list_icon_18_647_2.png"
+        anchors["list"] = {"method": "fixed_icon_template", "bbox": list(_LIST_ICON_ROI),
+                           "confidence": icon_score, "asset_sha256": _sha256(icon_asset)}
+    position_offset, position_basis = _upper_position(ocr)
+    position_verified = position_offset is not None
     visual = {name: _template_score(image, name, roi)
               for name, roi in _VISUAL_ROIS.items()}
     if any(score < .97 for score in visual.values()):
@@ -147,28 +223,35 @@ def observe_reward_track(frame_path: str | Path, ocr: list[dict], *,
         return None
     targets = {}
     for name, spec in _TARGETS.items():
-        labels = _exact(ocr, spec["label"], spec["text_roi"])
-        amounts = _exact(ocr, spec["amount"], spec["text_roi"])
-        buttons = _exact(ocr, "领取", spec["claim_roi"])
-        green = _green_fraction(image, spec["button_roi"])
-        empty_score = _template_score(image, name + "_empty", spec["empty_roi"])
+        rois = ({key: _translated_roi(spec[key], position_offset) for key in
+                 ("text_roi", "claim_roi", "button_roi", "empty_roi")}
+                if position_verified else {})
+        target_visible = position_verified and all(roi is not None for roi in rois.values())
+        labels = _exact(ocr, spec["label"], rois["text_roi"]) if target_visible else []
+        amounts = _exact(ocr, spec["amount"], rois["text_roi"]) if target_visible else []
+        buttons = _exact(ocr, "领取", rois["claim_roi"]) if target_visible else []
+        green = _green_fraction(image, rois["button_roi"]) if target_visible else 0.0
+        empty_score = (_translated_empty_score(image, name, rois["empty_roi"])
+                       if target_visible else 0.0)
         status = "unknown"
         button = None
-        if position_verified and len(labels) == len(amounts) == len(buttons) == 1 and green >= .35 and empty_score < .9:
+        if target_visible and len(labels) == len(amounts) == len(buttons) == 1 and green >= .35 and empty_score < .9:
             bbox = list(buttons[0]["bbox"])
             button = {"bbox": bbox, "point": [(bbox[0] + bbox[2]) // 2,
                                                  (bbox[1] + bbox[3]) // 2],
                       "confidence": buttons[0]["confidence"]}
             status = "claimable"
-        elif position_verified and not labels and not amounts and not buttons and green <= .05 and empty_score >= .97:
+        elif target_visible and not labels and not amounts and not buttons and green <= .05 and empty_score >= .97:
             status = "no_opportunity"
         targets[name] = {"status": status, "label": spec["label"],
                          "amount": int(spec["amount"]), "button": button,
-                         "green_fraction": green, "empty_template_score": empty_score}
+                         "green_fraction": green, "empty_template_score": empty_score,
+                         "visible": bool(target_visible), "rois": rois}
     close_box = list(_VISUAL_ROIS["close"])
     return {"surface": "event_reward_track", "client_version": client_version,
             "frame": str(frame), "frame_sha256": _sha256(frame),
             "anchors": anchors, "position_verified": position_verified,
+            "position_offset_px": position_offset, "position_basis": position_basis,
             "visual": {**visual, "paid_yellow_fraction": paid_yellow},
             "targets": targets,
             "button": {"name": "close_event_rewards", "text": "X（图像）",
@@ -202,11 +285,13 @@ def _require_current(session, snapshot, target: str, end: float) -> dict:
     result = observe_reward_track(snapshot.screenshot_path, snapshot.observations.get("ocr", []),
                                   client_version=session.client_version)
     if (result is None or result["frame_sha256"] != observed["frame_sha256"]
-            or result["button"] != observed.get("button")):
+            or result["button"] != observed.get("button")
+            or result["anchors"] != observed.get("anchors")):
         raise FlowError("Event reward current page failed revalidation")
     before = observed.get("targets", {}).get(target, {})
     now = result["targets"][target]
-    if before.get("status") != now["status"] or before.get("button") != now["button"]:
+    if (before.get("status") != now["status"] or before.get("button") != now["button"]
+            or observed.get("position_offset_px") != result.get("position_offset_px")):
         raise FlowError("Event reward target evidence changed")
     return now
 
@@ -345,6 +430,169 @@ def close_reward_track(session, *, timeout_sec: float = 20) -> dict:
     raise FlowError("Event reward close did not return to a confirmed home")
 
 
+def _start_position(ocr: object) -> tuple[float, float] | None:
+    """Recognize the one observed 100/800 starting viewport, never guess scroll direction."""
+    if not isinstance(ocr, list):
+        return None
+    centers = []
+    for amount, label in (("100", "璀璨矿石"), ("800", "裂隙奖章")):
+        numbers = _exact(ocr, amount, _UPPER_AMOUNT_ROI)
+        if len(numbers) != 1:
+            return None
+        center = _center_x(numbers[0]["bbox"])
+        labels = [item for item in _exact(ocr, label, _UPPER_LABEL_ROI)
+                  if abs(_center_x(item["bbox"]) - center) <= 22]
+        if len(labels) != 1:
+            return None
+        centers.append(center)
+    # The third slot is partly covered by the trader; only the two complete
+    # amount/name pairs may establish this exact starting viewport.
+    if (not 425 <= centers[0] <= 450
+            or not 730 <= centers[1] <= 755
+            or not 295 <= centers[1] - centers[0] <= 320):
+        return None
+    return tuple(centers)
+
+
+def _fresh_pair(first, second) -> bool:
+    one, two = first.observations, second.observations
+    first_time, second_time = one.get("requested_at_monotonic"), two.get("requested_at_monotonic")
+    first_id, second_id = one.get("frame_id"), two.get("frame_id")
+    return (type(first_time) in (int, float) and type(second_time) in (int, float)
+            and math.isfinite(first_time) and math.isfinite(second_time)
+            and first_time > 0 and second_time > first_time
+            and isinstance(first_id, str) and isinstance(second_id, str)
+            and bool(first_id.strip()) and bool(second_id.strip())
+            and first_id != second_id
+            and isinstance(first.screenshot_path, Path)
+            and isinstance(second.screenshot_path, Path)
+            and first.screenshot_path != second.screenshot_path)
+
+
+def _stable_position(first: dict, second: dict, target: str) -> bool:
+    """Allow one-pixel OCR jitter without relaxing same-frame target evidence."""
+    a, b = first.get("position_offset_px"), second.get("position_offset_px")
+    return (first.get("position_verified") is True and second.get("position_verified") is True
+            and type(a) is int and type(b) is int and abs(a - b) <= 1
+            and first.get("targets", {}).get(target, {}).get("visible") is True
+            and second.get("targets", {}).get(target, {}).get("visible") is True)
+
+
+def locate_reward_track_position(session, target: str, *, enabled: bool = False,
+                                 task_id: str | None = None,
+                                 timeout_sec: float = 30) -> dict:
+    """At most one guarded `prev` swipe per task from the 100/800 viewport.
+
+    This is a separate opt-in navigation step. It never claims or closes.
+    Callers reserve their own close and inventory-read time before invoking it.
+    """
+    if not enabled:
+        raise FlowError("Event track scrolling requires explicit opt-in")
+    if target not in _TARGETS or not 0 < timeout_sec <= 30:
+        raise ValueError("Unsupported target or navigation timeout")
+    if task_id is not None and (not isinstance(task_id, str) or not task_id.strip()):
+        raise ValueError("Position navigation task id must be nonempty")
+    attempt_key = (task_id or target, target)
+    end = min(time.monotonic() + timeout_sec, session.deadline, session.task_deadline)
+    receipt = {"kind": "event_track_position_navigation", "target": target,
+               "task_id": task_id,
+               "status": "unknown", "input_attempted": False, "input_sent": False,
+               "claim_attempted": False, "formal_success": False, "frames": [], "reasons": []}
+    try:
+        pair = []
+        for index in (1, 2):
+            frame = _bounded_observe(session, f"event-position-before-{index}", end)
+            _require_current(session, frame, target, end)
+            receipt["frames"].append({"path": str(frame.screenshot_path),
+                                      "sha256": _sha256(frame.screenshot_path),
+                                      "frame_id": frame.observations.get("frame_id"),
+                                      "requested_at_monotonic": frame.observations.get("requested_at_monotonic"),
+                                      "offset": frame.observations["event_reward_track"].get("position_offset_px")})
+            pair.append(frame)
+        first, second = pair
+        if not _fresh_pair(first, second):
+            raise FlowError("Position source frames were not independent and newer")
+        a = first.observations["event_reward_track"]
+        b = second.observations["event_reward_track"]
+        if getattr(session, "_event_track_position_uncertain", False):
+            receipt["reasons"].append("previous_navigation_transport_uncertain")
+            return receipt
+        if _stable_position(a, b, target):
+            receipt["status"] = "positioned"
+            receipt["offset_px"] = b["position_offset_px"]
+            return receipt
+        attempts = getattr(session, "_event_track_position_swipe_attempts", None)
+        if attempts is None:
+            attempts = set()
+            session._event_track_position_swipe_attempts = attempts
+        if attempt_key in attempts:
+            receipt["reasons"].append("one_swipe_already_attempted_for_task")
+            return receipt
+        start_a = _start_position(first.observations.get("ocr"))
+        start_b = _start_position(second.observations.get("ocr"))
+        if (start_a is None or start_b is None
+                or any(abs(x - y) > 4 for x, y in zip(start_a, start_b))):
+            receipt["reasons"].append("starting_viewport_not_independently_bound")
+            return receipt
+        if end - time.monotonic() < 15:
+            receipt["reasons"].append("insufficient_budget_for_one_swipe_and_after_frames")
+            return receipt
+        _require_foreground(session)
+        _require_current(session, second, target, end)
+        session.check_deadline()
+        if time.monotonic() >= end:
+            raise FlowError("Position navigation deadline expired before input")
+        attempts.add(attempt_key)
+        session.event("event_track_position_swipe_reserved", target=target,
+                      frame=str(second.screenshot_path), frame_sha256=_sha256(second.screenshot_path),
+                      start=[340, 385], finish=[920, 385], duration_ms=550)
+        receipt["input_attempted"] = True
+        try:
+            session._input_attempt_generation += 1
+            session.context.swipe(340, 385, 920, 385, 550)
+            session.action_count += 1
+            receipt["input_sent"] = True
+            receipt["input_done_at_monotonic"] = time.monotonic()
+        except Exception:
+            session._event_track_position_uncertain = True
+            raise
+        finally:
+            session.last_snapshot = None
+        previous = None
+        for index in range(4):
+            current = _bounded_observe(session, f"event-position-after-{index + 1}", end)
+            record = {"path": str(current.screenshot_path), "sha256": _sha256(current.screenshot_path),
+                      "frame_id": current.observations.get("frame_id"),
+                      "requested_at_monotonic": current.observations.get("requested_at_monotonic"),
+                      "offset": None}
+            receipt["frames"].append(record)
+            if (current.scene != "popup"
+                    or not isinstance(current.observations.get("event_reward_track"), dict)):
+                previous = None
+                continue
+            _require_current(session, current, target, end)
+            state = current.observations["event_reward_track"]
+            record["offset"] = state.get("position_offset_px")
+            if (previous is not None and _fresh_pair(previous, current)
+                    and _stable_position(previous.observations["event_reward_track"], state, target)
+                    and record["requested_at_monotonic"] > receipt["input_done_at_monotonic"]
+                    and previous.observations["requested_at_monotonic"] > receipt["input_done_at_monotonic"]):
+                receipt["status"] = "positioned"
+                receipt["offset_px"] = state["position_offset_px"]
+                return receipt
+            previous = current
+        receipt["reasons"].append("stable_target_position_not_established")
+        return receipt
+    except StopRequested:
+        receipt["reasons"].append("StopRequested")
+        raise
+    except Exception as exc:
+        receipt["reasons"].append(f"{type(exc).__name__}: {exc}")
+        return receipt
+    finally:
+        session.event("event_track_position_receipt", receipt=receipt)
+
+
 def claim_one_free_reward(session, target: str, *, enabled: bool = False,
                           timeout_sec: float = 20) -> dict:
     """Opt-in one-tap claim; return only a UI receipt, never an ore receipt."""
@@ -374,7 +622,19 @@ def claim_one_free_reward(session, target: str, *, enabled: bool = False,
                                   "frame_id": before.observations["frame_id"],
                                   "requested_at_monotonic": before.observations["requested_at_monotonic"]})
         if state["status"] == "no_opportunity":
-            receipt["status"] = "no_opportunity"
+            confirmed = _bounded_observe(session, "event-free-no-opportunity-second", end)
+            second = _require_current(session, confirmed, target, end)
+            receipt["frames"].append({"path": str(confirmed.screenshot_path),
+                                      "sha256": _sha256(confirmed.screenshot_path),
+                                      "status": second["status"],
+                                      "frame_id": confirmed.observations["frame_id"],
+                                      "requested_at_monotonic": confirmed.observations["requested_at_monotonic"]})
+            if (_fresh_pair(before, confirmed) and second["status"] == "no_opportunity"
+                    and _stable_position(before.observations["event_reward_track"],
+                                         confirmed.observations["event_reward_track"], target)):
+                receipt["status"] = "no_opportunity"
+            else:
+                receipt["reasons"].append("no_opportunity_not_stable_in_two_frames")
             return receipt
         if state["status"] != "claimable":
             receipt["reasons"].append("target_not_independently_claimable")

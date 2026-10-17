@@ -16,9 +16,11 @@ def test_current_client_combined_routine_is_loadable_and_ordered():
     data = tomllib.loads((ROOT / "routine.current-18-647-2.toml").read_text(encoding="utf-8"))
     routine = routine_from_dict(data["routine"])
     assert [(task.kind, task.enabled) for task in routine.tasks] == [
-        (name, True) for name in ("collect", "request", "donate", "train", "event", "resources")]
+        ("collect", True), ("request", True), ("donate", True), ("train", True),
+        ("event_reward", False), ("event", True), ("resources", True)]
     assert routine.tasks[3].kind == "train"  # Inspect only; battle preflight prepares/validates army.
-    assert routine.tasks[4].goal.adapter_path.endswith("rift_event_18_647_2.adapter.toml")
+    assert routine.tasks[4].free_reward_target == "shiny"  # Free claims remain explicit opt-in.
+    assert routine.tasks[5].goal.adapter_path.endswith("rift_event_18_647_2.adapter.toml")
     config = load_config(ROOT / "config.example.toml")
     validate_routine_files(config, routine)
 

@@ -1,0 +1,102 @@
+{
+  "schema": "blacksmith_navigation_zoom103_18_647_2_fixture_v1",
+  "client_version": "18.647.2",
+  "calibration_kind": "bounded_home_front_template",
+  "formal_acceptance": false,
+  "new_run_selected_blacksmith_verified": false,
+  "prior_confirmed_selection": {
+    "run": "20261016-224105-027202-f362718d",
+    "home_frame": "frames/00006-ore-navigation-current-1.png",
+    "home_sha256": "d82b8d28625220a6e807d62e585c9a88b480d545c4bc836de0b2678fe1e2ab0c",
+    "selected_frame": "frames/00007-ore-navigation-selected.png",
+    "selected_sha256": "c6855c9a34cc208e166ffe07f606d0ae41dc99f880ea0a4a4e391779284456cf",
+    "old_front_bbox_xyxy": [
+      758,
+      197,
+      776,
+      219
+    ],
+    "old_front_ncc": 0.998779,
+    "old_front_mad": 0.287
+  },
+  "source_mapping_diagnostic": {
+    "reference_run": "20261016-224105-027202-f362718d",
+    "current_run": "20261017-051304-043976-eb6e483f",
+    "reference_frame": "00006-ore-navigation-current-1.png",
+    "current_frame": "00048-ore-navigation-current-1.png",
+    "ratio_matches": 518,
+    "affine_inliers": 342,
+    "map_scale": 1.029241699878419,
+    "predicted_front_xy": [
+      762.009,
+      192.013
+    ],
+    "observed_front_xy": [
+      762,
+      192
+    ],
+    "diagnostic_file": "diagnostics/ore-nav-051304-agent-v1/prior_affine.txt"
+  },
+  "transformation": {
+    "baseline_resolution": [
+      1280,
+      720
+    ],
+    "retained_roi_xyxy": [
+      730,
+      165,
+      815,
+      240
+    ],
+    "masked_bgr": [
+      24,
+      24,
+      24
+    ],
+    "method": "resize_native_2560x1440_to_baseline_INTER_AREA_then_mask_outside_roi"
+  },
+  "template": {
+    "path": "assets/templates/ore_navigation_blacksmith_front_zoom103_18_647_2.png",
+    "sha256": "0015199e0ff070e851f5d87c8c7572541fe9c66330ad4edea164dac539016841",
+    "source_run": "20261017-051304-043976-eb6e483f",
+    "source_frame": "frames/00048-ore-navigation-current-1.png",
+    "source_frame_sha256": "ec619660b1a538b06bfe91320ad74fb7f5f5a4d03c358781295a83ed6c044f5d",
+    "physical_bbox_xyxy": [
+      762,
+      192,
+      780,
+      214
+    ],
+    "source_pixel_sha256": "41f2f10d1e47072ab153ea561a9d4c19766ea13641eae5a9c67b3a8aec1c9330",
+    "tap_offset_xy": [
+      1,
+      10
+    ]
+  },
+  "fixtures": {
+    "48": {
+      "source_run": "20261017-051304-043976-eb6e483f",
+      "source_frame": "frames/00048-ore-navigation-current-1.png",
+      "source_sha256": "ec619660b1a538b06bfe91320ad74fb7f5f5a4d03c358781295a83ed6c044f5d",
+      "derived_path": "tests/fixtures/blacksmith_navigation_zoom103_18_647_2/home_zoom103_48.png",
+      "derived_sha256": "65775f03f4255d45e6e5ea60ba930bcaeecd6adb3212c17c82467addbb2d4926",
+      "retained_roi_pixel_sha256": "2eeb622662ed23010409d6741249d557eb45be025fce98a2925836e83c24a2fd"
+    },
+    "49": {
+      "source_run": "20261017-051304-043976-eb6e483f",
+      "source_frame": "frames/00049-ore-navigation-current-2.png",
+      "source_sha256": "dc6ec8ba78ccd52719cf05f828e33ffe1b308ff51e561cb0af9724df8d651dba",
+      "derived_path": "tests/fixtures/blacksmith_navigation_zoom103_18_647_2/home_zoom103_49.png",
+      "derived_sha256": "27cc46014ae2d392ffe208834dd8f0161624b63659e2d36f881fd8710e97b495",
+      "retained_roi_pixel_sha256": "fe786cb5d4afaf5f3ff6d25b87250112ddb24ab492f43150c1241ab3061d2a15"
+    },
+    "50": {
+      "source_run": "20261017-051304-043976-eb6e483f",
+      "source_frame": "frames/00050-ore-navigation-current-3.png",
+      "source_sha256": "8c36e129a1b2e8199f6e31ae3182ccc6d8872f4eed36ab7d8bfc270c31435dca",
+      "derived_path": "tests/fixtures/blacksmith_navigation_zoom103_18_647_2/home_zoom103_50.png",
+      "derived_sha256": "7adc2edde89c9eca8a375082dd969e42a02cbb5415f6b0c1c43c0e4c0459df4e",
+      "retained_roi_pixel_sha256": "88340e9cb1d0704b6488e007b967fc2d74c9796a2cbcaa0bd5f21ebebda1aefc"
+    }
+  }
+}

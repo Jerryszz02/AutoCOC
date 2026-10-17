@@ -69,7 +69,8 @@ def _ore_inventory_task(session, spec) -> TaskResult:
 
 def _event_reward_task(session, spec) -> TaskResult:
     """Reconcile one free claim against ore balances in the same task session."""
-    from .event_rewards import close_reward_track, claim_one_free_reward, open_reward_track
+    from .event_rewards import (close_reward_track, claim_one_free_reward,
+                                locate_reward_track_position, open_reward_track)
     from .ore_navigation import read_current_ore_inventory
 
     end = min(session.deadline, session.task_deadline,
@@ -81,6 +82,7 @@ def _event_reward_task(session, spec) -> TaskResult:
     before_home = None
     after_home = None
     opened = None
+    located = None
     claim = None
     closed = None
     failure = None
@@ -174,6 +176,9 @@ def _event_reward_task(session, spec) -> TaskResult:
                           if isinstance(item, dict) and item.get("frame"))
         if isinstance(opened, dict):
             frames.extend(opened[key] for key in ("entry_frame", "frame") if opened.get(key))
+        if isinstance(located, dict):
+            frames.extend(item["path"] for item in (located.get("frames") or [])
+                          if isinstance(item, dict) and item.get("path"))
         if isinstance(claim, dict):
             frames.extend(item["path"] for item in (claim.get("frames") or [])
                           if isinstance(item, dict) and item.get("path"))
@@ -194,7 +199,8 @@ def _event_reward_task(session, spec) -> TaskResult:
         metrics = {"receipt_kind": "event_reward", "target": spec.free_reward_target,
                    "before_ore_read": before, "after_ore_read": after,
                    "before_home": before_home, "after_home": after_home,
-                   "opened": opened, "claim": claim, "closed": closed,
+                   "opened": opened, "position_navigation": located,
+                   "claim": claim, "closed": closed,
                    "ore_delta": delta, "ui_claim_acknowledged": bool(
                        isinstance(claim, dict) and claim.get("ui_claim_acknowledged") is True),
                    "reward_inventory_verified": verified,
@@ -204,7 +210,8 @@ def _event_reward_task(session, spec) -> TaskResult:
         return TaskResult(spec.id, status, reason,
                           evidence=[Path(path) for path in dict.fromkeys(frames)], metrics=metrics)
 
-    # Two complete 90s inventory reads and three bounded 20s UI stages.
+    # Two complete 90s inventory reads, three bounded 20s UI stages, and
+    # one bounded 30s positioning step share the same task/global deadline.
     # The task/global deadlines are shared; no phase can extend either one.
     current = getattr(session, "last_snapshot", None)
     captured = current.observations.get("observed_at_monotonic") if current is not None else None
@@ -213,7 +220,7 @@ def _event_reward_task(session, spec) -> TaskResult:
                   and current.observations.get("resource_source") == "village_inventory"
                   and type(captured) in (int, float) and math.isfinite(captured)
                   and 0 <= time.monotonic() - captured <= 8 and not account_blocked())
-    if remaining() < 240:
+    if remaining() < 270:
         return finish("limited", "event_reward_full_reconciliation_budget_insufficient")
 
     known_home = False
@@ -232,15 +239,24 @@ def _event_reward_task(session, spec) -> TaskResult:
     capacity = before_ores[spec.free_reward_target]["capacity"]
     if capacity - current_amount < expected_amount:
         return finish("skipped", "event_reward_target_capacity_insufficient")
-    if remaining() < 150:
+    if remaining() < 180:
         return finish("limited", "event_reward_post_read_budget_insufficient")
 
     known_home = False
     try:
         opened = open_reward_track(session, timeout_sec=20)
-        if remaining() < 130:
-            failure = "event_reward_claim_and_after_read_budget_insufficient"
+        if remaining() < 160:
+            failure = "event_reward_position_and_after_read_budget_insufficient"
         else:
+            located = locate_reward_track_position(session, spec.free_reward_target,
+                                                   enabled=True, task_id=spec.id,
+                                                   timeout_sec=30)
+        if failure is None and (not isinstance(located, dict)
+                                or located.get("status") != "positioned"):
+            failure = "event_reward_position_unknown"
+        if failure is None and remaining() < 130:
+            failure = "event_reward_claim_and_after_read_budget_insufficient"
+        if failure is None:
             claim = claim_one_free_reward(session, spec.free_reward_target, enabled=True,
                                           timeout_sec=20)
     except StopRequested:

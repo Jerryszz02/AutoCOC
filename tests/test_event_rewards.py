@@ -6,6 +6,7 @@ from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
+from shutil import copyfile
 from tempfile import TemporaryDirectory
 import time
 import unittest
@@ -15,7 +16,8 @@ import cv2
 
 from autococ.errors import FlowError, StopRequested
 from autococ.event_rewards import (claim_one_free_reward, close_reward_track,
-                                   observe_reward_track, open_reward_track)
+                                   locate_reward_track_position, observe_reward_track,
+                                   open_reward_track)
 from autococ.ocr import OCRText
 from autococ.scene import SceneSnapshot
 from autococ.vision import ScreenshotRecognizer
@@ -40,6 +42,47 @@ def recognized(name: str, *, ocr_name: str | None = None) -> SceneSnapshot:
     return snapshot
 
 
+def recognized_with_ocr(path: Path, rows: list[dict]) -> SceneSnapshot:
+    provider = Mock()
+    provider.recognize.return_value = [OCRText(item["text"], item["confidence"], tuple(item["bbox"]))
+                                       for item in rows]
+    recognizer = ScreenshotRecognizer(provider=provider)
+    recognizer.client_version = "18.647.2"
+    return recognizer.recognize(path)
+
+
+def upper_row(*items: tuple[str, tuple[int, int, int, int]]) -> list[dict]:
+    return [{"text": text, "bbox": list(box), "confidence": .999}
+            for text, box in items]
+
+
+def shifted_live_ocr() -> list[dict]:
+    base = [item for item in fixture_ocr("both_empty")
+            if not (item["bbox"][1] < 285 and item["text"] in
+                    {"600", "95", "裂隙奖章", "璀璨矿石", "奖励清单"})]
+    return base + upper_row(
+        ("600", (234, 222, 284, 246)),
+        ("95", (549, 220, 583, 246)),
+        ("璀璨矿石", (526, 248, 593, 272)),
+        ("25", (856, 222, 887, 246)),
+        ("星辉矿石", (834, 248, 902, 272)),
+        ("奖励清单裂隙奖章", (180, 246, 288, 271)),
+    )
+
+
+def initial_view_ocr() -> list[dict]:
+    base = [item for item in fixture_ocr("both_empty")
+            if not (item["bbox"][1] < 285 and item["text"] in
+                    {"600", "95", "裂隙奖章", "璀璨矿石"})]
+    return base + upper_row(
+        ("100", (414, 220, 464, 246)),
+        ("璀璨矿石", (401, 248, 470, 272)),
+        ("800", (714, 220, 764, 246)),
+        ("裂隙奖章", (701, 248, 770, 272)),
+        ("12", (1032, 220, 1064, 246)),
+    )
+
+
 class FakeSession:
     def __init__(self, snapshots, *, version="18.647.2"):
         self.snapshots = list(snapshots)
@@ -55,6 +98,9 @@ class FakeSession:
         self.template_clicks = []
         self.events = []
         self.observation_count = 0
+        self.context = Mock()
+        self._input_attempt_generation = 0
+        self.action_count = 0
 
     def check_deadline(self):
         if time.monotonic() >= min(self.deadline, self.task_deadline):
@@ -89,8 +135,203 @@ class FakeSession:
 
 
 class EventRewardTests(unittest.TestCase):
+    def test_position_pair_rejects_missing_or_nonfinite_source_identity(self):
+        from autococ import event_rewards as module
+
+        offset, pairs = module._upper_position(fixture_ocr("shifted_after_swipe_2"))
+        self.assertEqual(offset, -181)
+        self.assertEqual({row["amount"] for row in pairs}, {"95", "25"})
+
+        first = Mock(screenshot_path=Path("first.png"), observations={
+            "requested_at_monotonic": 1.0, "frame_id": "first"})
+        second = Mock(screenshot_path=Path("second.png"), observations={
+            "requested_at_monotonic": 2.0, "frame_id": "second"})
+        self.assertTrue(module._fresh_pair(first, second))
+        for field, value in (("requested_at_monotonic", float("nan")),
+                             ("requested_at_monotonic", float("inf")),
+                             ("frame_id", ""), ("frame_id", None)):
+            with self.subTest(field=field, value=value):
+                bad = dict(second.observations, **{field: value})
+                self.assertFalse(module._fresh_pair(first, Mock(
+                    screenshot_path=Path("second.png"), observations=bad)))
+        self.assertIsNotNone(module._start_position(initial_view_ocr()))
+        obscured_third = [row for row in initial_view_ocr() if row["text"] != "12"]
+        self.assertIsNotNone(module._start_position(obscured_third))
+        verified = {"position_verified": True, "position_offset_px": -180,
+                    "targets": {"shiny": {"visible": True}}}
+        jittered = {**verified, "position_offset_px": -181}
+        self.assertTrue(module._stable_position(verified, jittered, "shiny"))
+        self.assertFalse(module._stable_position(verified,
+            {**verified, "position_offset_px": -182}, "shiny"))
+
+    def test_merged_list_text_needs_independent_icon_and_two_position_pairs(self):
+        from autococ import event_rewards as module
+
+        frame = FIXTURES / "shifted_after_swipe_2.png"
+        rows = fixture_ocr("shifted_after_swipe_2")
+        result = observe_reward_track(frame, rows, client_version="18.647.2")
+        self.assertIsNotNone(result)
+        self.assertEqual(result["anchors"]["list"]["method"], "fixed_icon_template")
+        self.assertTrue(result["position_verified"])
+        self.assertEqual(result["position_offset_px"], -181)
+        self.assertEqual({row["amount"] for row in result["position_basis"]}, {"95", "25"})
+        self.assertEqual(result["targets"]["shiny"]["rois"]["empty_roi"][0],
+                         682 + result["position_offset_px"])
+        original_score = module._template_score
+        with patch("autococ.event_rewards._template_score",
+                   side_effect=lambda image, name, roi: 0.0 if name == "list_icon"
+                   else original_score(image, name, roi)):
+            self.assertIsNone(observe_reward_track(frame, rows, client_version="18.647.2"))
+        duplicate = rows + [dict(next(row for row in rows if row["text"] == "25"))]
+        self.assertFalse(observe_reward_track(frame, duplicate, client_version="18.647.2")
+                         ["position_verified"])
+        missing = [row for row in rows if row["text"] != "星辉矿石"]
+        self.assertFalse(observe_reward_track(frame, missing, client_version="18.647.2")
+                         ["position_verified"])
+        no_leading_number = [row for row in rows if row["text"] != "600"]
+        self.assertFalse(observe_reward_track(frame, no_leading_number, client_version="18.647.2")
+                         ["position_verified"])
+        conflicting = [dict(row, bbox=[number + 20 if index in (0, 2) else number
+                                       for index, number in enumerate(row["bbox"])])
+                       if row["text"] in {"25", "星辉矿石"} else row for row in rows]
+        self.assertFalse(observe_reward_track(frame, conflicting, client_version="18.647.2")
+                         ["position_verified"])
+
+    def test_no_opportunity_needs_two_distinct_stable_source_frames(self):
+        with TemporaryDirectory() as tmp:
+            first_path, second_path = (Path(tmp) / "one.png", Path(tmp) / "two.png")
+            for path in (first_path, second_path):
+                copyfile(FIXTURES / "both_empty.png", path)
+            rows = fixture_ocr("both_empty")
+            session = FakeSession([recognized_with_ocr(first_path, rows),
+                                   recognized_with_ocr(second_path, rows)])
+            with patch("autococ.event_rewards.foreground_package", return_value=session.config.game.package_name):
+                result = claim_one_free_reward(session, "shiny", enabled=True)
+            self.assertEqual(result["status"], "no_opportunity")
+            self.assertEqual(len(result["frames"]), 2)
+            self.assertEqual(session.taps, [])
+
+    def test_live_shifted_no_opportunity_accepts_one_pixel_position_jitter(self):
+        first = recognized("shifted_after_swipe_2")
+        second = recognized("shifted_read_only_1")
+        self.assertEqual(first.observations["event_reward_track"]["position_offset_px"], -181)
+        self.assertEqual(second.observations["event_reward_track"]["position_offset_px"], -180)
+        for target in ("shiny", "glowy"):
+            with self.subTest(target=target):
+                session = FakeSession([recognized("shifted_after_swipe_2"),
+                                       recognized("shifted_read_only_1")])
+                with patch("autococ.event_rewards.foreground_package",
+                           return_value=session.config.game.package_name):
+                    result = claim_one_free_reward(session, target, enabled=True)
+                self.assertEqual(result["status"], "no_opportunity")
+                self.assertEqual([row["status"] for row in result["frames"]],
+                                 ["no_opportunity", "no_opportunity"])
+                self.assertEqual(session.taps, [])
+
+    def test_locator_one_prev_swipe_and_terminal_uncertainty(self):
+        with TemporaryDirectory() as tmp:
+            first_path, second_path = (Path(tmp) / "start-one.png", Path(tmp) / "start-two.png")
+            for path in (first_path, second_path):
+                copyfile(FIXTURES / "both_empty.png", path)
+            first = recognized_with_ocr(first_path, initial_view_ocr())
+            second = recognized_with_ocr(second_path, initial_view_ocr())
+            session = FakeSession([first, second, recognized("shiny_before"), recognized("both_empty")])
+            with patch("autococ.event_rewards.foreground_package", return_value=session.config.game.package_name):
+                located = locate_reward_track_position(session, "shiny", enabled=True)
+            self.assertEqual(located["status"], "positioned")
+            self.assertEqual(located["offset_px"], 0)
+            session.context.swipe.assert_called_once_with(340, 385, 920, 385, 550)
+            self.assertFalse(located["claim_attempted"])
+
+            uncertain = FakeSession([recognized_with_ocr(first_path, initial_view_ocr()),
+                                     recognized_with_ocr(second_path, initial_view_ocr()),
+                                     recognized_with_ocr(first_path, initial_view_ocr()),
+                                     recognized_with_ocr(second_path, initial_view_ocr())])
+            uncertain.context.swipe.side_effect = FlowError("transport uncertain")
+            with patch("autococ.event_rewards.foreground_package", return_value=uncertain.config.game.package_name):
+                failed = locate_reward_track_position(uncertain, "shiny", enabled=True)
+                repeated = locate_reward_track_position(uncertain, "glowy", enabled=True,
+                                                        task_id="other-task")
+            self.assertEqual(failed["status"], "unknown")
+            self.assertTrue(failed["input_attempted"])
+            self.assertFalse(failed["input_sent"])
+            self.assertIn("previous_navigation_transport_uncertain", repeated["reasons"])
+            uncertain.context.swipe.assert_called_once()
+
+            # A previous swipe must not hide a target already established in
+            # two new frames (for example the next shiny/glowy task).
+            positioned = FakeSession([recognized("shiny_before"), recognized("both_empty")])
+            positioned._event_track_position_swipe_attempts = {("earlier", "shiny")}
+            with patch("autococ.event_rewards.foreground_package",
+                       return_value=positioned.config.game.package_name):
+                result = locate_reward_track_position(positioned, "glowy", enabled=True,
+                                                      task_id="next")
+            self.assertEqual(result["status"], "positioned")
+            positioned.context.swipe.assert_not_called()
+
+    def test_second_task_can_swipe_after_track_reopens_at_start(self):
+        with TemporaryDirectory() as tmp:
+            paths = [Path(tmp) / f"start-{index}.png" for index in range(6)]
+            for path in paths:
+                copyfile(FIXTURES / "both_empty.png", path)
+            starts = [recognized_with_ocr(path, initial_view_ocr()) for path in paths]
+            session = FakeSession(starts[:2] + [recognized("shiny_before"),
+                                                recognized("both_empty")]
+                                  + starts[2:4] + [recognized("shiny_before"),
+                                                    recognized("both_empty")]
+                                  + starts[4:])
+            with patch("autococ.event_rewards.foreground_package",
+                       return_value=session.config.game.package_name):
+                first = locate_reward_track_position(session, "shiny", enabled=True,
+                                                     task_id="reward-shiny")
+                second = locate_reward_track_position(session, "glowy", enabled=True,
+                                                      task_id="reward-glowy")
+                repeated = locate_reward_track_position(session, "shiny", enabled=True,
+                                                        task_id="reward-shiny")
+            self.assertEqual((first["status"], second["status"]), ("positioned", "positioned"))
+            self.assertEqual(repeated["status"], "unknown")
+            self.assertIn("one_swipe_already_attempted_for_task", repeated["reasons"])
+            self.assertEqual(session.context.swipe.call_count, 2)
+            self.assertEqual(session._event_track_position_swipe_attempts,
+                             {("reward-shiny", "shiny"), ("reward-glowy", "glowy")})
+
+    def test_locator_unknown_start_budget_and_stop_never_swipe(self):
+        with TemporaryDirectory() as tmp:
+            first_path, second_path = (Path(tmp) / "start-one.png", Path(tmp) / "start-two.png")
+            for path in (first_path, second_path):
+                copyfile(FIXTURES / "both_empty.png", path)
+            start_rows = initial_view_ocr()
+            wrong_rows = [dict(row, text="801") if row["text"] == "800" else row for row in start_rows]
+            unknown = FakeSession([recognized_with_ocr(first_path, wrong_rows),
+                                   recognized_with_ocr(second_path, wrong_rows)])
+            with patch("autococ.event_rewards.foreground_package", return_value=unknown.config.game.package_name):
+                result = locate_reward_track_position(unknown, "shiny", enabled=True)
+            self.assertEqual(result["status"], "unknown")
+            self.assertFalse(result["input_attempted"])
+            unknown.context.swipe.assert_not_called()
+
+            short = FakeSession([recognized_with_ocr(first_path, start_rows),
+                                 recognized_with_ocr(second_path, start_rows)])
+            short.task_deadline = time.monotonic() + 10
+            with patch("autococ.event_rewards.foreground_package", return_value=short.config.game.package_name):
+                result = locate_reward_track_position(short, "shiny", enabled=True)
+            self.assertEqual(result["status"], "unknown")
+            self.assertIn("insufficient_budget_for_one_swipe_and_after_frames", result["reasons"])
+            short.context.swipe.assert_not_called()
+
+            stopped = FakeSession([recognized_with_ocr(first_path, start_rows),
+                                   recognized_with_ocr(second_path, start_rows)])
+            with patch("autococ.event_rewards.foreground_package", side_effect=StopRequested("stop")):
+                with self.assertRaises(StopRequested):
+                    locate_reward_track_position(stopped, "shiny", enabled=True)
+            stopped.context.swipe.assert_not_called()
+
     def test_anonymous_fixture_and_template_provenance(self):
         provenance = json.loads((FIXTURES / "provenance.json").read_text(encoding="utf-8"))
+        calibration = provenance["position_calibration"]
+        self.assertEqual(hashlib.sha256((ROOT / calibration["derived_ocr_path"]).read_bytes()).hexdigest(),
+                         calibration["derived_ocr_sha256"])
+        self.assertEqual(calibration["canonical_centers_x"]["25"], 1052)
         for row in provenance["fixtures"].values():
             self.assertEqual(hashlib.sha256((ROOT / row["derived_path"]).read_bytes()).hexdigest(),
                              row["derived_sha256"])
@@ -188,10 +429,17 @@ class EventRewardTests(unittest.TestCase):
         path = FIXTURES / "shiny_before.png"
         base = fixture_ocr("shiny_before")
         self.assertIsNone(observe_reward_track(path, base, client_version="18.647.3"))
-        for missing in ("裂隙之乱", "奖励清单", "购买活动令牌"):
+        for missing in ("裂隙之乱", "购买活动令牌"):
             with self.subTest(missing=missing):
                 self.assertIsNone(observe_reward_track(path, [x for x in base if x["text"] != missing],
                                                        client_version="18.647.2"))
+        from autococ import event_rewards as module
+        original_score = module._template_score
+        with patch("autococ.event_rewards._template_score",
+                   side_effect=lambda image, name, roi: 0.0 if name == "list_icon"
+                   else original_score(image, name, roi)):
+            self.assertIsNone(observe_reward_track(
+                path, [x for x in base if x["text"] != "奖励清单"], client_version="18.647.2"))
         wrong = [dict(x, text="1251") if x["text"] == "1250" else x for x in base]
         self.assertEqual(observe_reward_track(path, wrong, client_version="18.647.2")
                          ["targets"]["shiny"]["status"], "unknown")
@@ -270,9 +518,7 @@ class EventRewardTests(unittest.TestCase):
             session = FakeSession([snapshot])
             with patch("autococ.event_rewards.foreground_package", return_value=session.config.game.package_name):
                 result = claim_one_free_reward(session, "shiny", enabled=True)
-            self.assertEqual(result["status"],
-                             "unknown" if snapshot.observations["event_reward_track"]["targets"]["shiny"]["status"] == "unknown"
-                             else "no_opportunity")
+            self.assertEqual(result["status"], "unknown")
             self.assertEqual(session.taps, [])
         session = FakeSession([recognized("shiny_before")])
         with patch("autococ.event_rewards.foreground_package", return_value="wrong.package"):

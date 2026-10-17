@@ -179,6 +179,10 @@ class DailyRunnerTests(unittest.TestCase):
 
     def setUp(self):
         self.temp=TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        position_patcher = patch("autococ.event_rewards.locate_reward_track_position",
+                                 return_value={"status": "positioned", "frames": []})
+        self.position_mock = position_patcher.start()
+        self.addCleanup(position_patcher.stop)
         root=Path(self.temp.name);path=root/"config.toml";path.write_text("")
         config=load_config(path)
         self.config=replace(config,runtime=replace(config.runtime,report_dir=root/"reports"))
@@ -303,6 +307,10 @@ class DailyRunnerTests(unittest.TestCase):
             stats = self.runner().run_routine(routine)
         reward = next(item for item in stats.task_results if item.task == "reward")
         opened.assert_called_once()
+        self.position_mock.assert_called_once()
+        self.assertEqual(self.position_mock.call_args.args[1], "shiny")
+        self.assertTrue(self.position_mock.call_args.kwargs["enabled"])
+        self.assertEqual(self.position_mock.call_args.kwargs["task_id"], "reward")
         claimed.assert_called_once()
         closed.assert_called_once()
         self.assertEqual(read.call_count, 2)
@@ -379,7 +387,7 @@ class DailyRunnerTests(unittest.TestCase):
         self.assertEqual(navigate.call_count, 2)  # Startup and pre-task; no recovery after the failed close.
 
     def test_event_reward_insufficient_total_budget_never_enters_inventory_or_track(self):
-        self.session.deadline = time.monotonic() + 220
+        self.session.deadline = time.monotonic() + 260
         self.session.task_deadline = self.session.deadline
         self.session.last_snapshot = self.event_ore_read("initial")[0]
         spec = TaskSpec("reward", "event_reward", free_reward_target="shiny")
@@ -429,8 +437,87 @@ class DailyRunnerTests(unittest.TestCase):
             result = _event_reward_task(self.session, spec)
         self.assertEqual(result.status, "failed")
         read.assert_called_once()
+        self.position_mock.assert_not_called()
         claim.assert_not_called()
         close.assert_called_once()
+
+    def test_event_reward_unknown_position_closes_without_claim_or_after_read(self):
+        spec = TaskSpec("reward", "event_reward", free_reward_target="shiny")
+        before = self.event_ore_read("before")
+        receipt = {"status": "unknown", "input_attempted": True,
+                   "input_sent": False,
+                   "frames": [{"path": str(self.frame.screenshot_path)}],
+                   "reasons": ["transport uncertain"]}
+        with patch("autococ.ore_navigation.read_current_ore_inventory",
+                   side_effect=self.event_ore_reader(before)) as read, \
+             patch("autococ.event_rewards.open_reward_track", return_value={"status": "opened"}), \
+             patch("autococ.event_rewards.locate_reward_track_position", return_value=receipt) as locate, \
+             patch("autococ.event_rewards.claim_one_free_reward") as claim, \
+             patch("autococ.event_rewards.close_reward_track", return_value={"status": "home"}) as close:
+            result = _event_reward_task(self.session, spec)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "event_reward_position_unknown")
+        self.assertIs(result.metrics["position_navigation"], receipt)
+        self.assertIn(self.frame.screenshot_path, result.evidence)
+        locate.assert_called_once()
+        claim.assert_not_called()
+        close.assert_called_once()
+        read.assert_called_once()
+
+    def test_event_reward_position_overrun_preserves_claim_and_after_read_budget(self):
+        spec = TaskSpec("reward", "event_reward", free_reward_target="shiny",
+                        max_duration_sec=300)
+        before = self.event_ore_read("before")
+        clock = [time.monotonic()]
+        def slow_position(*_args, **_kwargs):
+            clock[0] += 171
+            return {"status": "positioned", "frames": []}
+        with patch("autococ.daily.time.monotonic", side_effect=lambda: clock[0]), \
+             patch("autococ.ore_navigation.read_current_ore_inventory",
+                   side_effect=self.event_ore_reader(before)) as read, \
+             patch("autococ.event_rewards.open_reward_track", return_value={"status": "opened"}), \
+             patch("autococ.event_rewards.locate_reward_track_position",
+                   side_effect=slow_position) as locate, \
+             patch("autococ.event_rewards.claim_one_free_reward") as claim, \
+             patch("autococ.event_rewards.close_reward_track", return_value={"status": "home"}) as close:
+            result = _event_reward_task(self.session, spec)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "event_reward_claim_and_after_read_budget_insufficient")
+        locate.assert_called_once()
+        claim.assert_not_called()
+        close.assert_called_once()
+        read.assert_called_once()
+
+    def test_event_reward_position_stop_and_account_block_send_no_close(self):
+        spec = TaskSpec("reward", "event_reward", free_reward_target="shiny")
+        before = self.event_ore_read("before")
+        with patch("autococ.ore_navigation.read_current_ore_inventory",
+                   side_effect=self.event_ore_reader(before)), \
+             patch("autococ.event_rewards.open_reward_track", return_value={"status": "opened"}), \
+             patch("autococ.event_rewards.locate_reward_track_position",
+                   side_effect=StopRequested("stop")), \
+             patch("autococ.event_rewards.claim_one_free_reward") as claim, \
+             patch("autococ.event_rewards.close_reward_track") as close:
+            with self.assertRaises(StopRequested):
+                _event_reward_task(self.session, spec)
+        claim.assert_not_called()
+        close.assert_not_called()
+        occupied = SceneSnapshot("account_in_use", .99, self.frame.screenshot_path,
+                                 {"account_in_use": True, "ocr": []})
+        def occupied_position(*_args, **_kwargs):
+            self.session.last_snapshot = occupied
+            return {"status": "unknown", "frames": []}
+        with patch("autococ.ore_navigation.read_current_ore_inventory",
+                   side_effect=self.event_ore_reader(before)), \
+             patch("autococ.event_rewards.open_reward_track", return_value={"status": "opened"}), \
+             patch("autococ.event_rewards.locate_reward_track_position",
+                   side_effect=occupied_position), \
+             patch("autococ.event_rewards.claim_one_free_reward") as claim, \
+             patch("autococ.event_rewards.close_reward_track") as close:
+            result = _event_reward_task(self.session, spec)
+        self.assertEqual(result.reason, "event_reward_account_in_use")
+        claim.assert_not_called()
+        close.assert_not_called()
 
     def test_event_reward_near_budget_stop_or_account_block_never_closes(self):
         spec = TaskSpec("reward", "event_reward", free_reward_target="shiny",

@@ -2,6 +2,23 @@
   "client_version": "18.647.2",
   "source_group": "20261016-061440-061529-development-manual-event-rewards",
   "source_kind": "agent_manual_assisted_not_formal",
+  "position_calibration": {
+    "source_kind": "single_nonclaiming_live_prev_swipe_not_formal_acceptance",
+    "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\tools\\event_track_sampling_v1\\runs\\20261017-050313-434563-f0f1859a\\frames\\00004-after_swipe-2.png",
+    "source_frame_sha256": "5b014d7a1087a22914f1e4a8c412fa76c2f918fa6b6128b430b50b5756312b3f",
+    "source_receipt": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\tools\\event_track_sampling_v1\\runs\\20261017-050313-434563-f0f1859a\\receipt.json",
+    "source_receipt_sha256": "a1df4b93d6ca6e24452839ced3aff6315bef28ef521597aec66a0042b685314d",
+    "derived_ocr_path": "tests\\fixtures\\event_rewards_18_647_2\\shifted_after_swipe_2.ocr.json",
+    "derived_ocr_sha256": "2c8edcfa4681e1ad19cb541e3dffbf8908b6a849937213fdb685aec1e2017cf3",
+    "method": "whitelist eight page/milestone OCR rows from the settled source receipt; no new OCR",
+    "observed_centers_x": {"600": 259, "95": 565.5, "25": 871},
+    "canonical_centers_x": {"600": 439, "95": 746, "25": 1052},
+    "bounds": "25 canonical center calibrated from the observed 95-to-25 translation on this one frame; other viewport or client versions remain unknown",
+    "second_source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\tools\\event_track_sampling_v1\\runs\\20261017-050348-379875-64b56f09\\frames\\00001-read-only-1.png",
+    "second_source_frame_sha256": "2855a3e4c5f892ee2ffcaa27588f0c1ab1e163b3ec5024f1595a68fcfb8d4b47",
+    "second_source_receipt": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\tools\\event_track_sampling_v1\\runs\\20261017-050348-379875-64b56f09\\receipt.json",
+    "second_source_receipt_sha256": "820d94ba4f45e820ac62a4991ae436c59ba641d9f3ebaf1f53a2815e92d97567"
+  },
   "transformation": {
     "decode": "cv2.IMREAD_COLOR",
     "resize": [
@@ -56,6 +73,20 @@
       "derived_path": "tests\\fixtures\\event_rewards_18_647_2\\both_empty.png",
       "derived_sha256": "34943058cd0f3d7a3f9e9672faf4cb99b4d3fe8be4e541014e8771984cad91d6"
     },
+    "shifted_after_swipe_2": {
+      "source_kind": "nonclaiming_live_prev_swipe",
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\tools\\event_track_sampling_v1\\runs\\20261017-050313-434563-f0f1859a\\frames\\00004-after_swipe-2.png",
+      "source_sha256": "5b014d7a1087a22914f1e4a8c412fa76c2f918fa6b6128b430b50b5756312b3f",
+      "derived_path": "tests\\fixtures\\event_rewards_18_647_2\\shifted_after_swipe_2.png",
+      "derived_sha256": "a689b4f940c8fedc4962cd472273da1a1b8637af7f5eb6e0e239a97e661aeecc"
+    },
+    "shifted_read_only_1": {
+      "source_kind": "nonclaiming_read_only_followup",
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\tools\\event_track_sampling_v1\\runs\\20261017-050348-379875-64b56f09\\frames\\00001-read-only-1.png",
+      "source_sha256": "2855a3e4c5f892ee2ffcaa27588f0c1ab1e163b3ec5024f1595a68fcfb8d4b47",
+      "derived_path": "tests\\fixtures\\event_rewards_18_647_2\\shifted_read_only_1.png",
+      "derived_sha256": "c005a2f196420483fad2faf3906fc1e12c8bbfa1654670a8dbc0dc0e23020390"
+    },
     "entry_panel": {
       "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-061250-event-rewards\\frames\\00003-event-reward-entry-reread.png",
       "source_sha256": "f764ccee901aef529427bdda7fae9447e4c3b5db110a4fa65d8db3ffb9940a7d",
@@ -93,6 +124,13 @@
     }
   },
   "assets": {
+    "list_icon": {
+      "source_fixture": "shifted_after_swipe_2",
+      "source_frame_sha256": "5b014d7a1087a22914f1e4a8c412fa76c2f918fa6b6128b430b50b5756312b3f",
+      "roi_xyxy": [178, 197, 237, 242],
+      "path": "assets\\templates\\event_reward_list_icon_18_647_2.png",
+      "sha256": "03990a4a56336f69156da924adf2ad002551119600feb4cffd8fa57114e29581"
+    },
     "close": {
       "source_fixture": "glowy_before",
       "roi_xyxy": [
@@ -150,6 +188,20 @@
     }
   },
   "ocr_fixtures": {
+    "shifted_after_swipe_2": {
+      "source_receipt_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\tools\\event_track_sampling_v1\\runs\\20261017-050313-434563-f0f1859a\\receipt.json",
+      "source_receipt_sha256": "a1df4b93d6ca6e24452839ced3aff6315be28ef521597aec66a0042b685314d",
+      "derived_path": "tests\\fixtures\\event_rewards_18_647_2\\shifted_after_swipe_2.ocr.json",
+      "derived_sha256": "2c8edcfa4681e1ad19cb541e3dffbf8908b6a849937213fdb685aec1e2017cf3",
+      "whitelist": ["裂隙之乱", "购买活动令牌", "600", "95", "25", "奖励清单裂隙奖章", "璀璨矿石", "星辉矿石"]
+    },
+    "shifted_read_only_1": {
+      "source_receipt_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\tools\\event_track_sampling_v1\\runs\\20261017-050348-379875-64b56f09\\receipt.json",
+      "source_receipt_sha256": "820d94ba4f45e820ac62a4991ae436c59ba641d9f3ebaf1f53a2815e92d97567",
+      "derived_path": "tests\\fixtures\\event_rewards_18_647_2\\shifted_read_only_1.ocr.json",
+      "derived_sha256": "93d614c940e7de23f7c201bdb2af16f245722d0bb9a4780cf40d01c90905577e",
+      "whitelist": ["裂隙之乱", "购买活动令牌", "600", "95", "25", "奖励清单裂隙奖章", "璀璨矿石", "星辉矿石"]
+    },
     "shiny_before": {
       "source_events_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-061440-event-free-shiny\\events.jsonl",
       "source_events_sha256": "2d8439b43eb79934efa52f2b598c48997ee791d62139ad21ea9f85f772bc855f",

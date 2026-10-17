@@ -34,6 +34,9 @@ _FRONTS = {
             "reference_roi": (758, 197, 776, 219), "tap_offset": (1, 10)},
     "old": {"file": "ore_navigation_blacksmith_front_old_18_647_2.png",
             "reference_roi": (754, 202, 772, 224), "tap_offset": (2, 10)},
+    # Same verified front at the independently measured ~1.03 HOME map zoom.
+    "zoom103": {"file": "ore_navigation_blacksmith_front_zoom103_18_647_2.png",
+                "reference_roi": (762, 192, 780, 214), "tap_offset": (1, 10)},
 }
 _TITLE = "铁匠铺（10级）"
 _TITLE_ROI = (535, 450, 740, 510)
