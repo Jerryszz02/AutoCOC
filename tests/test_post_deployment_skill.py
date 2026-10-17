@@ -104,6 +104,38 @@ class PostDeploymentSkillTests(unittest.TestCase):
             return execute_post_deployment_hero_skill(session, deployed,
                                                       hero_id="grand_warden", delay_sec=0)
 
+    def test_yellow_hp_with_ready_equipment_never_authorizes_skill_input(self):
+        fixtures = FIXTURES / "warden_yellow_used_061704_18_647_2"
+        ready = cv2.imdecode(np.fromfile(fixtures / "00032-post-deployment-skill-before.png", np.uint8),
+                             cv2.IMREAD_COLOR)
+        yellow = cv2.imdecode(np.fromfile(fixtures / "00033-post-deployment-skill-after-1.png", np.uint8),
+                              cv2.IMREAD_COLOR)
+        ready[1138:1172, 1302:1472] = yellow[1138:1172, 1302:1472]
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "yellow-ready.png"
+            cv2.imencode(".png", ready)[1].tofile(path)
+            deployed = snapshot(23, deployment=True)
+            fresh = replace(snapshot(24), screenshot_path=path)
+            session = FakeSession(deployed, [fresh])
+            _, receipt = self.execute(session, deployed)
+        self.assertEqual(receipt["reason"], "current_warden_ready_with_live_hp_unverified")
+        self.assertFalse(receipt["attempted"])
+        self.assertEqual(session.taps, [])
+
+    def test_anonymous_061704_yellow_used_after_frame_verifies_original_one_tap(self):
+        fixtures = FIXTURES / "warden_yellow_used_061704_18_647_2"
+        deployed = snapshot(23, deployment=True)
+        before = replace(snapshot(24), screenshot_path=fixtures / "00032-post-deployment-skill-before.png")
+        after = replace(snapshot(27), screenshot_path=fixtures / "00033-post-deployment-skill-after-1.png")
+        session = FakeSession(deployed, [before, after])
+        latest, receipt = self.execute(session, deployed)
+        self.assertIs(latest, after)
+        self.assertTrue(receipt["verified"])
+        self.assertEqual(receipt["reason"], "current_warden_used_verified")
+        self.assertEqual(len(session.taps), 1)
+        self.assertIs(session.taps[0][0], before)
+        self.assertEqual(len(receipt["after"]), 1)
+
     def test_third_strict_before_frame_can_authorize_one_tap(self):
         deployed = snapshot(23, deployment=True)
         session = FakeSession(deployed, [snapshot(25), snapshot(26), snapshot(24), snapshot(27)])

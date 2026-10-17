@@ -218,7 +218,8 @@ def recognize_hero_state(
         # A gray face by itself is only an identity candidate, never an ability
         # transition. Require the live HP frame and the independently closed
         # card located again in this same screenshot.
-        if unit_id != "grand_warden" or (health is None and red_health is None):
+        if unit_id != "grand_warden" or (health is None and red_health is None
+                                          and yellow_health is None):
             evidence["ability_phase_reason"] = "current_warden_equipment_or_live_hp_unverified"
             return result
         located = evidence.get("closed_card") or locate_current_deployed_hero_card(
@@ -246,7 +247,10 @@ def recognize_hero_state(
         used = anchors["used_book"] is not None and anchors["used_card"] is not None
         mixed = ((anchors["ready_book"] is not None or anchors["ready_card"] is not None)
                  and (anchors["used_book"] is not None or anchors["used_card"] is not None))
-        if ready and not mixed:
+        # Yellow HP is independently enclosed and locates a live Warden, but
+        # it cannot authorize a ready skill input. It is only eligible for the
+        # already-used phase when both gray equipment proofs agree.
+        if ready and not mixed and (health is not None or red_health is not None):
             result.update(state="ability_ready", ability_ready=True, ability_used=False)
             ready_template = Path(anchors["ready_card"]["template"]).name
             ready_source = (CURRENT_WARDEN_READY_CARD_PHASE_SOURCE

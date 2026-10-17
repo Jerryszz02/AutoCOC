@@ -81,12 +81,20 @@ def _current_warden(session: Any, snapshot: Any) -> dict[str, object]:
     state = recognize_hero_state(snapshot.screenshot_path, locator["bbox"],
                                  unit_id=HERO_ID, client_version=session.client_version)
     identity = state.get("evidence", {}).get("portrait_identity") or {}
+    evidence = state.get("evidence", {})
+    used = evidence.get("ability_used") or {}
+    yellow_used_hp = (evidence.get("yellow_health_bar") is not None
+                      and state.get("ability_used") is True
+                      and state.get("ability_ready") is False
+                      and used.get("gray_equipment") is not None
+                      and used.get("gray_card") is not None)
     return {"locator": locator, "state": state,
             "verified": (identity.get("version_verified") is True
                          and identity.get("unit_id") == HERO_ID
                          and state.get("deployed") is True
-                         and (state.get("evidence", {}).get("health_bar") is not None
-                              or state.get("evidence", {}).get("red_health_bar") is not None)
+                         and (evidence.get("health_bar") is not None
+                              or evidence.get("red_health_bar") is not None
+                              or yellow_used_hp)
                          and tuple(locator["bbox"]) == tuple(state.get("slot_bbox") or ())) }
 
 
