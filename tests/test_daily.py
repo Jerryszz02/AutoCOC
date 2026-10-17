@@ -144,7 +144,7 @@ class DailyRunnerTests(unittest.TestCase):
         self.session.config=self.config
         self.session.observe.return_value=self.frame
         self.session.last_snapshot=self.frame
-        self.session.deadline=time.monotonic()+300
+        self.session.deadline=time.monotonic()+self.config.stop.max_duration_sec
         self.session.task_deadline=self.session.deadline
         self.session.events_path=root/"events.jsonl"
         self.factory=Mock(return_value=self.session)
@@ -387,6 +387,204 @@ class DailyRunnerTests(unittest.TestCase):
         claimed.assert_called_once()
         battle.assert_not_called()
         self.assertEqual(stats.goals_completed, 1)
+
+    def test_front_tasks_cannot_start_battle_with_less_than_full_global_window(self):
+        clock = [time.monotonic()]
+        self.config = replace(self.config, runtime=replace(self.config.runtime, task_timeout_sec=600))
+        self.session.deadline = clock[0] + 1050
+        def collected(_session):
+            clock[0] += 500
+            return TaskResult("collect", "succeeded", "verified", evidence=[self.frame.screenshot_path])
+        runner = self.runner()
+        with patch("autococ.daily.time.monotonic", side_effect=lambda: clock[0]), \
+             patch.object(runner, "_handler", return_value=collected), \
+             patch("autococ.daily.read_progress") as goal, \
+             patch("autococ.combat.run_battle") as battle:
+            stats = runner.run_routine(RoutineConfig((TaskSpec("collect", "collect"),
+                                                     TaskSpec("farm", "resources"))))
+        goal.assert_not_called()
+        battle.assert_not_called()
+        limit = next(r for r in stats.task_results if r.reason == "global_battle_budget_insufficient")
+        self.assertEqual(limit.metrics["phase"], "before_progress")
+        self.assertEqual(limit.metrics["completed_battles"], 0)
+        self.assertTrue(limit.metrics["returned_home"])
+        self.assertEqual(stats.battles_completed, 0)
+
+    def test_initial_maintenance_needs_full_task_budget_before_any_handler(self):
+        clock = [time.monotonic()]
+        self.config = replace(self.config, runtime=replace(self.config.runtime, task_timeout_sec=600))
+        self.session.deadline = clock[0] + 550
+        runner = self.runner()
+        with patch("autococ.daily.time.monotonic", side_effect=lambda: clock[0]), \
+             patch.object(runner, "_handler") as handler, \
+             patch("autococ.daily.read_progress") as goal, \
+             patch("autococ.combat.run_battle") as battle:
+            stats = runner.run_routine(RoutineConfig((TaskSpec("collect", "collect"),
+                                                     TaskSpec("farm", "resources"))))
+        handler.assert_not_called()
+        goal.assert_not_called()
+        battle.assert_not_called()
+        limit = next(r for r in stats.task_results if r.reason == "global_maintenance_budget_insufficient")
+        self.assertEqual(limit.task, "collect")
+        self.assertEqual(limit.metrics["phase"], "before_initial_maintenance")
+        self.assertEqual(limit.metrics["global_remaining_sec"], 550)
+        self.assertEqual(limit.metrics["required_task_sec"], 600)
+        self.assertTrue(limit.metrics["returned_home"])
+        self.assertEqual(stats.battles_completed, 0)
+        self.assertIn("limited by global maintenance budget", stats.stop_reason)
+
+    def test_stop_after_launch_preempts_initial_maintenance_budget(self):
+        event = Event()
+        self.session.deadline = time.monotonic() + 1
+        launch = TaskResult("launch", "succeeded", "home verified",
+                            evidence=[self.frame.screenshot_path])
+        def verify(_session):
+            event.set()
+            return launch
+        runner = self.runner(stop_event=event)
+        with patch("autococ.flow.verify_home", side_effect=verify), \
+             patch.object(runner, "_handler") as handler:
+            stats = runner.run_routine(RoutineConfig((TaskSpec("collect", "collect"),)))
+        handler.assert_not_called()
+        self.assertEqual(stats.task_results[-1].status, "cancelled")
+        self.assertFalse(any(r.reason == "global_maintenance_budget_insufficient"
+                             for r in stats.task_results))
+
+    def test_read_progress_can_exhaust_battle_budget_before_search(self):
+        clock = [time.monotonic()]
+        self.config = replace(self.config, runtime=replace(self.config.runtime, task_timeout_sec=600))
+        self.session.deadline = clock[0] + 700
+        task_beginnings = []
+        def begin():
+            self.session.task_deadline = min(self.session.deadline, clock[0] + 600)
+            task_beginnings.append(clock[0])
+        self.session.begin_task.side_effect = begin
+        def read(_session, _task):
+            clock[0] += 150
+            return GoalProgress(False, evidence=(self.frame.screenshot_path,))
+        with patch("autococ.daily.time.monotonic", side_effect=lambda: clock[0]), \
+             patch("autococ.daily.read_progress", side_effect=read), \
+             patch("autococ.combat.run_battle") as battle:
+            stats = self.runner().run_routine(RoutineConfig((TaskSpec("farm", "resources"),)))
+        battle.assert_not_called()
+        limit = next(r for r in stats.task_results if r.reason == "global_battle_budget_insufficient")
+        self.assertEqual(limit.metrics["phase"], "before_battle")
+        self.assertEqual(limit.metrics["global_remaining_sec"], 550)
+        self.assertTrue(limit.metrics["returned_home"])
+        self.assertEqual(task_beginnings[-1], clock[0])
+        self.assertEqual(self.session.task_deadline, self.session.deadline)
+
+    def test_admitted_battle_gets_fresh_full_task_window_and_finishes_home(self):
+        clock = [time.monotonic()]
+        self.config = replace(self.config, runtime=replace(self.config.runtime, task_timeout_sec=600))
+        self.session.deadline = clock[0] + 650
+        task_beginnings = []
+        def begin():
+            self.session.task_deadline = min(self.session.deadline, clock[0] + 600)
+            task_beginnings.append(clock[0])
+        self.session.begin_task.side_effect = begin
+        def read(_session, _task):
+            clock[0] += 30
+            return GoalProgress(False, evidence=(self.frame.screenshot_path,))
+        def battle(_session):
+            self.assertEqual(self.session.task_deadline, task_beginnings[-1] + 600)
+            clock[0] += 500
+            return self.success()
+        with patch("autococ.daily.time.monotonic", side_effect=lambda: clock[0]), \
+             patch("autococ.daily.read_progress", side_effect=read), \
+             patch("autococ.combat.run_battle", side_effect=battle) as called:
+            stats = self.runner().run_routine(RoutineConfig((TaskSpec("farm", "resources"),)))
+        called.assert_called_once()
+        self.assertEqual(stats.battles_completed, 1)
+        self.assertEqual(task_beginnings[-1] - task_beginnings[-2], 30)
+        self.assertEqual([r.reason for r in stats.task_results if r.status == "limited"],
+                         ["global_battle_budget_insufficient"])
+
+    def test_resource_window_ends_after_completed_battle_without_next_search(self):
+        clock = [time.monotonic()]
+        self.config = replace(self.config, runtime=replace(self.config.runtime, task_timeout_sec=600))
+        self.session.deadline = clock[0] + 5000
+        def battle(_session):
+            clock[0] += 600
+            return self.success()
+        with patch("autococ.daily.time.monotonic", side_effect=lambda: clock[0]), \
+             patch("autococ.daily.read_progress", return_value=GoalProgress(False)), \
+             patch("autococ.combat.run_battle", side_effect=battle) as called:
+            stats = self.runner().run_routine(RoutineConfig((TaskSpec("farm", "resources",
+                                                           max_duration_sec=600),)))
+        called.assert_called_once()
+        self.assertEqual(stats.battles_completed, 1)
+        self.assertEqual([r.reason for r in stats.task_results if r.status == "limited"],
+                         ["task_limit_reached"])
+
+    def test_periodic_chain_stops_at_budget_boundary_before_another_maintenance(self):
+        clock = [time.monotonic()]
+        self.config = replace(self.config, runtime=replace(self.config.runtime, task_timeout_sec=600))
+        self.session.deadline = clock[0] + 1900
+        calls = []
+        def handler(kind):
+            def execute(_session):
+                calls.append(kind)
+                if len(calls) > 3:
+                    clock[0] += 590
+                return TaskResult(kind, "succeeded", "verified", evidence=[self.frame.screenshot_path])
+            return execute
+        def read(_session, _task):
+            clock[0] += 601
+            return GoalProgress(False, evidence=(self.frame.screenshot_path,))
+        routine = RoutineConfig((TaskSpec("collect", "collect"), TaskSpec("request", "request"),
+                                 TaskSpec("train", "train"), TaskSpec("farm", "resources")), 600)
+        runner = self.runner()
+        with patch("autococ.daily.time.monotonic", side_effect=lambda: clock[0]), \
+             patch.object(runner, "_handler", side_effect=handler), \
+             patch("autococ.daily.read_progress", side_effect=read), \
+             patch("autococ.combat.run_battle") as battle:
+            stats = runner.run_routine(routine)
+        self.assertEqual(calls, ["collect", "request", "train", "collect", "request"])
+        battle.assert_not_called()
+        limit = next(r for r in stats.task_results if r.reason == "global_battle_budget_insufficient")
+        self.assertEqual(limit.metrics["phase"], "before_maintenance")
+        self.assertTrue(limit.metrics["returned_home"])
+
+    def test_periodic_chain_stops_when_resource_window_expires_mid_chain(self):
+        clock = [time.monotonic()]
+        self.session.deadline = clock[0] + 5000
+        calls = []
+        def handler(kind):
+            def execute(_session):
+                calls.append(kind)
+                if len(calls) > 3:
+                    clock[0] += 49
+                return TaskResult(kind, "succeeded", "verified", evidence=[self.frame.screenshot_path])
+            return execute
+        def read(_session, _task):
+            clock[0] += 601
+            return GoalProgress(False, evidence=(self.frame.screenshot_path,))
+        routine = RoutineConfig((TaskSpec("collect", "collect"), TaskSpec("request", "request"),
+                                 TaskSpec("train", "train"),
+                                 TaskSpec("farm", "resources", max_duration_sec=650)), 600)
+        runner = self.runner()
+        with patch("autococ.daily.time.monotonic", side_effect=lambda: clock[0]), \
+             patch.object(runner, "_handler", side_effect=handler), \
+             patch("autococ.daily.read_progress", side_effect=read), \
+             patch("autococ.combat.run_battle") as battle:
+            stats = runner.run_routine(routine)
+        self.assertEqual(calls, ["collect", "request", "train", "collect"])
+        battle.assert_not_called()
+        self.assertEqual([r.reason for r in stats.task_results if r.status == "limited"],
+                         ["task_limit_reached"])
+
+    def test_stop_request_during_progress_preempts_budget_result(self):
+        event = Event()
+        def read(_session, _task):
+            event.set()
+            return GoalProgress(False, evidence=(self.frame.screenshot_path,))
+        with patch("autococ.daily.read_progress", side_effect=read), \
+             patch("autococ.combat.run_battle") as battle:
+            stats = self.runner(stop_event=event).run_routine(RoutineConfig((TaskSpec("farm", "resources"),)))
+        battle.assert_not_called()
+        self.assertEqual(stats.task_results[-1].status, "cancelled")
+        self.assertFalse(any(r.reason == "global_battle_budget_insufficient" for r in stats.task_results))
 
     def test_goal_receipt_links_before_after_and_gains_never_use_inventory(self):
         before = GoalProgress(False, values={"gold": 100}, evidence=(self.frame.screenshot_path,))

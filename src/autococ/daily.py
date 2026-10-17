@@ -205,7 +205,35 @@ def run_routine(runner, routine: RoutineConfig) -> RunStats:
         if result.status == "failed":
             raise _RecordedTaskFailure(f"{spec.id}: {result.reason}")
         if spec.kind not in {"event_reward", "ore_inventory"}:
-            return_to_village(session)
+            return return_to_village(session)
+
+    def confirmed_home(known_home=None):
+        # A just-verified Home frame remains valid when no input followed it.
+        if known_home is not None and session.last_snapshot is known_home:
+            return known_home
+        # A prior progress or maintenance task may have used its own deadline.
+        # Refresh that task allowance only for safe navigation, never global.
+        session.begin_task()
+        return return_to_village(session)
+
+    def limit_for_battle_budget(spec, completed, *, phase, progress=None, known_home=None):
+        """Leave Home without starting a battle that cannot use its full task window."""
+        runner._check_stop()
+        remaining = session.deadline - time.monotonic()
+        required = config.runtime.task_timeout_sec
+        if remaining >= required:
+            return False
+        home = confirmed_home(known_home)
+        evidence = list(progress.evidence) if progress is not None else []
+        evidence.append(home.screenshot_path)
+        record(TaskResult(spec.id, "limited", "global_battle_budget_insufficient",
+                          evidence=list(dict.fromkeys(evidence)),
+                          metrics={"receipt_kind": "battle_budget", "phase": phase,
+                                   "completed_battles": completed,
+                                   "global_remaining_sec": max(0.0, remaining),
+                                   "required_battle_task_sec": required,
+                                   "returned_home": True, "formal_success": False}))
+        return True
 
     try:
         runner._check_stop()
@@ -230,12 +258,33 @@ def run_routine(runner, routine: RoutineConfig) -> RunStats:
             raise _RecordedTaskFailure(f"launch: {launched.reason}")
         if session.last_snapshot.observations.get("village_type") != "home":
             raise CapabilityUnavailable("Cannot positively identify the main Home Village")
+        last_verified_home = session.last_snapshot
         for task in enabled:
             runner._check_stop()
             active = task
             task_started_at = time.monotonic()
             if task.kind not in BATTLE_KINDS:
-                maintenance(task)
+                runner._check_stop()
+                remaining = session.deadline - time.monotonic()
+                required = config.runtime.task_timeout_sec
+                if remaining < required:
+                    home = confirmed_home(last_verified_home)
+                    record(TaskResult(task.id, "limited", "global_maintenance_budget_insufficient",
+                                      evidence=[home.screenshot_path],
+                                      metrics={"receipt_kind": "maintenance_budget",
+                                               "phase": "before_initial_maintenance",
+                                               "global_remaining_sec": max(0.0, remaining),
+                                               "required_task_sec": required,
+                                               "returned_home": True, "formal_success": False}))
+                    stats.stop_reason = "daily task queue limited by global maintenance budget"
+                    active = None
+                    break
+                last_verified_home = maintenance(task)
+                if last_verified_home is None:
+                    current = session.last_snapshot
+                    if (current is not None and current.scene == "village"
+                            and current.observations.get("village_type") == "home"):
+                        last_verified_home = current
                 active = None
                 continue
             runner._notify("task_started", task=task.id, cycle=1)
@@ -248,7 +297,18 @@ def run_routine(runner, routine: RoutineConfig) -> RunStats:
             previous_battle_id = None
             while True:
                 runner._check_stop()
+                if completed >= task.max_battles or time.monotonic() - task_started_at >= task.max_duration_sec:
+                    home = confirmed_home(last_verified_home)
+                    record(TaskResult(task.id, "limited", "task_limit_reached",
+                                      evidence=[home.screenshot_path],
+                                      metrics={"completed_battles": completed,
+                                               "returned_home": True}))
+                    break
+                if limit_for_battle_budget(task, completed, phase="before_progress",
+                                           known_home=last_verified_home):
+                    break
                 session.begin_task()
+                last_verified_home = None
                 try:
                     last_progress = read_progress(session, task)
                 except CapabilityUnavailable as exc:
@@ -283,11 +343,29 @@ def run_routine(runner, routine: RoutineConfig) -> RunStats:
                                                "goal_target": last_progress.target}))
                     break
                 if routine.maintenance_interval_sec and time.monotonic() - last_maintenance >= routine.maintenance_interval_sec:
+                    maintenance_limit = None
                     for daily_task in enabled:
                         if daily_task.kind not in BATTLE_KINDS and daily_task.kind not in {"event_reward", "ore_inventory"}:
-                            maintenance(daily_task, periodic=True)
+                            runner._check_stop()
+                            if time.monotonic() - task_started_at >= task.max_duration_sec:
+                                maintenance_limit = "task_limit_reached"
+                                break
+                            if limit_for_battle_budget(task, completed, phase="before_maintenance",
+                                                       progress=last_progress,
+                                                       known_home=last_verified_home):
+                                maintenance_limit = "global_battle_budget_insufficient"
+                                break
+                            last_verified_home = maintenance(daily_task, periodic=True)
+                    if maintenance_limit:
+                        # A budget result was already recorded when global time was short.
+                        if maintenance_limit == "task_limit_reached":
+                            home = confirmed_home(last_verified_home)
+                            record(TaskResult(task.id, "limited", "task_limit_reached",
+                                              evidence=[home.screenshot_path],
+                                              metrics={"completed_battles": completed,
+                                                       "returned_home": True}))
+                        break
                     last_maintenance = time.monotonic()
-                    session.begin_task()
                     # Collection can itself reach a stock goal. Refresh the goal
                     # before spending another search or starting another battle.
                     continue
@@ -318,6 +396,12 @@ def run_routine(runner, routine: RoutineConfig) -> RunStats:
                             record(TaskResult(task.id, "not_supported", "Event scoring units need explicit matching strategy actions",
                                               evidence=list(last_progress.evidence)))
                             break
+                if limit_for_battle_budget(task, completed, phase="before_battle",
+                                           progress=last_progress):
+                    break
+                # read_progress and any periodic work used a different task window.
+                # Grant the admitted battle its own full window, capped by global.
+                session.begin_task()
                 battle_id = uuid4().hex
                 battle_number = completed + 1
 
@@ -344,6 +428,10 @@ def run_routine(runner, routine: RoutineConfig) -> RunStats:
                     stats.battles_won += int(result.metrics.get("victory") is True)
                     completed += 1
                     stats.cycles += 1
+                    current = session.last_snapshot
+                    if (current is not None and current.scene == "village"
+                            and current.observations.get("village_type") == "home"):
+                        last_verified_home = current
                 record(result, notify=False)
                 if settled_home:
                     progress("已回村", resources=result.metrics.get("resources_after"))
@@ -364,7 +452,8 @@ def run_routine(runner, routine: RoutineConfig) -> RunStats:
             session.progress_callback = None
             session.config = config
             active = None
-        stats.stop_reason = "daily task queue finished"
+        if not stats.stop_reason:
+            stats.stop_reason = "daily task queue finished"
     except (StopRequested, KeyboardInterrupt):
         from .reporting import interrupted_battle_metrics
         frame = getattr(session, "last_snapshot", None)
