@@ -105,7 +105,8 @@ class DynamicTrainingTests(unittest.TestCase):
                 self.features = torch.nn.Sequential(torch.nn.Conv2d(3, 4, 1),
                                                     torch.nn.BatchNorm2d(4),
                                                     torch.nn.AdaptiveAvgPool2d(1))
-                self.classifier = torch.nn.Sequential(torch.nn.Flatten(), torch.nn.Linear(4, 3))
+                self.classifier = torch.nn.Sequential(torch.nn.Flatten(),
+                                                      torch.nn.Linear(4, len(BUILDING_STATES)))
 
             def forward(self, images):
                 return self.classifier(self.features(images))
@@ -136,17 +137,31 @@ class DynamicTrainingTests(unittest.TestCase):
                 self.assertEqual(report["epochs_completed"], limit)
                 state = torch.load(run / "last.pt", map_location="cpu", weights_only=True)
                 self.assertEqual(state["bad_epochs"], expected_bad)
-                self.assertEqual(tuple(state["best_score"]), (.7, .7))
+                self.assertEqual(tuple(state["best_score"][:2]), (.7, .7))
+                self.assertTrue(np.isfinite(state["best_score"][2]))
+                self.assertEqual(state["best_epoch"], 2)
                 self.assertEqual(state["phase"], "head" if limit == 5 else "finetune")
             self.assertEqual(torch.load(run / "best.pt", map_location="cpu", weights_only=True)["epoch"], 2)
             recipe = json.loads((run / "training_config.json").read_text())
-            self.assertEqual(recipe["trainer_recipe_version"], 2)
+            self.assertEqual(recipe["trainer_recipe_version"], 3)
+            self.assertEqual(recipe["checkpoint_selection"],
+                             "macro_f1_then_minimum_recall_then_validation_nll")
+            self.assertEqual(recipe["validation_nll_min_delta"], .001)
+            history = json.loads((run / "history.json").read_text())
+            self.assertTrue(all("validation_diagnostics" in row and
+                                "checkpoint_selection" in row for row in history))
+            self.assertTrue(all(np.isfinite(row["validation_diagnostics"]["val_cross_entropy"])
+                                for row in history))
+            self.assertTrue(all(row["validation_diagnostics"]["nll_usage"] == "checkpoint_tiebreak" and
+                                row["validation_diagnostics"]["threshold_usage"] == "not_applicable"
+                                for row in history))
+            self.assertEqual(history[2]["checkpoint_selection"]["reason"], "primary_metric_improvement")
             self.assertEqual(recipe["finetune_patience"], 7)
             old = torch.load(run / "last.pt", map_location="cpu", weights_only=True)
             old_identity = {key: value for key, value in recipe.items()
-                            if key not in {"deadline_seconds", "trainer_recipe_version",
-                                           "head_features_mode", "finetune_features_mode",
-                                           "finetune_patience", "finetune_patience_policy"}}
+                            if key not in {"deadline_seconds", "checkpoint_selection",
+                                           "validation_nll_min_delta"}}
+            old_identity["trainer_recipe_version"] = 2
             old["signature"] = hashlib.sha256(json.dumps(old_identity, sort_keys=True,
                                                          separators=(",", ":")).encode()).hexdigest()
             torch.save(old, run / "last.pt")

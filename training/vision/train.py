@@ -27,11 +27,15 @@ SCENE_PREPROCESS = {"width": 320, "height": 192, "color": "RGB", "resize": "lett
 BUILDING_PREPROCESS = {"width": 640, "height": 640, "color": "RGB", "resize": "letterbox",
                        "scale": 1 / 255, "mean": [0, 0, 0], "std": [1, 1, 1],
                        "pad_value": 114}
-SCENE_TRAINER_RECIPE = {"trainer_recipe_version": 2,
+VALIDATION_NLL_MIN_DELTA = 0.001
+
+SCENE_TRAINER_RECIPE = {"trainer_recipe_version": 3,
                         "head_features_mode": "eval_frozen_parameters_and_buffers",
                         "finetune_features_mode": "train_all_parameters_and_buffers",
                         "finetune_patience": 7,
-                        "finetune_patience_policy": "reset_at_boundary_keep_global_best"}
+                        "finetune_patience_policy": "reset_at_boundary_keep_global_best",
+                        "checkpoint_selection": "macro_f1_then_minimum_recall_then_validation_nll",
+                        "validation_nll_min_delta": VALIDATION_NLL_MIN_DELTA}
 
 
 from .snapshot import TrainingError, verify_snapshot
@@ -153,13 +157,99 @@ def _set_scene_training_phase(model, phase: str) -> None:
         model.features.eval()
 
 
-def _advance_scene_patience(score: tuple[float, float], best_score: tuple[float, float],
-                            bad_epochs: int, *, epoch: int, head_epochs: int) -> tuple[tuple[float, float], int, bool]:
-    """Start fine tuning's seven misses afresh without replacing the global best."""
+def _advance_scene_patience(score: tuple[float, float, float | None],
+                            best_score: tuple[float, float, float | None],
+                            bad_epochs: int, *, epoch: int, head_epochs: int,
+                            nll_min_delta: float = VALIDATION_NLL_MIN_DELTA
+                            ) -> tuple[tuple[float, float, float | None], int, bool]:
+    """Use validation NLL only to break exact accuracy-metric ties."""
+    if len(score) != 3 or len(best_score) != 3:
+        raise TrainingError("Checkpoint score must contain macro F1, minimum recall, and validation NLL")
+    if (type(nll_min_delta) not in (int, float) or not math.isfinite(nll_min_delta) or
+            nll_min_delta <= 0):
+        raise TrainingError("Validation NLL min_delta must be finite and positive")
+    for value in score[:2]:
+        if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1:
+            raise TrainingError("Checkpoint accuracy metrics must be finite values from 0 to 1")
+    for value in best_score[:2]:
+        if type(value) not in (int, float) or not math.isfinite(value):
+            raise TrainingError("Best checkpoint accuracy metrics must be finite numbers")
+    for value in (score[2], best_score[2]):
+        if value is not None and (type(value) not in (int, float) or not math.isfinite(value)):
+            raise TrainingError("Checkpoint validation NLL must be finite or absent")
     if head_epochs and epoch == head_epochs:
         bad_epochs = 0
-    improved = score > best_score
+    primary_score = tuple(float(value) for value in score[:2])
+    best_primary_score = tuple(float(value) for value in best_score[:2])
+    if primary_score > best_primary_score:
+        improved = True
+    elif primary_score == best_primary_score:
+        current_nll, best_nll = score[2], best_score[2]
+        improved = (current_nll is not None and
+                    (best_nll is None or best_nll - current_nll >= nll_min_delta))
+    else:
+        improved = False
     return (score if improved else best_score, 0 if improved else bad_epochs + 1, improved)
+
+
+def _checkpoint_score_details(score: tuple[float, float, float | None]) -> dict:
+    return {"macro_f1": float(score[0]), "minimum_recall": float(score[1]),
+            "validation_nll": None if score[2] is None else float(score[2])}
+
+
+def _checkpoint_improvement_reason(score: tuple[float, float, float | None],
+                                   best_score: tuple[float, float, float | None],
+                                   improved: bool) -> str:
+    if not improved:
+        return "no_improvement"
+    return "primary_metric_improvement" if tuple(score[:2]) > tuple(best_score[:2]) else "validation_nll_tiebreak"
+
+
+def _classification_validation_diagnostics(logits: np.ndarray, truth: list[int],
+                                           classes: list[str]) -> dict:
+    """Record threshold-free validation NLL and probability-margin summaries."""
+    if (not isinstance(logits, np.ndarray) or len(classes) < 2 or
+            logits.shape != (len(truth), len(classes)) or
+            not np.issubdtype(logits.dtype, np.floating) or not np.isfinite(logits).all() or
+            any(type(label) is not int or not 0 <= label < len(classes) for label in truth)):
+        raise TrainingError("Validation logits/truth are incomplete or non-finite")
+    count = len(truth)
+    if not count:
+        return {"scope": "validation_diagnostics", "nll_usage": "checkpoint_tiebreak",
+                "threshold_usage": "not_applicable", "sample_count": 0,
+                "val_cross_entropy": None, "true_class_probability": None,
+                "top1_probability": None, "top1_minus_second": None}
+
+    values = logits.astype(np.float64, copy=False)
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        shifted = values - values.max(axis=1, keepdims=True)
+        log_normalizer = np.log(np.exp(shifted).sum(axis=1, keepdims=True))
+        log_probabilities = shifted - log_normalizer
+        probabilities = np.exp(log_probabilities)
+    if not np.isfinite(log_probabilities).all() or not np.isfinite(probabilities).all():
+        raise TrainingError("Validation logits produce non-finite probabilities")
+    labels = np.asarray(truth, dtype=np.int64)
+    row_indices = np.arange(count)
+    true_class = probabilities[row_indices, labels]
+    ordered = np.sort(probabilities, axis=1)
+    top1 = ordered[:, -1]
+    margin = top1 - ordered[:, -2]
+
+    def summarize(distribution: np.ndarray) -> dict:
+        return {"minimum": float(np.min(distribution)),
+                "mean": float(np.mean(distribution)),
+                "median": float(np.median(distribution)),
+                "p90": float(np.quantile(distribution, .9))}
+
+    val_cross_entropy = float(-np.mean(log_probabilities[row_indices, labels]))
+    if not math.isfinite(val_cross_entropy):
+        raise TrainingError("Validation cross-entropy is non-finite")
+    return {"scope": "validation_diagnostics", "nll_usage": "checkpoint_tiebreak",
+            "threshold_usage": "not_applicable", "sample_count": count,
+            "val_cross_entropy": val_cross_entropy,
+            "true_class_probability": summarize(true_class),
+            "top1_probability": summarize(top1),
+            "top1_minus_second": summarize(margin)}
 
 
 def _offline_ultralytics(config_dir: Path):
@@ -238,24 +328,17 @@ def _metric(truth: list[int], predicted: list[int], classes: list[str]) -> dict:
 
 def _scene_validation_diagnostics(logits: np.ndarray, truth: list[int],
                                   classes: list[str], output: dict) -> dict:
-    """Describe one validation epoch without affecting checkpoint selection."""
-    if (not isinstance(logits, np.ndarray) or len(classes) < 2 or
-            logits.shape != (len(truth), len(classes)) or
-            not np.issubdtype(logits.dtype, np.floating) or not np.isfinite(logits).all() or
-            any(type(label) is not int or not 0 <= label < len(classes) for label in truth)):
-        raise TrainingError("Scene validation logits/truth are incomplete or non-finite")
+    """Describe validation probabilities and runtime coverage separately from selection."""
+    result = _classification_validation_diagnostics(logits, truth, classes)
+    result["threshold_usage"] = "diagnostic_only"
     if not truth:
-        return {"scope": "validation_diagnostic_only", "sample_count": 0,
-                "val_cross_entropy": None, "threshold_status": "not_established",
+        return {**result, "threshold_status": "not_established",
                 "threshold_reason": "no_validation_samples"}
     shifted = logits - logits.max(axis=1, keepdims=True)
     exponentials = np.exp(shifted)
     probabilities = exponentials / exponentials.sum(axis=1, keepdims=True)
     labels = np.asarray(truth)
     count = len(truth)
-    result = {"scope": "validation_diagnostic_only", "sample_count": count,
-              "val_cross_entropy": float(np.mean(np.log(exponentials.sum(axis=1)) -
-                                                 shifted[np.arange(count), labels]))}
     if not isinstance(output, dict) or output.get("format") != "logits":
         return {**result, "threshold_status": "not_established",
                 "threshold_reason": "logits_output_contract_missing_or_unsupported"}
@@ -405,11 +488,12 @@ def train_scene(snapshot_root: Path, config_path: Path, output: Path, *, device:
     head_epochs = 5 if development or not prototype else 0
     total_epochs = int(config["max_epochs"])
     optimizer, scheduler = None, None
-    start_epoch, best_score, bad_epochs, history = 0, (-1.0, -1.0), 0, []
+    start_epoch, best_score, best_epoch, bad_epochs, history = 0, (-1.0, -1.0, None), None, 0, []
     if resume:
         model.load_state_dict(checkpoint["model"])
         start_epoch = checkpoint["epoch"] + 1
         best_score = tuple(checkpoint["best_score"])
+        best_epoch = checkpoint["best_epoch"]
         bad_epochs = checkpoint["bad_epochs"]
         history = checkpoint["history"]
         _restore_rng(checkpoint["rng"])
@@ -448,17 +532,28 @@ def train_scene(snapshot_root: Path, config_path: Path, output: Path, *, device:
         diagnostics = _scene_validation_diagnostics(
             np.concatenate(validation_logits) if validation_logits else
             np.empty((0, len(classes)), dtype=np.float32), truth, classes, config["output"])
-        score = (metrics["macro_f1"], metrics["minimum_recall"])
+        score = (metrics["macro_f1"], metrics["minimum_recall"],
+                 diagnostics["val_cross_entropy"])
+        previous_best_score = best_score
         scheduler.step()
         best_score, bad_epochs, better = _advance_scene_patience(
-            score, best_score, bad_epochs, epoch=epoch, head_epochs=head_epochs)
+            score, best_score, bad_epochs, epoch=epoch, head_epochs=head_epochs,
+            nll_min_delta=config["validation_nll_min_delta"])
+        if better:
+            best_epoch = epoch
         record = {"epoch": epoch, "phase": phase, "train_loss": sum(losses) / len(losses),
                   "validation": metrics, "validation_diagnostics": diagnostics,
+                  "checkpoint_selection": {
+                      "improved": better,
+                      "reason": _checkpoint_improvement_reason(score, previous_best_score, better),
+                      "current_score": _checkpoint_score_details(score),
+                      "best_score": _checkpoint_score_details(best_score),
+                      "validation_nll_min_delta": config["validation_nll_min_delta"]},
                   "elapsed_seconds": time.monotonic() - began}
         history.append(record)
         state = {"signature": signature, "model": model.state_dict(), "optimizer": optimizer.state_dict(),
                  "scheduler": scheduler.state_dict(),
-                 "epoch": epoch, "phase": phase, "best_score": best_score,
+                 "epoch": epoch, "phase": phase, "best_score": best_score, "best_epoch": best_epoch,
                  "bad_epochs": bad_epochs, "history": history, "rng": _rng_state()}
         torch.save(state, output / "last.pt")
         if better:
@@ -473,7 +568,8 @@ def train_scene(snapshot_root: Path, config_path: Path, output: Path, *, device:
               "unknown_test_reserved": len(splits["unknown"]["test"]),
               "t2_smoke_complete": bool(prototype and not development and len(train_rows) == 32 and len(history) == 2),
               "development": development,
-              "best_score": best_score, "checkpoint": str(output / "best.pt"),
+              "best_score": best_score, "best_epoch": best_epoch,
+              "checkpoint": str(output / "best.pt"),
               "last_checkpoint": str(output / "last.pt"), "snapshot_sha256": snapshot["snapshot_sha256"],
               "status": "prototype_only" if prototype else "trained_unevaluated"}
     (output / "training_report.json").write_text(json.dumps(result, indent=2), encoding="utf-8")

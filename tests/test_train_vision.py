@@ -10,7 +10,9 @@ import cv2
 import numpy as np
 
 from autococ.model_vision import _ONNXModel
-from training.vision.train import (SCENE_PREPROCESS, TrainingError, _config, _scene_rows,
+from training.vision.train import (SCENE_PREPROCESS, VALIDATION_NLL_MIN_DELTA, TrainingError,
+                                   _checkpoint_improvement_reason,
+                                   _classification_validation_diagnostics, _config, _scene_rows,
                                    _advance_scene_patience, _scene_validation_diagnostics,
                                    _set_scene_training_phase,
                                    _stage_building_inputs,
@@ -26,6 +28,8 @@ class TrainingContractTests(unittest.TestCase):
             logits, [0, 0, 1, 2], ["battle", "village", "settlement", "training"],
             {"format": "logits", "min_confidence": .7, "min_margin": .2})
         self.assertEqual(result["threshold_status"], "established")
+        self.assertEqual(result["nll_usage"], "checkpoint_tiebreak")
+        self.assertEqual(result["threshold_usage"], "diagnostic_only")
         self.assertEqual((result["accepted"], result["rejected"], result["coverage"]),
                          (3, 1, .75))
         self.assertEqual(result["per_class"]["battle"],
@@ -88,6 +92,96 @@ class TrainingContractTests(unittest.TestCase):
                                           [0], ["battle", "village"],
                                           {"format": "logits", "min_confidence": .8, "min_margin": .1})
 
+    def test_validation_diagnostics_are_threshold_free_and_handle_empty_or_invalid_logits(self):
+        logits = np.array([[4., 0.], [0., 2.]], dtype=np.float32)
+        result = _classification_validation_diagnostics(logits, [0, 1], ["battle", "village"])
+        self.assertEqual(result["scope"], "validation_diagnostics")
+        self.assertEqual(result["nll_usage"], "checkpoint_tiebreak")
+        self.assertEqual(result["threshold_usage"], "not_applicable")
+        self.assertEqual(result["sample_count"], 2)
+        self.assertGreater(result["val_cross_entropy"], 0.)
+        self.assertIn("mean", result["true_class_probability"])
+        self.assertIn("median", result["top1_minus_second"])
+        self.assertNotIn("min_confidence", result)
+
+        empty = _classification_validation_diagnostics(
+            np.empty((0, 2), dtype=np.float32), [], ["battle", "village"])
+        self.assertIsNone(empty["val_cross_entropy"])
+        self.assertIsNone(empty["top1_probability"])
+        with self.assertRaisesRegex(TrainingError, "logits/truth"):
+            _classification_validation_diagnostics(
+                np.array([[float("nan"), 0.]], dtype=np.float32), [0], ["battle", "village"])
+        with self.assertRaisesRegex(TrainingError, "logits/truth"):
+            _classification_validation_diagnostics(
+                np.zeros((1, 2), dtype=np.float32), [True], ["battle", "village"])
+
+    def test_checkpoint_selection_uses_nll_only_after_exact_primary_metric_tie(self):
+        less_confident = _classification_validation_diagnostics(
+            np.array([[2., 0.], [0., 2.]], dtype=np.float32), [0, 1], ["battle", "village"])
+        more_confident = _classification_validation_diagnostics(
+            np.array([[4., 0.], [0., 4.]], dtype=np.float32), [0, 1], ["battle", "village"])
+        initial = (-1.0, -1.0, None)
+        best, bad, improved = _advance_scene_patience(
+            (1., 1., less_confident["val_cross_entropy"]), initial, 0,
+            epoch=0, head_epochs=0)
+        self.assertTrue(improved)
+        self.assertEqual(bad, 0)
+        self.assertEqual(best[:2], (1., 1.))
+
+        same_argmax_lower_nll = (1., 1., more_confident["val_cross_entropy"])
+        next_best, bad, improved = _advance_scene_patience(
+            same_argmax_lower_nll, best, bad, epoch=1, head_epochs=0)
+        self.assertTrue(improved)
+        self.assertEqual(bad, 0)
+        self.assertAlmostEqual(next_best[2], same_argmax_lower_nll[2])
+        self.assertEqual(_checkpoint_improvement_reason(same_argmax_lower_nll, best, improved),
+                         "validation_nll_tiebreak")
+
+        tiny_gain = (1., 1., next_best[2] - VALIDATION_NLL_MIN_DELTA / 2)
+        retained, bad, improved = _advance_scene_patience(
+            tiny_gain, next_best, bad, epoch=2, head_epochs=0)
+        self.assertFalse(improved)
+        self.assertEqual(retained, next_best)
+        self.assertEqual(bad, 1)
+
+        exact_delta = (1., 1., next_best[2] - VALIDATION_NLL_MIN_DELTA)
+        selected, bad, improved = _advance_scene_patience(
+            exact_delta, next_best, bad, epoch=3, head_epochs=0)
+        self.assertTrue(improved)
+        self.assertEqual(bad, 0)
+        self.assertAlmostEqual(selected[2], exact_delta[2])
+
+        lower_primary_with_better_nll = (.99, 1., 0.)
+        retained, bad, improved = _advance_scene_patience(
+            lower_primary_with_better_nll, selected, bad, epoch=4, head_epochs=0)
+        self.assertFalse(improved)
+        self.assertEqual(retained, selected)
+        self.assertEqual(bad, 1)
+
+        primary_priority = (1., 1., 10.)
+        selected, bad, improved = _advance_scene_patience(
+            primary_priority, (.99, .99, .001), 4, epoch=4, head_epochs=0)
+        self.assertTrue(improved)
+        self.assertEqual(selected, primary_priority)
+        self.assertEqual(bad, 0)
+
+        with self.assertRaisesRegex(TrainingError, "validation NLL"):
+            _advance_scene_patience((1., 1., float("nan")), next_best, 0,
+                                    epoch=5, head_epochs=0)
+        with self.assertRaisesRegex(TrainingError, "min_delta"):
+            _advance_scene_patience((1., 1., .1), next_best, 0,
+                                    epoch=5, head_epochs=0, nll_min_delta=float("nan"))
+
+        empty_score = (0., 0., None)
+        empty_best, bad, improved = _advance_scene_patience(
+            empty_score, initial, 0, epoch=0, head_epochs=0)
+        self.assertTrue(improved)
+        retained, bad, improved = _advance_scene_patience(
+            empty_score, empty_best, bad, epoch=1, head_epochs=0)
+        self.assertFalse(improved)
+        self.assertEqual(retained, empty_best)
+        self.assertEqual(bad, 1)
+
     @unittest.skipUnless(os.environ.get("AUTOCOC_TRAINING_INTEGRATION") == "1", "training environment only")
     def test_head_freezes_feature_bn_buffers_but_updates_classifier_then_finetune_updates_features(self):
         import torch
@@ -140,12 +234,12 @@ class TrainingContractTests(unittest.TestCase):
         self.assertFalse(torch.equal(model.features[0].weight, before_features))
 
     def test_head_stalls_do_not_consume_finetune_patience_and_resume_does_not_reset_twice(self):
-        best, bad = (.8, .8), 2  # head's last checkpoint, after two stagnant epochs
+        best, bad = (.8, .8, .4), 2  # head's last checkpoint, after two stagnant epochs
         for epoch in range(5, 12):
-            best, bad, improved = _advance_scene_patience((.1, .1), best, bad,
+            best, bad, improved = _advance_scene_patience((.1, .1, .8), best, bad,
                                                           epoch=epoch, head_epochs=5)
             self.assertFalse(improved)
-            self.assertEqual(best, (.8, .8))
+            self.assertEqual(best, (.8, .8, .4))
             self.assertEqual(bad, epoch - 4)
             if epoch == 5:
                 boundary_checkpoint = {"epoch": epoch, "phase": "finetune", "bad_epochs": bad,
@@ -212,7 +306,9 @@ class TrainingContractTests(unittest.TestCase):
                 self.assertEqual(result["epochs_completed"], limit)
                 last = torch.load(run / "last.pt", map_location="cpu", weights_only=True)
                 self.assertEqual(last["bad_epochs"], expected_bad)
-                self.assertEqual(tuple(last["best_score"]), (.7, .7))
+                self.assertEqual(tuple(last["best_score"][:2]), (.7, .7))
+                self.assertTrue(np.isfinite(last["best_score"][2]))
+                self.assertEqual(last["best_epoch"], 2)
                 self.assertEqual(last["phase"], "head" if limit == 5 else "finetune")
             self.assertEqual(torch.load(run / "best.pt", map_location="cpu", weights_only=True)["epoch"], 2)
             history = json.loads((run / "history.json").read_text())
@@ -220,10 +316,16 @@ class TrainingContractTests(unittest.TestCase):
             self.assertEqual(last["history"], history)
             for epoch_record in history:
                 diagnostics = epoch_record["validation_diagnostics"]
-                self.assertEqual(diagnostics["scope"], "validation_diagnostic_only")
+                self.assertEqual(diagnostics["scope"], "validation_diagnostics")
+                self.assertEqual(diagnostics["nll_usage"], "checkpoint_tiebreak")
+                self.assertEqual(diagnostics["threshold_usage"], "diagnostic_only")
                 self.assertEqual(diagnostics["threshold_status"], "established")
                 self.assertEqual(diagnostics["sample_count"], 1)
                 self.assertTrue(np.isfinite(diagnostics["val_cross_entropy"]))
+                self.assertIn("top1_minus_second", diagnostics)
+                selection = epoch_record["checkpoint_selection"]
+                self.assertEqual(selection["validation_nll_min_delta"], .001)
+                self.assertIn(selection["reason"], {"primary_metric_improvement", "no_improvement"})
                 self.assertEqual(diagnostics["accepted"] + diagnostics["rejected"], 1)
                 self.assertEqual(sum(row["support"] for row in diagnostics["per_class"].values()), 1)
             recipe = json.loads((run / "training_config.json").read_text())
@@ -231,9 +333,9 @@ class TrainingContractTests(unittest.TestCase):
             self.assertEqual(recipe["finetune_patience_policy"], "reset_at_boundary_keep_global_best")
             old = torch.load(run / "last.pt", map_location="cpu", weights_only=True)
             old_identity = {key: value for key, value in recipe.items()
-                            if key not in {"deadline_seconds", "trainer_recipe_version",
-                                           "head_features_mode", "finetune_features_mode",
-                                           "finetune_patience", "finetune_patience_policy"}}
+                            if key not in {"deadline_seconds", "checkpoint_selection",
+                                           "validation_nll_min_delta"}}
+            old_identity["trainer_recipe_version"] = 2
             old["signature"] = hashlib.sha256(json.dumps(old_identity, sort_keys=True).encode()).hexdigest()
             torch.save(old, run / "last.pt")
             with self.assertRaisesRegex(TrainingError, "Resume config or snapshot differs"):

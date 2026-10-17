@@ -13,8 +13,10 @@ import numpy as np
 from .data import sha256
 from .dynamic_snapshot import verify_dynamic_snapshot
 from .snapshot import TrainingError
-from .train import (_environment, _metric, _restore_rng, _rng_state, _scene_model,
-                    _seed, _signature, _advance_scene_patience,
+from .train import (_checkpoint_improvement_reason, _checkpoint_score_details,
+                    _classification_validation_diagnostics, _environment, _metric,
+                    _restore_rng, _rng_state, _scene_model, _seed, _signature,
+                    _advance_scene_patience,
                     _set_scene_training_phase, SCENE_TRAINER_RECIPE)
 
 
@@ -203,11 +205,12 @@ def train_dynamic_state(snapshot_root: Path, config_path: Path, output: Path, *,
     sampler = WeightedRandomSampler(weights, num_samples=len(train_rows), replacement=True)
     train_loader = DataLoader(ROIs(train_rows), batch_size=batch, sampler=sampler, num_workers=0)
     val_loader = DataLoader(ROIs(val_rows), batch_size=batch, shuffle=False, num_workers=0)
-    start, best_score, bad_epochs, history = 0, (-1.0, -1.0), 0, []
+    start, best_score, best_epoch, bad_epochs, history = 0, (-1.0, -1.0, None), None, 0, []
     if checkpoint:
         model.load_state_dict(checkpoint["model"])
         start = checkpoint["epoch"] + 1
         best_score = tuple(checkpoint["best_score"])
+        best_epoch = checkpoint["best_epoch"]
         bad_epochs = checkpoint["bad_epochs"]
         history = checkpoint["history"]
         _restore_rng(checkpoint["rng"])
@@ -237,21 +240,38 @@ def train_dynamic_state(snapshot_root: Path, config_path: Path, output: Path, *,
             optimizer.step()
             losses.append(float(loss.detach().cpu()))
         model.eval()
-        truth, predictions = [], []
+        truth, predictions, validation_logits = [], [], []
         with torch.inference_mode():
             for images, labels in val_loader:
-                predictions.extend(model(images.to(device)).argmax(1).cpu().tolist())
+                logits = model(images.to(device)).cpu().numpy()
+                validation_logits.append(logits)
+                predictions.extend(logits.argmax(axis=1).tolist())
                 truth.extend(labels.tolist())
         metrics = _metric(truth, predictions, classes)
-        score = (metrics["macro_f1"], metrics["minimum_recall"])
+        diagnostics = _classification_validation_diagnostics(
+            np.concatenate(validation_logits) if validation_logits else
+            np.empty((0, len(classes)), dtype=np.float32), truth, classes)
+        score = (metrics["macro_f1"], metrics["minimum_recall"],
+                 diagnostics["val_cross_entropy"])
+        previous_best_score = best_score
         scheduler.step()
         best_score, bad_epochs, improved = _advance_scene_patience(
-            score, best_score, bad_epochs, epoch=epoch, head_epochs=head_epochs)
+            score, best_score, bad_epochs, epoch=epoch, head_epochs=head_epochs,
+            nll_min_delta=config["validation_nll_min_delta"])
+        if improved:
+            best_epoch = epoch
         history.append({"epoch": epoch, "phase": phase, "loss": sum(losses) / len(losses),
-                        "validation": metrics, "elapsed_seconds": time.monotonic() - began})
+                        "validation": metrics, "validation_diagnostics": diagnostics,
+                        "checkpoint_selection": {
+                            "improved": improved,
+                            "reason": _checkpoint_improvement_reason(score, previous_best_score, improved),
+                            "current_score": _checkpoint_score_details(score),
+                            "best_score": _checkpoint_score_details(best_score),
+                            "validation_nll_min_delta": config["validation_nll_min_delta"]},
+                        "elapsed_seconds": time.monotonic() - began})
         state = {"signature": signature, "model": model.state_dict(),
                  "optimizer": optimizer.state_dict(), "scheduler": scheduler.state_dict(),
-                 "epoch": epoch, "phase": phase, "best_score": best_score,
+                 "epoch": epoch, "phase": phase, "best_score": best_score, "best_epoch": best_epoch,
                  "bad_epochs": bad_epochs, "history": history, "rng": _rng_state()}
         torch.save(state, output / "last.pt")
         if improved:
@@ -265,7 +285,7 @@ def train_dynamic_state(snapshot_root: Path, config_path: Path, output: Path, *,
                                         sum(len(rows) for rows in splits.values()),
               "train_groups": len({row["component"] for row in train_rows}),
               "validation_groups": len({row["component"] for row in val_rows}),
-              "epochs_completed": len(history), "best_score": best_score,
+              "epochs_completed": len(history), "best_score": best_score, "best_epoch": best_epoch,
               "snapshot_sha256": snapshot["snapshot_sha256"],
               "status": "prototype_only" if config["prototype_only"] else "trained_unevaluated",
               "checkpoint": str(output / "best.pt"), "last_checkpoint": str(output / "last.pt")}
