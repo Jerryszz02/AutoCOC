@@ -382,6 +382,89 @@ class CurrentPickerTests(TestCase):
                                          self.image, "18.600.7", "lightning_spell")
         self.assertIsNone(count)
 
+    def test_native_balloon_count_replays_frame13_crop_with_recorded_ocr(self):
+        # The crop is pixel-exact from live frame 13 (SHA recorded alongside
+        # the fixture). OCR responses below are cached from that same frame;
+        # this test does not run OCR or borrow the army manifest's quantity.
+        fixture = Path(__file__).resolve().parent / "fixtures/picker_balloon_x1_native_18_647_2.png"
+        self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(),
+                         "651255b1742df86403a40187c3923385b44ed24114072dcbc93140b9544e706e")
+        crop = cv2.imread(str(fixture))
+        self.assertEqual(crop.shape, (52, 80, 3))
+        expected_gray = "e256c89c1e37bad3ef1685401e04451733d1ebc5349044b73db926f814f81738"
+        frame = np.zeros((1440, 2560, 3), dtype=np.uint8)
+        frame[390:442, 1740:1820] = crop
+        self.assertTrue(cv2.imwrite(str(self.path), frame))
+        canonical = cv2.resize(frame, (1280, 720), interpolation=cv2.INTER_AREA)
+
+        class RecordedProvider:
+            def __init__(self, native_reads):
+                self.native_reads = native_reads
+                self.calls = 0
+                self.original_pixels = True
+
+            def recognize_line(self, _path, _roi):
+                return []
+
+            def recognize_line_image(self, image):
+                self.calls += 1
+                if image.shape == (30, 52):
+                    return []
+                assert image.shape == (52, 80)
+                # Only the original number pixels may receive cached OCR.
+                if self.calls == 4:
+                    self.original_pixels = (hashlib.sha256(image.tobytes()).hexdigest()
+                                            == expected_gray)
+                if not self.original_pixels:
+                    return []
+                return [self.native_reads[self.calls - 4]]
+
+        reads = (OCRText("x1", .88943), OCRText("x1", .80139), OCRText("x1", .66021))
+        provider = RecordedProvider(reads)
+        count, evidence = _picker_count(provider, self.path, [], (870, 194, 968, 292),
+                                         (2560, 1440), canonical, "18.647.2", "balloon")
+        self.assertEqual(provider.calls, 6)
+        self.assertTrue(provider.original_pixels)
+        self.assertEqual((count, evidence["source"]), (1, "contrast_consensus"))
+        self.assertEqual([item["variant"] for item in evidence["contrast_reads"]],
+                         ["native_gray", "native_inverted", "native_threshold"])
+
+        # A strong, conflicting local number cannot be voted away.
+        conflict = RecordedProvider((OCRText("x1", .88943), OCRText("x2", .80139),
+                                     OCRText("x1", .66021)))
+        count, _ = _picker_count(conflict, self.path, [], (870, 194, 968, 292),
+                                 (2560, 1440), canonical, "18.647.2", "balloon")
+        self.assertIsNone(count)
+
+        # This local route is bound to the observed client, card and scale.
+        for version, unit_id, resolution in (("18.600.7", "balloon", (2560, 1440)),
+                                             ("18.647.2", "dragon", (2560, 1440)),
+                                             ("18.647.2", "balloon", (1280, 720))):
+            provider = RecordedProvider(reads)
+            count, _ = _picker_count(provider, self.path, [], (870, 194, 968, 292),
+                                     resolution, canonical, version, unit_id)
+            self.assertIsNone(count)
+            self.assertEqual(provider.calls, 3)
+
+        # Full OCR disagreement takes precedence over the native fallback.
+        provider = RecordedProvider(reads)
+        count, _ = _picker_count(provider, self.path,
+                                 [OCRText("x1", .99, (872, 197, 890, 219)),
+                                  OCRText("x2", .99, (872, 197, 890, 219))],
+                                 (870, 194, 968, 292), (2560, 1440), canonical,
+                                 "18.647.2", "balloon")
+        self.assertIsNone(count)
+        self.assertEqual(provider.calls, 0)
+
+        # Changed pixels cannot be paired with the cached original-frame OCR.
+        frame[390:442, 1740:1820] = 0
+        self.assertTrue(cv2.imwrite(str(self.path), frame))
+        provider = RecordedProvider(reads)
+        count, _ = _picker_count(provider, self.path, [], (870, 194, 968, 292),
+                                 (2560, 1440), canonical, "18.647.2", "balloon")
+        self.assertIsNone(count)
+        self.assertFalse(provider.original_pixels)
+
     def test_conflicting_contrast_votes_block_version_sample_fallback(self):
         class Provider:
             def __init__(self):

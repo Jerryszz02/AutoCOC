@@ -1,0 +1,19 @@
+{
+  "client_version": "18.647.2",
+  "source": "reports/completion-20261015/live/20261017-005103-132498-d5d5879a/frames/00013-army-current_picker-1.png",
+  "source_sha256": "21ade23d03b628d82cbc6807c11c3094319fef0922d3290f52ef6de7c1f69e26",
+  "source_resolution": [2560, 1440],
+  "crop_box_native": [1740, 390, 1820, 442],
+  "crop_sha256": "651255b1742df86403a40187c3923385b44ed24114072dcbc93140b9544e706e",
+  "crop_gray_pixels_sha256": "e256c89c1e37bad3ef1685401e04451733d1ebc5349044b73db926f814f81738",
+  "crop_contents": "selected balloon quantity header only",
+  "cached_ocr_same_frame": {
+    "canonical_gray": {"text": "xi", "confidence": 0.76614},
+    "canonical_inverted": {"text": "xi", "confidence": 0.72158},
+    "canonical_threshold": {"text": "x1", "confidence": 0.58908},
+    "native_gray": {"text": "x1", "confidence": 0.88943},
+    "native_inverted": {"text": "x1", "confidence": 0.80139},
+    "native_threshold": {"text": "x1", "confidence": 0.66021}
+  },
+  "notes": "Cached OCR is replay evidence, not a new OCR execution or a count borrowed from another frame."
+}

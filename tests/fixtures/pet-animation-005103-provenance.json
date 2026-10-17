@@ -1,0 +1,285 @@
+{
+  "builder_sha256": "5ede4a13413760bcb85aa6f05ab352e38d8d1ad4936cd3d04199762d948adfe5",
+  "run_id": "20261017-005103-132498-d5d5879a",
+  "events_sha256": "25a875ba7a54c5d3b5f6681db523ac6fb11110efe30b61b6a8a2076a1cae8ab2",
+  "client_version": "18.647.2",
+  "purpose": "Anonymous regression pixels, not model training truth",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "baseline_resolution": [
+    1280,
+    720
+  ],
+  "transform": "cv2.INTER_AREA resize to baseline, then unmodified bbox crop and lossless PNG",
+  "reviewer_type": "agent",
+  "human_reviewed": false,
+  "formal_acceptance": false,
+  "crops": [
+    {
+      "frame_number": 11,
+      "hero_id": "grand_warden",
+      "source_frame": "live\\20261017-005103-132498-d5d5879a\\frames\\00011-mixed-army-preparation.png",
+      "source_sha256": "ea98a5024b638169eb6510eeb57216f5709947aefcae6687ea971d165b621ddc",
+      "crop": "pet-animation-005103-11-grand_warden.png",
+      "crop_sha256": "4eadcf34f2ec57d6933e47a1f18ef693391cdb6739a7d71b41c95779c49def08",
+      "bbox_at_baseline": [
+        31,
+        533,
+        139,
+        599
+      ],
+      "cached_fingerprint": {
+        "phash": "3246ec976d461e39",
+        "mean_bgr": [
+          148.63,
+          119.64,
+          119.98
+        ],
+        "std_bgr": [
+          63.19,
+          69.78,
+          67.96
+        ],
+        "bbox": [
+          31,
+          533,
+          139,
+          599
+        ]
+      }
+    },
+    {
+      "frame_number": 11,
+      "hero_id": "dragon_duke",
+      "source_frame": "live\\20261017-005103-132498-d5d5879a\\frames\\00011-mixed-army-preparation.png",
+      "source_sha256": "ea98a5024b638169eb6510eeb57216f5709947aefcae6687ea971d165b621ddc",
+      "crop": "pet-animation-005103-11-dragon_duke.png",
+      "crop_sha256": "883dd7610cde9d87f0636125550bd9e9d83e4896d23c29566ba24bc9306455e5",
+      "bbox_at_baseline": [
+        161,
+        533,
+        269,
+        599
+      ],
+      "cached_fingerprint": {
+        "phash": "193db474b6864dc3",
+        "mean_bgr": [
+          95.14,
+          94.72,
+          174.87
+        ],
+        "std_bgr": [
+          39.71,
+          62.52,
+          82.78
+        ],
+        "bbox": [
+          161,
+          533,
+          269,
+          599
+        ]
+      }
+    },
+    {
+      "frame_number": 11,
+      "hero_id": "minion_prince",
+      "source_frame": "live\\20261017-005103-132498-d5d5879a\\frames\\00011-mixed-army-preparation.png",
+      "source_sha256": "ea98a5024b638169eb6510eeb57216f5709947aefcae6687ea971d165b621ddc",
+      "crop": "pet-animation-005103-11-minion_prince.png",
+      "crop_sha256": "61b86cf69bd13c9689a57bed35760833a5cf4b956c516725154a28ff30b7923f",
+      "bbox_at_baseline": [
+        291,
+        533,
+        399,
+        599
+      ],
+      "cached_fingerprint": {
+        "phash": "03bc731b8986fc1b",
+        "mean_bgr": [
+          135.17,
+          100.8,
+          85.73
+        ],
+        "std_bgr": [
+          58.66,
+          64.06,
+          52.69
+        ],
+        "bbox": [
+          291,
+          533,
+          399,
+          599
+        ]
+      }
+    },
+    {
+      "frame_number": 11,
+      "hero_id": "archer_queen",
+      "source_frame": "live\\20261017-005103-132498-d5d5879a\\frames\\00011-mixed-army-preparation.png",
+      "source_sha256": "ea98a5024b638169eb6510eeb57216f5709947aefcae6687ea971d165b621ddc",
+      "crop": "pet-animation-005103-11-archer_queen.png",
+      "crop_sha256": "9c61bbc3456454937689db055abd367947c6da5a718722c9b264a804c3b890bd",
+      "bbox_at_baseline": [
+        421,
+        533,
+        529,
+        599
+      ],
+      "cached_fingerprint": {
+        "phash": "4ff4f216b5c250a9",
+        "mean_bgr": [
+          135.35,
+          123.12,
+          135.09
+        ],
+        "std_bgr": [
+          51.42,
+          72.47,
+          78.54
+        ],
+        "bbox": [
+          421,
+          533,
+          529,
+          599
+        ]
+      }
+    },
+    {
+      "frame_number": 15,
+      "hero_id": "grand_warden",
+      "source_frame": "live\\20261017-005103-132498-d5d5879a\\frames\\00015-army-current-return-1.png",
+      "source_sha256": "bb2cf6bc5a62563f2ddfbac6afa7057a935b1d0b8db60944bc7481317e1d1b67",
+      "crop": "pet-animation-005103-15-grand_warden.png",
+      "crop_sha256": "eec2a61e229be01818d2d9f86a709540738930f1ba3320cb62ce1513091c1460",
+      "bbox_at_baseline": [
+        31,
+        533,
+        139,
+        599
+      ],
+      "cached_fingerprint": {
+        "phash": "1646ec97ed461639",
+        "mean_bgr": [
+          154.94,
+          120.48,
+          115.45
+        ],
+        "std_bgr": [
+          60.09,
+          67.81,
+          68.66
+        ],
+        "bbox": [
+          31,
+          533,
+          139,
+          599
+        ]
+      }
+    },
+    {
+      "frame_number": 15,
+      "hero_id": "dragon_duke",
+      "source_frame": "live\\20261017-005103-132498-d5d5879a\\frames\\00015-army-current-return-1.png",
+      "source_sha256": "bb2cf6bc5a62563f2ddfbac6afa7057a935b1d0b8db60944bc7481317e1d1b67",
+      "crop": "pet-animation-005103-15-dragon_duke.png",
+      "crop_sha256": "f06be374429378c8fe3a565dcd03885257b463e5b67278d957bb6020a9523179",
+      "bbox_at_baseline": [
+        161,
+        533,
+        269,
+        599
+      ],
+      "cached_fingerprint": {
+        "phash": "193db634b6864dc3",
+        "mean_bgr": [
+          95.36,
+          95.46,
+          174.87
+        ],
+        "std_bgr": [
+          39.79,
+          62.44,
+          82.78
+        ],
+        "bbox": [
+          161,
+          533,
+          269,
+          599
+        ]
+      }
+    },
+    {
+      "frame_number": 15,
+      "hero_id": "minion_prince",
+      "source_frame": "live\\20261017-005103-132498-d5d5879a\\frames\\00015-army-current-return-1.png",
+      "source_sha256": "bb2cf6bc5a62563f2ddfbac6afa7057a935b1d0b8db60944bc7481317e1d1b67",
+      "crop": "pet-animation-005103-15-minion_prince.png",
+      "crop_sha256": "bae3f6a8a68b3120210f2f1aba6f0bae02880d53618cb856c502981d02af806d",
+      "bbox_at_baseline": [
+        291,
+        533,
+        399,
+        599
+      ],
+      "cached_fingerprint": {
+        "phash": "03bc731b8986fc1b",
+        "mean_bgr": [
+          135.17,
+          100.8,
+          85.73
+        ],
+        "std_bgr": [
+          58.66,
+          64.06,
+          52.69
+        ],
+        "bbox": [
+          291,
+          533,
+          399,
+          599
+        ]
+      }
+    },
+    {
+      "frame_number": 15,
+      "hero_id": "archer_queen",
+      "source_frame": "live\\20261017-005103-132498-d5d5879a\\frames\\00015-army-current-return-1.png",
+      "source_sha256": "bb2cf6bc5a62563f2ddfbac6afa7057a935b1d0b8db60944bc7481317e1d1b67",
+      "crop": "pet-animation-005103-15-archer_queen.png",
+      "crop_sha256": "5b28ea1be16509e582926641a1e098b52965b097c8a96280dda8f0d4ebfdb7e2",
+      "bbox_at_baseline": [
+        421,
+        533,
+        529,
+        599
+      ],
+      "cached_fingerprint": {
+        "phash": "4ff4ea1775626029",
+        "mean_bgr": [
+          136.79,
+          123.43,
+          135.94
+        ],
+        "std_bgr": [
+          51.49,
+          72.47,
+          78.11
+        ],
+        "bbox": [
+          421,
+          533,
+          529,
+          599
+        ]
+      }
+    }
+  ]
+}

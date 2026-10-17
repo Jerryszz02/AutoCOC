@@ -158,6 +158,26 @@ def _picker_count(provider: OCRProvider | None, path: Path, texts: Sequence[OCRT
             variants = {"gray": gray, "inverted": 255 - gray,
                         "threshold": cv2.threshold(gray, 170, 255,
                                                    cv2.THRESH_BINARY)[1]}
+            # On 18.647.2 the selected balloon's x1 can collapse to "xi"
+            # when the 2560x1440 capture is reduced to the canonical frame.
+            # Re-read only its quantity glyph from this same capture. The
+            # ordinary two independent contrast-variant votes still apply.
+            if (client_version == "18.647.2" and unit_id == "balloon"
+                    and box == (870, 194, 968, 292)
+                    and native_resolution == (2560, 1440)):
+                native = (cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+                          if path.is_file() else None)
+                if native is not None and native.shape[:2] == (1440, 2560):
+                    nl, nt, nr, nb = scale_box((870, 195, 910, 221),
+                                               from_resolution=_BASE,
+                                               to_resolution=native_resolution)
+                    native_gray = cv2.cvtColor(native[nt:nb, nl:nr], cv2.COLOR_BGR2GRAY)
+                    variants.update({
+                        "native_gray": native_gray,
+                        "native_inverted": 255 - native_gray,
+                        "native_threshold": cv2.threshold(native_gray, 170, 255,
+                                                          cv2.THRESH_BINARY)[1],
+                    })
             observed: list[dict[str, object]] = []
             for name, crop in variants.items():
                 reads = image_reader(crop)
@@ -775,14 +795,48 @@ def recognize_army_editor(
     return result
 
 
-def _visual_fingerprint(crop: np.ndarray, box: tuple[int, int, int, int]) -> dict[str, object]:
+def _visual_fingerprint(crop: np.ndarray, box: tuple[int, int, int, int], *,
+                        animation_hero_id: str | None = None) -> dict[str, object]:
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     resized = cv2.resize(gray, (32, 32), interpolation=cv2.INTER_AREA).astype(np.float32)
     coefficients = cv2.dct(resized)[:8, :8]
     bits = coefficients > np.median(coefficients.flat[1:])
     value = sum(int(bit) << index for index, bit in enumerate(bits.flat))
-    return {"phash": f"{value:016x}", "mean_bgr": [round(float(x), 2) for x in crop.mean((0, 1))],
-            "std_bgr": [round(float(x), 2) for x in crop.std((0, 1))], "bbox": list(box)}
+    result = {"phash": f"{value:016x}", "mean_bgr": [round(float(x), 2) for x in crop.mean((0, 1))],
+              "std_bgr": [round(float(x), 2) for x in crop.std((0, 1))], "bbox": list(box)}
+    if animation_hero_id is not None:
+        result["animation"] = {"schema": "pet_gray16_v1", "client_version": "18.647.2",
+                               "hero_id": animation_hero_id,
+                               "gray16": cv2.resize(gray, (16, 16),
+                                                    interpolation=cv2.INTER_AREA).tobytes().hex()}
+    return result
+
+
+def _pet_animation_matches(first: dict, second: dict, hamming: int,
+                           mean_delta: float, std_delta: float) -> bool:
+    """Prove near-identical pet structure when animation perturbs the hash."""
+    if not 8 < hamming <= 12 or mean_delta > 3 or std_delta > 3:
+        return False
+    a, b = first.get("animation"), second.get("animation")
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return False
+    if (a.get("schema") != "pet_gray16_v1" or b.get("schema") != "pet_gray16_v1"
+            or a.get("client_version") != "18.647.2" or b.get("client_version") != "18.647.2"
+            or not isinstance(a.get("hero_id"), str) or a["hero_id"] != b.get("hero_id")):
+        return False
+    hero = get_unit(a["hero_id"])
+    if hero is None or hero.kind != "hero":
+        return False
+    arrays = []
+    for item in (a, b):
+        encoded = item.get("gray16")
+        if not isinstance(encoded, str) or re.fullmatch(r"[0-9a-f]{512}", encoded) is None:
+            return False
+        pixels = np.frombuffer(bytes.fromhex(encoded), dtype=np.uint8).reshape(16, 16)
+        if float(pixels.std()) < 15:
+            return False
+        arrays.append(pixels)
+    return float(cv2.matchTemplate(arrays[0], arrays[1], cv2.TM_CCOEFF_NORMED)[0, 0]) >= .98
 
 
 def visual_fingerprint_matches(first: dict, second: dict) -> bool:
@@ -791,10 +845,17 @@ def visual_fingerprint_matches(first: dict, second: dict) -> bool:
         a, b = int(first["phash"], 16), int(second["phash"], 16)
         means_a, means_b = first["mean_bgr"], second["mean_bgr"]
         deviations_a, deviations_b = first["std_bgr"], second["std_bgr"]
-        return ((a ^ b).bit_count() <= 8 and len(means_a) == len(means_b) == 3
-                and len(deviations_a) == len(deviations_b) == 3
-                and max(abs(float(x) - float(y)) for x, y in zip(means_a, means_b)) <= 12
-                and max(abs(float(x) - float(y)) for x, y in zip(deviations_a, deviations_b)) <= 12)
+        if not len(means_a) == len(means_b) == len(deviations_a) == len(deviations_b) == 3:
+            return False
+        numbers = [float(x) for group in (means_a, means_b, deviations_a, deviations_b) for x in group]
+        if not all(np.isfinite(value) for value in numbers):
+            return False
+        mean_delta = max(abs(float(x) - float(y)) for x, y in zip(means_a, means_b))
+        std_delta = max(abs(float(x) - float(y)) for x, y in zip(deviations_a, deviations_b))
+        if mean_delta > 12 or std_delta > 12:
+            return False
+        hamming = (a ^ b).bit_count()
+        return hamming <= 8 or _pet_animation_matches(first, second, hamming, mean_delta, std_delta)
     except (KeyError, TypeError, ValueError):
         return False
 
@@ -883,7 +944,13 @@ def recognize_hero_loadout(
             if float(crop.std()) < 15:
                 result["unknowns"].append("hero_loadout_icon_obscured")
                 return result
-            state[name] = _visual_fingerprint(crop, box)
+            evidence = card.get("evidence")
+            identity = evidence.get("identity") if isinstance(evidence, dict) else None
+            animation_hero = (unit_id if name == "pet_visual" and isinstance(identity, dict)
+                              and identity.get("unit_id") == unit_id
+                              and identity.get("version_verified") is True
+                              and identity.get("template_client_version") == "18.647.2" else None)
+            state[name] = _visual_fingerprint(crop, box, animation_hero_id=animation_hero)
         result["hero_loadout"][unit_id] = state
     result["complete"] = True
     return result

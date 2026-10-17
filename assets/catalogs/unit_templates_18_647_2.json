@@ -211,6 +211,21 @@
     {
       "unit_id": "dragon_duke",
       "surface": "army_hero",
+      "role": "face",
+      "path": "units/dragon_duke_army_face_pose2_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261017-005103-132498-d5d5879a/frames/00016-army-current-return-2.png",
+      "source_bbox_1280": [177, 270, 212, 300],
+      "source_sha256": "9cf1bebd2dc0d43ea796dcbd52867017cbd17b2d2d5f3523eedb0a899bf9f650",
+      "template_sha256": "3fd17274971b8a447bbfcf26d91f0e3a7c6a88cc26532f9f023f2c7fd5e41ddb",
+      "identity_evidence_frame": "reports/completion-20261015/live/20261017-005103-132498-d5d5879a/frames/00011-mixed-army-preparation.png",
+      "identity_evidence_sha256": "ea98a5024b638169eb6510eeb57216f5709947aefcae6687ea971d165b621ddc",
+      "identity_evidence_status": "agent_visual_same_character_pose_not_human_ground_truth",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "dragon_duke",
+      "surface": "army_hero",
       "role": "color_profile",
       "path": "units/dragon_duke_army_color_18_647_2.png",
       "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",

@@ -311,6 +311,114 @@ class UnitCatalogTests(unittest.TestCase):
                                                        client_version="18.600.8")
         self.assertIsNone(wrong_version["unit_id"])
 
+    def test_dragon_duke_second_face_pose_keeps_four_hero_roster_distinct(self):
+        root = Path(__file__).parents[1]
+        metadata = json.loads((root / "tests/fixtures/hero_roster_dragon_pose_18_647_2_20261017.json")
+                              .read_text(encoding="utf-8"))
+        entries = [entry for entry in template_manifest(client_version="18.647.2")["templates"]
+                   if entry.get("unit_id") == "dragon_duke"
+                   and entry.get("surface") == "army_hero" and entry.get("role") == "face"]
+        self.assertEqual(len(entries), 2)
+        self.assertIn("units/dragon_duke_army_face_18_647_2.png",
+                      {entry["path"] for entry in entries})
+        second = next(entry for entry in entries if "pose2" in entry["path"])
+        sample_path = root / "assets/catalogs" / second["path"]
+        provenance = json.loads(sample_path.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+        self.assertEqual(hashlib.sha256(sample_path.read_bytes()).hexdigest(),
+                         second["template_sha256"])
+        self.assertEqual(provenance["template_sha256"], second["template_sha256"])
+        self.assertEqual(provenance["source_sha256"], second["source_sha256"])
+        self.assertEqual(provenance["source_bbox_1280"], second["source_bbox_1280"])
+        self.assertEqual(provenance["identity_evidence_frames"][0]["source_sha256"],
+                         second["identity_evidence_sha256"])
+        second_face = cv2.imdecode(np.fromfile(sample_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        old_face_path = root / "assets/catalogs/units/dragon_duke_army_face_18_647_2.png"
+        old_face = cv2.imdecode(np.fromfile(old_face_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        self.assertEqual(second_face.shape, old_face.shape)
+        expected = ("grand_warden", "dragon_duke", "minion_prince", "archer_queen")
+        for source in metadata["frames"]:
+            with self.subTest(frame=source["fixture"]):
+                path = root / "tests/fixtures" / source["fixture"]
+                self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),
+                                 source["fixture_sha256"])
+                image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+                self.assertEqual(image.shape, (483, 514, 3))
+                self.assertEqual(source["cached_hero_count_ocr"]["text"], "4/4")
+                self.assertGreaterEqual(source["cached_hero_count_ocr"]["confidence"], .9)
+                self.assertEqual(source["cached_hero_slots"], {"used": 4, "capacity": 4})
+                for index, unit_id in enumerate(expected):
+                    left = 130 * index
+                    identity = recognize_large_hero_identity(
+                        image, (left, 0, left + 124, 483), client_version="18.647.2")
+                    self.assertEqual(identity["unit_id"], unit_id, identity)
+                    self.assertGreaterEqual(identity["evidence"][0]["face_score"], .85)
+                    self.assertGreaterEqual(identity["evidence"][0]["color_score"], .8)
+                    face_region = image[35:355, left + 5:left + 118]
+                    second_face_score = float(cv2.matchTemplate(
+                        face_region, second_face, cv2.TM_CCOEFF_NORMED).max())
+                    if unit_id == "dragon_duke":
+                        if "_16_" in source["fixture"]:
+                            old_face_score = float(cv2.matchTemplate(
+                                face_region, old_face, cv2.TM_CCOEFF_NORMED).max())
+                            self.assertLess(old_face_score, .85)
+                            self.assertGreaterEqual(second_face_score, .85)
+                    else:
+                        self.assertLess(second_face_score, .85)
+                anonymous = np.zeros((720, 1280, 3), dtype=np.uint8)
+                anonymous[185:668, 23:537] = image
+                with TemporaryDirectory() as folder:
+                    replay = Path(folder) / "anonymous-roster.png"
+                    cv2.imencode(".png", anonymous)[1].tofile(replay)
+                    roster = recognize_army_heroes(replay, source["cached_hero_slots"],
+                                                   client_version="18.647.2")
+                self.assertTrue(roster["complete"], roster["unknowns"])
+                self.assertEqual([card["unit_id"] for card in roster["cards"]], list(expected))
+                self.assertIsNone(recognize_large_hero_identity(
+                    image, (130, 0, 254, 483), client_version="18.647.3")["unit_id"])
+        # Neither the second face alone nor a blank card may authorize a hero.
+        blank = np.zeros((483, 514, 3), dtype=np.uint8)
+        self.assertIsNone(recognize_large_hero_identity(
+            blank, (130, 0, 254, 483), client_version="18.647.2")["unit_id"])
+
+    def test_dragon_duke_second_face_pose_matches_original_pixels_and_cached_ocr(self):
+        root = Path(__file__).parents[1]
+        metadata = json.loads((root / "tests/fixtures/hero_roster_dragon_pose_18_647_2_20261017.json")
+                              .read_text(encoding="utf-8"))
+        source_root = Path(r"E:\projects\AutoCOC")
+        events_path = source_root / metadata["source_events"]
+        if not events_path.is_file() or any(not (source_root / item["source_frame"]).is_file()
+                                                for item in metadata["frames"]):
+            self.skipTest("Original local army frames or cached events are unavailable")
+        self.assertEqual(hashlib.sha256(events_path.read_bytes()).hexdigest(),
+                         metadata["source_events_sha256"])
+        observations = {}
+        for line in events_path.read_text(encoding="utf-8").splitlines():
+            event = json.loads(line)
+            if event.get("kind") == "observation":
+                observations[Path(event["frame"]).name] = event["observations"]
+        for source in metadata["frames"]:
+            with self.subTest(frame=source["fixture"]):
+                path = source_root / source["source_frame"]
+                self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), source["source_sha256"])
+                original = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+                original = cv2.resize(original, (1280, 720), interpolation=cv2.INTER_AREA)
+                fixture = cv2.imdecode(np.fromfile(root / "tests/fixtures" / source["fixture"],
+                                                  dtype=np.uint8), cv2.IMREAD_COLOR)
+                self.assertTrue(np.array_equal(fixture, original[185:668, 23:537]))
+                observed = observations[path.name]
+                self.assertIn(source["cached_hero_count_ocr"], observed["ocr"])
+                self.assertEqual(source["cached_hero_slots"],
+                                 {key: observed["army"]["heroes"][key] for key in ("used", "capacity")})
+        second = next(entry for entry in template_manifest(client_version="18.647.2")["templates"]
+                      if entry.get("path") == "units/dragon_duke_army_face_pose2_18_647_2.png")
+        path = source_root / second["source_frame"]
+        original = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        original = cv2.resize(original, (1280, 720), interpolation=cv2.INTER_AREA)
+        left, top, right, bottom = second["source_bbox_1280"]
+        sample = cv2.imdecode(np.fromfile(root / "assets/catalogs" / second["path"],
+                                          dtype=np.uint8), cv2.IMREAD_COLOR)
+        self.assertTrue(np.array_equal(sample, original[top:bottom, left:right]))
+
     def test_new_grand_warden_sample_matches_independent_selected_view(self):
         path = Path(__file__).parent / "fixtures/hero_grand_warden_selected_18_647_2_20261015.png"
         image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
