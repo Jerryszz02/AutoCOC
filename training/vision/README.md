@@ -128,4 +128,6 @@ python scripts/export_u_position.py --training-dir C:\runs\u-position --snapshot
 python -B scripts/collect_scene_samples.py --config C:\captures\live.toml --output C:\captures\scene-candidates\session-001 --split TRAIN --session-id session-001 --group-id candidate-group-001 --limit-sec 180
 ```
 
-拍图前写入 `prospective.json` 并在输出父目录预留 session/group，拒绝同一父目录中的重复身份；结束写入原图和事件哈希及源码/配置指纹。`TRAIN`/`VAL` 仅是预声明候选归属，`labels=null`、`leakage_independence_verified=false`、`admitted_to_training=false`。先做真实图复核、版本核对和近重复/关联组审计，再由既有数据工具导入；不同采集会话不能自动算独立组，发现跨拆分关联时隔离，不能移动候选以改善分数。Agent 复核不会变成人工真值。当前工具已实现，真实路线和新数据训练仍待验证。
+拍图前写入 `prospective.json` 并在输出父目录预留 session/group，拒绝同一父目录中的重复身份；结束写入原图和事件哈希及源码/配置指纹。`TRAIN`/`VAL` 仅是预声明候选归属，`labels=null`、`leakage_independence_verified=false`、`admitted_to_training=false`。先做真实图复核、版本核对和近重复/关联组审计，再由既有数据工具导入；不同采集会话不能自动算独立组，发现跨拆分关联时隔离，不能移动候选以改善分数。Agent 复核不会变成人工真值。
+
+2026-10-17 的 `20261017-0927-train-d39dabf` 已实际完成 18 帧、6 次导航、55.764 秒，军队和前后 HOME 库存相同；审计 `reports/completion-20261015/diagnostics/scene-route-d39dabf-0927-root-v1.json`。原始候选保持未标注，运行时场景输出不能当作标签；后续 Agent 逐图复核、旧拆分保持和实际增量训练单独记录。

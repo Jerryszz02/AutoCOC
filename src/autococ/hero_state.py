@@ -439,9 +439,11 @@ def locate_current_deployed_hero_card(
 def _current_warden_gray_card_topology(gray, left: int, right: int) -> dict | None:
     """Independent paired side-line proof for an animated gray used card.
 
-    This checks a long, aligned left/right outline and actual inside/outside
-    luminance separation; isolated battlefield edges or a one-sided border
-    cannot replace a closed card. The caller still checks its bottom edge.
+    This checks a long, aligned left/right outline. Its original broad
+    inside/outside contrast proof is retained; a dark-line proof also accepts
+    a narrow continuous trough with brighter pixels on both flanks. This
+    matters when the neighbouring battlefield brightens independently of the
+    card. The caller still checks its bottom edge.
     """
     import cv2
     import numpy as np
@@ -472,15 +474,33 @@ def _current_warden_gray_card_topology(gray, left: int, right: int) -> dict | No
         run = run + 1 if value else 0
         longest = max(longest, run)
     if (count < 63 or longest < 50 or int(paired[:8].sum()) < 6
-            or int(paired[-8:].sum()) < 6
-            or float(np.median(left_contrast)) < 20
-            or float(np.median(right_contrast)) < 20):
+            or int(paired[-8:].sum()) < 6):
         return None
     left_positions = np.argmax(left_band, axis=1)[paired]
     right_positions = np.argmin(right_band, axis=1)[paired]
     if (float(np.median(np.abs(left_positions - np.median(left_positions)))) > 1
             or float(np.median(np.abs(right_positions - np.median(right_positions)))) > 1):
         return None
+    broad_contrast = (float(np.median(left_contrast)) >= 20
+                      and float(np.median(right_contrast)) >= 20)
+    dark_line = None
+    if not broad_contrast:
+        # Both dark troughs must occupy the current portrait-derived card
+        # edges. Brightness of one neighbouring area is never substituted for
+        # a line: each trough needs independent inner and outer flanks.
+        left_line = rows[:, left - 1:left + 1].min(axis=1).astype(float)
+        right_line = rows[:, right - 1:right + 1].min(axis=1).astype(float)
+        left_outer = rows[:, left - 4:left - 2].mean(axis=1) - left_line
+        left_inner = rows[:, left + 1:left + 3].mean(axis=1) - left_line
+        right_inner = rows[:, right - 4:right - 2].mean(axis=1) - right_line
+        right_outer = rows[:, right + 2:right + 4].mean(axis=1) - right_line
+        trough_rows = (paired & (left_outer >= 12) & (left_inner >= 25)
+                       & (right_inner >= 25) & (right_outer >= 12))
+        if int(trough_rows.sum()) < 45:
+            return None
+        dark_line = {"paired_dark_trough_rows": int(trough_rows.sum()),
+                     "left_line_median": float(np.median(left_line[trough_rows])),
+                     "right_line_median": float(np.median(right_line[trough_rows]))}
     return {"method": "paired_full_height_gray_used_card_sides",
             "paired_rows": count, "longest_paired_run": longest,
             "top_paired_rows": int(paired[:8].sum()),
@@ -488,7 +508,9 @@ def _current_warden_gray_card_topology(gray, left: int, right: int) -> dict | No
             "left_gradient_median": float(np.median(left_strength[paired])),
             "right_gradient_median": float(np.median(right_strength[paired])),
             "left_contrast_median": float(np.median(left_contrast[paired])),
-            "right_contrast_median": float(np.median(right_contrast[paired]))}
+            "right_contrast_median": float(np.median(right_contrast[paired])),
+            "contrast_proof": "broad_inside_outside" if broad_contrast else "paired_dark_troughs",
+            "dark_line": dark_line}
 
 
 def _hero_phase_portrait(image, box: tuple[int, int, int, int], unit_id: str) -> dict | None:

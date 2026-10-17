@@ -94,6 +94,87 @@ class HeroStateTests(unittest.TestCase):
             saved = cv2.imdecode(np.fromfile(fixture, np.uint8), cv2.IMREAD_COLOR)
             self.assertTrue(np.array_equal(saved, expected))
 
+    def test_narrow_dark_warden_outline_keeps_current_hp_and_used_pair_required(self) -> None:
+        fixture = self.root / "tests/fixtures/hero_warden_gray_used_092829_18_647_2.png"
+        source = cv2.imdecode(np.fromfile(fixture, np.uint8), cv2.IMREAD_COLOR)
+        self.assertIsNotNone(source)
+        locator = locate_current_deployed_hero_card(fixture, "grand_warden",
+                                                    client_version="18.647.2")
+        self.assertIsNotNone(locator)
+        self.assertEqual(locator["bbox"], [647, 595, 736, 711])
+        self.assertEqual(locator["gray_used_topology"]["contrast_proof"], "paired_dark_troughs")
+        self.assertGreaterEqual(locator["gray_used_topology"]["dark_line"]["paired_dark_trough_rows"], 45)
+        state = recognize_hero_state(fixture, locator["bbox"], unit_id="grand_warden",
+                                     client_version="18.647.2")
+        self.assertIs(state["ability_used"], True)
+        self.assertIsNotNone(state["evidence"]["health_bar"])
+        equipment = state["evidence"]["current_equipment_matches"]
+        self.assertIsNotNone(equipment["used_book"])
+        self.assertIsNotNone(equipment["used_card"])
+        self.assertIsNone(equipment["ready_book"])
+        self.assertIsNone(equipment["ready_card"])
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "modified.png"
+            for name in ("left_erased", "right_erased", "left_gap", "right_gap",
+                         "left_shifted", "right_shifted", "neighbor_edge", "bright_neighbors",
+                         "missing_hp", "missing_book", "missing_card"):
+                with self.subTest(case=name):
+                    image = source.copy()
+                    if name == "left_erased":
+                        image[625:695, 646:651] = (30, 30, 30)
+                    elif name == "right_erased":
+                        image[625:695, 732:740] = source[625:695, 740:741]
+                    elif name == "left_gap":
+                        image[650:664, 642:653] = (30, 30, 30)
+                    elif name == "right_gap":
+                        image[650:664, 731:740] = (30, 30, 30)
+                    elif name == "left_shifted":
+                        image[625:695, 644:654] = np.roll(source[625:695, 644:654], 3, axis=1)
+                    elif name == "right_shifted":
+                        image[625:695, 730:740] = np.roll(source[625:695, 730:740], -3, axis=1)
+                    elif name == "neighbor_edge":
+                        image[625:695, 646:651] = (30, 30, 30)
+                        image[625:695, 642:644] = (20, 20, 20)
+                    elif name == "bright_neighbors":
+                        image[625:695, 638:645] = (190, 190, 190)
+                        image[625:695, 739:746] = (190, 190, 190)
+                    elif name == "missing_hp":
+                        image[573:586, 654:731] = (30, 30, 30)
+                    elif name == "missing_book":
+                        image[530:567, 650:690] = (30, 30, 30)
+                    else:
+                        image[626:680, 680:729] = (30, 30, 30)
+                    cv2.imencode(".png", image)[1].tofile(path)
+                    changed = locate_current_deployed_hero_card(path, "grand_warden",
+                                                               client_version="18.647.2")
+                    if name == "bright_neighbors":
+                        self.assertIsNotNone(changed)
+                    elif name not in ("missing_hp", "missing_book", "missing_card"):
+                        self.assertIsNone(changed)
+                    current = recognize_hero_state(path, locator["bbox"], unit_id="grand_warden",
+                                                   client_version="18.647.2")
+                    if name == "bright_neighbors":
+                        self.assertIs(current["ability_used"], True)
+                    if name.startswith("missing_"):
+                        self.assertIsNot(current["ability_used"], True)
+
+    def test_narrow_dark_warden_fixture_provenance(self) -> None:
+        fixture = self.root / "tests/fixtures/hero_warden_gray_used_092829_18_647_2.png"
+        provenance = fixture.with_suffix(".provenance.json")
+        record = json.loads(provenance.read_text(encoding="utf-8"))
+        self.assertFalse(record["human_ground_truth"])
+        self.assertFalse(record["formal_battle_acceptance"])
+        self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(), record["fixture_sha256"])
+        original = Path(record["source_frame"])
+        if original.is_file():
+            self.assertEqual(hashlib.sha256(original.read_bytes()).hexdigest(), record["source_sha256"])
+            raw = cv2.imdecode(np.fromfile(original, np.uint8), cv2.IMREAD_COLOR)
+            baseline = cv2.resize(raw, (1280, 720), interpolation=cv2.INTER_AREA)
+            expected = np.zeros_like(baseline)
+            expected[515:720, :] = baseline[515:720, :]
+            saved = cv2.imdecode(np.fromfile(fixture, np.uint8), cv2.IMREAD_COLOR)
+            self.assertTrue(np.array_equal(saved, expected))
+
     def test_current_warden_yellow_hp_proves_only_live_deployment(self) -> None:
         for name, fill in (("green_24", "green"), ("yellow_25", "yellow"),
                            ("yellow_26", "yellow")):

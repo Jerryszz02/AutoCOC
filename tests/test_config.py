@@ -174,6 +174,24 @@ class ConfigTests(unittest.TestCase):
             with self.subTest(kwargs=kwargs), self.assertRaises(ConfigError):
                 BattleConfig(**kwargs)
 
+    def test_settlement_wait_has_independent_default_and_preserves_explicit_values(self) -> None:
+        self.assertEqual(BattleConfig().settlement_timeout_sec, 240)
+        self.assertEqual(BattleConfig(deploy_timeout_sec=90).settlement_timeout_sec, 240)
+        self.assertIsNone(BattleConfig(settlement_timeout_sec=None).settlement_timeout_sec)
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text('[battle]\ndeploy_timeout_sec = 90\n', encoding="utf-8")
+            battle = load_config(path).battle
+            self.assertEqual((battle.deploy_timeout_sec, battle.settlement_timeout_sec), (90, 240))
+            path.write_text('[battle]\ndeploy_timeout_sec = 90\nsettlement_timeout_sec = 120\n',
+                            encoding="utf-8")
+            self.assertEqual(load_config(path).battle.settlement_timeout_sec, 120)
+            for value in ("0", "-1", "true", "1.5"):
+                with self.subTest(value=value):
+                    path.write_text(f'[battle]\nsettlement_timeout_sec = {value}\n', encoding="utf-8")
+                    with self.assertRaises(ConfigError):
+                        load_config(path)
+
     def test_rejects_unknown_profile_task(self) -> None:
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.toml"

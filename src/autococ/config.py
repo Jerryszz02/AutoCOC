@@ -122,7 +122,7 @@ class BattleConfig:
     resource_filter: ResourceFilter | None = None
     strategy_file: str = ""
     target_building: str = ""
-    settlement_timeout_sec: int | None = None
+    settlement_timeout_sec: int | None = 240
     line_execution_mode: str = "verified"
     line_tactics: str = "single_edge"
     post_deployment_hero_skill: str = ""
@@ -373,8 +373,7 @@ def _load_battle(section: dict[str, Any]) -> BattleConfig:
         resource_filter=resource_filter,
         strategy_file=_string(section, "strategy_file", ""),
         target_building=_string(section, "target_building", ""),
-        settlement_timeout_sec=(_positive_int(section, "settlement_timeout_sec", 180)
-                                if "settlement_timeout_sec" in section else None),
+        settlement_timeout_sec=_positive_int(section, "settlement_timeout_sec", 240),
     )
 
 

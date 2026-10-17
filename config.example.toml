@@ -85,9 +85,9 @@ min_expected_resources = 300000
 # Maximum observed candidates, including the first. Never attack below the threshold to exhaust this budget.
 max_searches = 30
 deploy_timeout_sec = 180
-# Optional independent wait for settlement after deployment. If omitted, reuses
-# deploy_timeout_sec for compatibility. Session/task deadlines still apply.
-# settlement_timeout_sec = 300
+# Independent wait for settlement after deployment defaults to 240 seconds.
+# Set a positive integer to override it. Session/task deadlines still apply.
+# settlement_timeout_sec = 240
 # Development options below require strategy = "edrag_line"; see docs/STRATEGIES.md.
 # line_execution_mode = "continuous"
 # line_tactics = "two_edge_probed_anchors"
