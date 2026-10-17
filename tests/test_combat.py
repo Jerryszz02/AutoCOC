@@ -61,6 +61,37 @@ def complete_frames() -> list[SceneSnapshot]:
     ]
 
 
+def regular_defeat_settlement() -> dict:
+    """Three independently read loot rows plus the verified no-bonus layout."""
+    loot = {"gold": 120, "elixir": 55, "dark_elixir": 10}
+    loot_evidence = {}
+    resource_icons = {}
+    for index, (name, amount) in enumerate(loot.items()):
+        icon = {"confidence": .99,
+                "bbox_at_1280x720": [700, 320 + index * 45, 730, 350 + index * 45],
+                "template": f"assets/templates/settlement_{name}.png",
+                "comparison": "opaque_drop_body" if name == "dark_elixir" else "full_template"}
+        resource_icons[name] = icon
+        loot_evidence[name] = {
+            "source": "full_ocr", "text": str(amount), "confidence": .99,
+            "bbox": [400, 320 + index * 45, 500, 340 + index * 45],
+            "resource_icon": icon,
+        }
+    return {
+        "loot": loot, "bonus": {name: 0 for name in loot},
+        "percentage": 44, "stars": 0, "event_reward": None,
+        "evidence": {
+            "layout": "regular_defeat_three_rows_v1",
+            "stars": {"source": "explicit_defeat_result", "result": {"confidence": .99}},
+            "loot": loot_evidence,
+            "resource_icons": resource_icons,
+            "bonus": {"source": "verified_no_bonus_layout",
+                      "layout": "regular_defeat_three_rows_v1",
+                      "requires_inventory_reconciliation": True},
+        },
+    }
+
+
 class FakeSession:
     buttons = staticmethod(GameSession.buttons)
     click = GameSession.click
@@ -1531,6 +1562,109 @@ class CombatTests(unittest.TestCase):
                 for resource in ("gold", "elixir", "dark_elixir"):
                     self.assertIsNone(ledger["resources"][resource]["battle_loot"])
                     self.assertIsNone(ledger["resources"][resource]["battle_bonus"])
+
+    def _provisional_defeat_session(self, *, evidence_change=None, dark_after=None):
+        frames = complete_frames()
+        settlement = regular_defeat_settlement()
+        if evidence_change is not None:
+            evidence_change(settlement["evidence"])
+        frames[5].observations["settlement"] = settlement
+        after = deepcopy(AFTER)
+        after["dark_elixir"] = BEFORE["dark_elixir"] if dark_after is None else dark_after
+        frames[6].observations["resources"] = after
+        session = FakeSession(frames)
+        session.client_version = "18.647.2"
+        session.config.battle = replace(session.config.battle, strategy="edrag_line")
+        return session, frames
+
+    def test_verified_regular_defeat_uses_strict_capacity_proof_without_crediting_overflow(self):
+        session, frames = self._provisional_defeat_session()
+        proof = {"capacity": BEFORE["dark_elixir"], "resource": "dark_elixir",
+                 "frame": "dark-capacity-detail.png"}
+        with patch("autococ.combat.read_resource_capacity",
+                   return_value=(proof, frames[6], [Path("dark-capacity-detail.png")])) as reader:
+            result = battle(session)
+
+        reader.assert_called_once_with(session, frames[6], "dark_elixir")
+        self.assertEqual(result.status, "succeeded", result.reason)
+        self.assertTrue(result.metrics["inventory_reconciled"])
+        self.assertEqual(result.metrics["inventory_reconciliation_method"], "capacity_capped")
+        self.assertEqual(result.metrics["stars"], 0)
+        self.assertIs(result.metrics["victory"], False)
+        self.assertEqual(result.metrics["battle_credited_dark_elixir"], 0)
+        self.assertEqual(result.metrics["overflow_dark_elixir"], 10)
+        ledger = resource_metrics(RunStats(task_results=[result]), elapsed_sec=60)
+        self.assertEqual(ledger["resources"]["dark_elixir"]["battle_credited"], 0)
+        self.assertEqual(ledger["resources"]["dark_elixir"]["battle_overflow"], 10)
+
+    def test_provisional_capacity_stays_disabled_for_missing_rows_or_untrusted_layout(self):
+        changes = (
+            lambda evidence: evidence["loot"].pop("dark_elixir"),
+            lambda evidence: evidence.update(layout="regular_defeat_gold_elixir_only_v1"),
+            lambda evidence: evidence["loot"]["dark_elixir"].update(
+                source="verified_absent_resource_row_layout", requires_inventory_reconciliation=True),
+            lambda evidence: evidence["bonus"].update(source="unknown_bonus_layout"),
+            lambda evidence: evidence["loot"]["dark_elixir"].update(confidence=.89),
+        )
+        for change in changes:
+            with self.subTest(change=change):
+                session, _ = self._provisional_defeat_session(evidence_change=change)
+                with patch("autococ.combat.read_resource_capacity") as reader:
+                    result = battle(session)
+                reader.assert_not_called()
+                self.assertEqual(result.status, "failed")
+                self.assertFalse(result.metrics["inventory_reconciled"])
+                self.assertIsNone(result.metrics.get("victory"))
+
+    def test_provisional_capacity_preserves_version_gem_and_positive_shortfall_gates(self):
+        session, _ = self._provisional_defeat_session()
+        session.client_version = "18.600.7"
+        with patch("autococ.combat.read_resource_capacity") as reader:
+            result = battle(session)
+        reader.assert_not_called()
+        self.assertEqual(result.status, "failed")
+        self.assertFalse(result.metrics["inventory_reconciled"])
+
+        session, _ = self._provisional_defeat_session(dark_after=BEFORE["dark_elixir"] - 1)
+        with patch("autococ.combat.read_resource_capacity") as reader:
+            result = battle(session)
+        reader.assert_not_called()
+        self.assertEqual(result.status, "failed")
+        self.assertFalse(result.metrics["inventory_reconciled"])
+
+        session, frames = self._provisional_defeat_session()
+        for home_frame in frames[6:]:
+            home_frame.observations["resources"]["gems"] = BEFORE["gems"] + 1
+        frames.extend(frame(index, "village", resources={**AFTER,
+                                                          "dark_elixir": BEFORE["dark_elixir"],
+                                                          "gems": BEFORE["gems"] + 1})
+                      for index in range(7, 10))
+        with patch("autococ.combat.read_resource_capacity") as reader:
+            result = battle(session)
+        reader.assert_not_called()
+        self.assertEqual(result.status, "failed")
+        self.assertFalse(result.metrics["inventory_reconciled"])
+        self.assertIn("Gem balance", result.reason)
+
+    def test_provisional_defeat_rejects_missing_or_mismatched_capacity_proof(self):
+        session, frames = self._provisional_defeat_session()
+        with patch("autococ.combat.read_resource_capacity", side_effect=FlowError("capacity unreadable")) as reader:
+            result = battle(session)
+        reader.assert_called_once()
+        self.assertEqual(result.status, "failed")
+        self.assertFalse(result.metrics["inventory_reconciled"])
+        self.assertIsNone(result.metrics.get("victory"))
+
+        session, frames = self._provisional_defeat_session()
+        wrong = {"capacity": BEFORE["dark_elixir"] + 1, "resource": "dark_elixir",
+                 "frame": "dark-capacity-detail.png"}
+        with patch("autococ.combat.read_resource_capacity",
+                   return_value=(wrong, frames[6], [Path("dark-capacity-detail.png")])) as reader:
+            result = battle(session)
+        reader.assert_called_once()
+        self.assertEqual(result.status, "failed")
+        self.assertFalse(result.metrics["inventory_reconciled"])
+        self.assertIsNone(result.metrics.get("victory"))
 
     def test_two_edge_unknown_loot_prevents_unverified_return(self):
         frames = complete_frames()

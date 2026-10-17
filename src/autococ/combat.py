@@ -732,7 +732,9 @@ def run_battle(session: GameSession) -> TaskResult:
                 else:
                     ledger, home_after = _reconcile_return_inventory(
                         session, home_after, verified_before, verified_after, settlement,
-                        total_search_cost, evidence, allow_capacity=not provisional_outcome,
+                        total_search_cost, evidence,
+                        allow_capacity=(not provisional_outcome or
+                                        _verified_regular_defeat_allows_capacity(settlement)),
                         chest_reward=metrics.get("battle_reward"))
                     metrics.update(ledger)
             if not metrics["inventory_reconciled"]:
@@ -1203,6 +1205,77 @@ def _settlement_requires_inventory_reconciliation(result: dict | None) -> bool:
                                          group[resource].get("requires_inventory_reconciliation") is True
                                          for resource in RESOURCES))
         for group in (loot, bonus))
+
+
+def _verified_regular_defeat_allows_capacity(result: dict | None) -> bool:
+    """Permit capped inventory only for a fully read, regular three-row defeat.
+
+    Missing-row zeros, claim layouts, and weak/unknown settlement evidence stay
+    exact-match-only. The existing capacity reader still owns the client-version,
+    positive-shortfall, current-HOME, and exact-capacity checks.
+    """
+    if (not isinstance(result, dict) or _verified_stars(result) != 0 or
+            result.get("event_reward") is not None):
+        return False
+    evidence = result.get("evidence")
+    if not isinstance(evidence, dict) or evidence.get("layout") != "regular_defeat_three_rows_v1":
+        return False
+    loot = result.get("loot")
+    bonus = result.get("bonus")
+    if (not isinstance(loot, dict) or any(type(loot.get(resource)) is not int or loot[resource] < 0
+                                          for resource in RESOURCES) or
+            not isinstance(bonus, dict) or any(type(bonus.get(resource)) is not int or bonus[resource] != 0
+                                               for resource in RESOURCES)):
+        return False
+
+    bonus_proof = evidence.get("bonus")
+    if (not isinstance(bonus_proof, dict) or
+            bonus_proof.get("source") != "verified_no_bonus_layout" or
+            bonus_proof.get("layout") != "regular_defeat_three_rows_v1" or
+            bonus_proof.get("requires_inventory_reconciliation") is not True):
+        return False
+    loot_proofs = evidence.get("loot")
+    if not isinstance(loot_proofs, dict) or loot_proofs.get("requires_inventory_reconciliation") is True:
+        return False
+    resource_icons = evidence.get("resource_icons")
+    if not isinstance(resource_icons, dict):
+        return False
+
+    def valid_box(value: object) -> bool:
+        return (isinstance(value, (list, tuple)) and len(value) == 4 and
+                all(type(edge) is int and edge >= 0 for edge in value) and
+                value[2] > value[0] and value[3] > value[1])
+
+    icon_y: dict[str, int] = {}
+    for resource in RESOURCES:
+        proof = loot_proofs.get(resource)
+        if (not isinstance(proof, dict) or proof.get("requires_inventory_reconciliation") is True or
+                proof.get("source") not in {"full_ocr", "glyph_line_roi"}):
+            return False
+        text = proof.get("text")
+        if not isinstance(text, str) or not text.strip() or any(
+                char not in "0123456789 ,.-，" for char in text):
+            return False
+        digits = "".join(char for char in text if "0" <= char <= "9")
+        if not digits or int(digits) != loot[resource]:
+            return False
+        confidence = proof.get("confidence")
+        icon = resource_icons.get(resource)
+        icon_box = icon.get("bbox_at_1280x720") if isinstance(icon, dict) else None
+        expected_comparison = "opaque_drop_body" if resource == "dark_elixir" else "full_template"
+        template_name = str(icon.get("template", "")).replace("\\", "/").rsplit("/", 1)[-1] if isinstance(icon, dict) else ""
+        if (type(confidence) not in (int, float) or not math.isfinite(confidence) or
+                not .9 <= confidence <= 1 or not valid_box(proof.get("bbox")) or
+                not isinstance(icon, dict) or type(icon.get("confidence")) not in (int, float) or
+                not math.isfinite(icon["confidence"]) or not .9 <= icon["confidence"] <= 1 or
+                not valid_box(icon_box) or proof.get("resource_icon") != icon or
+                template_name != f"settlement_{resource}.png" or
+                icon.get("comparison") != expected_comparison):
+            return False
+        icon_y[resource] = icon_box[1]
+    if len(set(icon_y.values())) != len(RESOURCES) or sorted(icon_y, key=icon_y.get) != list(RESOURCES):
+        return False
+    return True
 
 
 def _verified_stars(result: dict | None) -> int | None:

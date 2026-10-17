@@ -1,5 +1,7 @@
 # 本地视觉训练工具
 
+新增独立 VAL 诊断快照 `r-card-dense-agent-val-20261017-120916-v1`，与旧 v5 快照并列保存，**2 帧、1 组、1 正窗、0 负窗**。整场采集前已声明 VAL；三张 pre 原图逐图 Agent 复核后，前两张间隔 0.118909 秒且严格相机证明通过，第三张位移 3.394 像素超门限而隔离，未采到 post。外部 raw 适配器保留全部原字节及 admit/quarantine 原因，既有 `import_reviewed_r.py` 完成权威校验；旧45帧和模型文件不变，90对哈希无重复或近重复冲突。冻结 v5 仅评估一次，**not_established、0 TP / 0 FP / 1 FN、2 帧部署未验证、0 可评估正窗、recall=null**：现有 `dynamic_tracking` 不接受黄血条部署证据，未绕过该门。模型仍禁用，本组没有训练或调参；单组正窗不构成正式质量估计，`event_at` 是首次观察可用而非真实起始时刻。证据 `reports/completion-20261015/diagnostics/r-dense-120916-pipeline-v1/`；评估报告 SHA `cf4a7b660fe4803fa2cce950e9dbe85c00a437a8d3c8e7e373c585ef4b121d44`。
+
 已完成的只读 picker 采样可导入独立的待复核候选队列：
 
 ```powershell
