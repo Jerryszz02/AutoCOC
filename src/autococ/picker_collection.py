@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import Path
 import subprocess
 import time
@@ -94,6 +95,49 @@ def _arrow_score(image: np.ndarray, source: np.ndarray) -> float:
     template = cv2.cvtColor(source, cv2.COLOR_BGR2GRAY)
     target = cv2.cvtColor(_crop(image, ARROW_SEARCH_BOX), cv2.COLOR_BGR2GRAY)
     return float(cv2.minMaxLoc(cv2.matchTemplate(target, template, cv2.TM_CCOEFF_NORMED))[1])
+
+
+def _masked_arrow_evidence(image: np.ndarray, source: np.ndarray) -> dict:
+    """Match the calibrated arrow glyph without the moving cards behind it.
+
+    The immutable source asset supplies the neutral bright arrow and its two
+    pixel bevel/outline. The rest of that rectangular crop is picker content,
+    which changes on every page. Keep the existing .93 strong threshold and
+    require exactly one small cluster of strong positions in the fixed search
+    window. A non-finite correlation is never evidence.
+    """
+    template = cv2.cvtColor(source, cv2.COLOR_BGR2GRAY)
+    neutral = source.max(axis=2).astype(np.int16) - source.min(axis=2).astype(np.int16)
+    bright = ((template >= 180) & (neutral <= 20)).astype(np.uint8)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(bright)
+    if count < 2:
+        return {"status": "invalid_template", "score": None}
+    glyph = (labels == 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))).astype(np.uint8)
+    mask = cv2.dilate(glyph, np.ones((5, 5), dtype=np.uint8))
+    target = cv2.cvtColor(_crop(image, ARROW_SEARCH_BOX), cv2.COLOR_BGR2GRAY)
+    scores = cv2.matchTemplate(target, template, cv2.TM_CCOEFF_NORMED, mask=mask)
+    finite = np.isfinite(scores)
+    maximum = float(scores[finite].max()) if finite.any() else None
+    strong = (finite & (scores >= .93)).astype(np.uint8)
+    groups, _, positions, _ = cv2.connectedComponentsWithStats(strong)
+    evidence = {"status": "unverified", "score": maximum,
+                "method": "calibrated_neutral_glyph_with_outline_v1",
+                "mask_pixels": int(mask.sum()), "strong_position_groups": groups - 1}
+    if groups != 2:
+        if groups > 2:
+            evidence["status"] = "ambiguous"
+        return evidence
+    x, y, width, height, _ = positions[1]
+    # Neighbouring correlation samples may describe one subpixel-aligned
+    # glyph. A broad plateau or separate match is not a unique physical arrow.
+    if width > 3 or height > 3:
+        return {**evidence, "status": "ambiguous"}
+    best = np.where(finite, scores, -1.0)
+    _, _, _, point = cv2.minMaxLoc(best)
+    evidence.update(status="verified", point=[ARROW_SEARCH_BOX[0] + point[0],
+                                                ARROW_SEARCH_BOX[1] + point[1]],
+                    strong_position_extent=[int(x), int(y), int(width), int(height)])
+    return evidence
 
 
 def _calibration() -> dict:
@@ -363,8 +407,19 @@ def run_flow(session, *, foreground, open_army, max_troop_pages: int,
         if not selected_stability["stable"]:
             raise SamplingStopped("selected_troop_row_changed")
         score = _arrow_score(image, arrow_source)
+        if not math.isfinite(score):
+            raise SamplingStopped("next_arrow_nonfinite")
+        legacy_score = score
+        arrow_evidence = {"status": "verified" if score >= .93 else "unverified",
+                          "method": "full_crop_correlation", "score": score}
+        if score < .93:
+            arrow_evidence = _masked_arrow_evidence(image, arrow_source)
+            if arrow_evidence["status"] == "verified":
+                score = arrow_evidence["score"]
         record = {"index": page_index + 1, "frame": str(picker.screenshot_path),
                   "sha256": sha(picker.screenshot_path), "next_arrow_score": round(score, 6),
+                  "next_arrow_full_crop_score": round(legacy_score, 6),
+                  "next_arrow_evidence": arrow_evidence,
                   "selected_row_initial_sha256": first_pixels,
                   "selected_row_stability": selected_stability,
                   "visible_roster_proof": visible, "identity_labels": None}
@@ -373,6 +428,8 @@ def run_flow(session, *, foreground, open_army, max_troop_pages: int,
         if page_index + 1 >= max_troop_pages:
             termination = "configured_page_limit_not_catalog_end"
             break
+        if arrow_evidence["status"] == "ambiguous":
+            raise SamplingStopped("next_arrow_ambiguous")
         if score <= .60:
             termination = "no_supported_next_arrow_not_catalog_end"
             break

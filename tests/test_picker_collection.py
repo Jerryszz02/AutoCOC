@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -10,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
+import cv2
 import pytest
 
 from autococ import picker_collection as picker
@@ -65,6 +67,7 @@ class FakeSession:
         self._input_attempt_generation = 0
         self.last_snapshot = None
         self.actions = []
+        self.events = []
         self.stop_after_page = False
         self.stop_flag = False
         self.context = SimpleNamespace(swipe=self.swipe)
@@ -86,6 +89,7 @@ class FakeSession:
 
     def event(self, kind, **_data):
         self.actions.append(("event", kind))
+        self.events.append({"kind": kind, **_data})
         if self.stop_after_page and kind == "development_readonly_picker_page":
             self.stop_flag = True
 
@@ -101,14 +105,16 @@ def _open_army(session, home, _evidence):
     return current
 
 
-def _run(session, *, stop=lambda: False, foreground=lambda: True):
+def _run(session, *, stop=lambda: False, foreground=lambda: True, arrow_score=.99,
+         masked_arrow=None):
     images = {name: np.zeros((720, 1280, 3), dtype=np.uint8)
               for name in ("before.png", "troop1.png", "troop2.png", "closed.png",
                            "spell.png", "after.png")}
     images["troop2.png"][430:690, 30:500] = 170
     with patch.object(picker, "_calibration", return_value={"next_arrow_template": {"path": "next-arrow.png"}}), \
          patch.object(picker, "_image", side_effect=lambda path: images[str(path)]), \
-         patch.object(picker, "_arrow_score", return_value=.99), \
+         patch.object(picker, "_arrow_score", return_value=arrow_score), \
+         patch.object(picker, "_masked_arrow_evidence", return_value=masked_arrow), \
          patch.object(picker, "sha", side_effect=lambda path: "sha:" + str(path)):
         return picker.run_flow(session, foreground=foreground, open_army=_open_army,
                                max_troop_pages=2, pause=lambda _: None, stop=stop)
@@ -147,6 +153,93 @@ def test_two_troop_pages_spell_first_and_unchanged_army():
     assert result["spell_first_page"]["swipe_attempted"] is False
     assert [a[0] for a in session.actions].count("swipe") == 1
     assert session.action_count == 7
+
+
+def _arrow_fixture(page):
+    root = Path(__file__).parent / "fixtures/picker_arrow_064927_18_647_2"
+    provenance = json.loads((root / "provenance.json").read_text(encoding="utf-8"))
+    row = provenance["frames"][page - 1]
+    path = root / row["fixture"]
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == row["fixture_sha256"]
+    window = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert hashlib.sha256(window.tobytes()).hexdigest() == row["pixel_sha256_bgr"]
+    image = np.zeros((720, 1280, 3), dtype=np.uint8)
+    image[545:589, 1229:1270] = window
+    source = cv2.imdecode(np.fromfile(picker.CALIBRATION_DIR / "next-arrow.png", dtype=np.uint8),
+                          cv2.IMREAD_COLOR)
+    return image, source
+
+
+def test_arrow_uses_opaque_glyph_when_page_background_changes():
+    first, source = _arrow_fixture(1)
+    second, _ = _arrow_fixture(2)
+    assert picker._arrow_score(first, source) >= .93
+    assert .60 < picker._arrow_score(second, source) < .93  # The real failure.
+    for image in (first, second):
+        evidence = picker._masked_arrow_evidence(image, source)
+        assert evidence["status"] == "verified"
+        assert evidence["score"] >= .93
+        assert evidence["point"] == [1237, 551]
+        assert evidence["strong_position_groups"] == 1
+
+
+@pytest.mark.parametrize("change", ["absent", "uniform_white", "upper_half_missing",
+                                     "tip_missing", "mirrored", "outside_search"])
+def test_arrow_missing_or_wrong_shape_does_not_authorize_paging(change):
+    image, source = _arrow_fixture(2)
+    if change in ("absent", "uniform_white"):
+        image[545:589, 1229:1270] = 0 if change == "absent" else 255
+    elif change == "upper_half_missing":
+        image[551:567, 1237:1260] = 0
+    elif change == "tip_missing":
+        image[551:582, 1247:1260] = 0
+    elif change == "mirrored":
+        image[545:589, 1229:1270] = image[545:589, 1229:1270][:, ::-1]
+    else:
+        image[545:589, 1000:1041] = image[545:589, 1229:1270]
+        image[545:589, 1229:1270] = 0
+    assert picker._masked_arrow_evidence(image, source)["status"] != "verified"
+
+
+@pytest.mark.parametrize("kind", ["two_peaks", "wide_plateau", "nonfinite"])
+def test_masked_arrow_requires_one_finite_physical_match(kind):
+    image, source = _arrow_fixture(2)
+    scores = np.zeros((14, 19), dtype=np.float32)
+    if kind == "two_peaks":
+        scores[3, 3] = scores[9, 9] = .97
+    elif kind == "wide_plateau":
+        scores[3, 3:7] = .97
+    else:
+        scores[:] = np.nan
+        scores[3, 3] = np.inf
+    with patch.object(picker.cv2, "matchTemplate", return_value=scores):
+        assert picker._masked_arrow_evidence(image, source)["status"] != "verified"
+
+
+def test_weak_full_crop_can_use_verified_mask_without_changing_roster_contract():
+    session = _session()
+    result = _run(session, arrow_score=.834, masked_arrow={"status": "verified", "score": .951,
+                                                         "method": "calibrated_neutral_glyph_with_outline_v1"})
+    assert result["zero_roster_change_verified"] is True
+    assert result["troop_pages"][0]["next_arrow_score"] == .951
+    assert result["troop_pages"][0]["next_arrow_full_crop_score"] == .834
+    assert [a[0] for a in session.actions].count("swipe") == 1
+
+
+@pytest.mark.parametrize("old_score", [.4, .834])
+def test_ambiguous_mask_stops_before_swipe_even_with_low_full_crop_score(old_score):
+    session = _session()
+    with pytest.raises(picker.SamplingStopped, match="next_arrow_ambiguous"):
+        _run(session, arrow_score=old_score, masked_arrow={"status": "ambiguous", "score": .951})
+    assert [a[0] for a in session.actions].count("swipe") == 0
+
+
+@pytest.mark.parametrize("score", [float("nan"), float("inf"), -float("inf")])
+def test_nonfinite_full_arrow_score_stops_before_swipe(score):
+    session = _session()
+    with pytest.raises(picker.SamplingStopped, match="next_arrow_nonfinite"):
+        _run(session, arrow_score=score)
+    assert [a[0] for a in session.actions].count("swipe") == 0
 
 
 def test_stop_before_swipe_sends_no_more_input():

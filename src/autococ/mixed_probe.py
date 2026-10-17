@@ -224,6 +224,22 @@ def _probe_count(session: Any, plan: MixedProbePlan, snapshot: Any, unit_id: str
         if border is None and base.client_version == "18.647.2" and not sampled_89_balloon:
             border = (_spent_balloon_dark_border(image, bbox) if unit_id == "balloon" else
                       _closed_dragon_card_border_18_647_2(image, bbox))
+        if border is None and unit_id == "dragon" and base.client_version == "18.647.2":
+            # Only a proof returned by this call's current-frame reading can
+            # supplement the old outer-border detector. Never consult cached
+            # snapshots or accept an unbound inner template match.
+            inner = reading.get("current_card_border")
+            if (isinstance(inner, dict) and
+                    inner.get("method") == "18.647.2_dragon_source_bound_inner_outline" and
+                    inner.get("frame") == str(snapshot.screenshot_path) and
+                    inner.get("frame_sha256") == _file_sha256(snapshot.screenshot_path) and
+                    inner.get("source_frame") == str(base.toolbar_before_frame_id) and
+                    inner.get("source_sha256") == base.toolbar_before_sha256 and
+                    inner.get("source_card_bbox") == list(bbox) and
+                    inner.get("client_version") == base.client_version and
+                    inner.get("unique_match") is True and
+                    inner.get("unique_portrait") is True):
+                border = inner
         if border is None:
             raise FlowError(f"Mixed spent {unit_id} lacks a closed card border")
         reading["current_card_border"] = border

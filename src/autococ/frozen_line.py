@@ -639,6 +639,80 @@ def _closed_dragon_card_border_18_647_2(current: Any,
     return _closed_dragon_exact_gray_border_18_647_2(current, bbox)
 
 
+def _closed_dragon_inner_outline_18_647_2(
+        current: Any, bbox: tuple[int, int, int, int],
+        portrait_origin: tuple[int, int]) -> dict | None:
+    """Locate one complete current-card inner rim near the frozen portrait.
+
+    The versioned pixels come from an existing TRAIN development frame.  This
+    proof is only used after the source portrait and identity have been bound;
+    it deliberately does not extend the standalone gray-border detector.
+    """
+    import cv2
+    import numpy as np
+    from .unit_catalog import CATALOG_ROOT
+
+    left, top, right, bottom = bbox
+    if (current.shape[:2] != (720, 1280) or not 80 <= right - left <= 105 or
+            not 590 <= top <= 605 or not 705 <= bottom <= 715 or
+            not 8 <= left < right <= 1272):
+        return None
+    template_path = CATALOG_ROOT / "units" / "dragon_spent_inner_outline_18_647_2.png"
+    try:
+        template_bytes = template_path.read_bytes()
+    except OSError:
+        return None
+    template_sha = sha256(template_bytes).hexdigest()
+    if template_sha != "7dfc78c7b215fd64af5d5791c4e73e9f05578e7669cf19f14518472bda604f20":
+        return None
+    template = cv2.imdecode(np.frombuffer(template_bytes, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+    if template is None or template.shape != (111, 83):
+        return None
+    mask = np.zeros(template.shape, dtype=bool)
+    segments = {
+        "upper": (slice(1, 5), slice(None)),
+        "lower": (slice(-4, None), slice(None)),
+        "left": (slice(None), slice(None, 4)),
+        "right": (slice(None), slice(-4, None)),
+        "upper_join": (slice(0, 1), slice(16, 66)),
+    }
+    for ys, xs in segments.values():
+        mask[ys, xs] = True
+    gray = cv2.cvtColor(current, cv2.COLOR_BGR2GRAY)
+    candidates = []
+    for x in range(left - 8, left + 9):
+        x1 = x + 89
+        if (abs((x + x1 - left - right) / 2) > 5 or
+                abs(x1 - right) > 8 or abs(x - portrait_origin[0]) > 3):
+            continue
+        for y in range(top - 3, top + 4):
+            if (not 590 <= y <= 600 or not 705 <= y + 116 <= 715 or
+                    abs(y - portrait_origin[1]) > 3):
+                continue
+            inner = gray[y + 2:y + 113, x + 3:x + 86]
+            if inner.shape != template.shape:
+                continue
+            errors = np.abs(inner.astype(np.int16) - template.astype(np.int16))
+            segment_errors = {name: int(errors[ys, xs].max())
+                              for name, (ys, xs) in segments.items()}
+            if any(error > 4 for error in segment_errors.values()):
+                continue
+            candidates.append((x, y, segment_errors))
+    if len(candidates) != 1:
+        return None
+    x, y, segment_errors = candidates[0]
+    return {"method": "18.647.2_dragon_source_bound_inner_outline",
+            "source_card_bbox": list(bbox),
+            "physical_card_bbox": [x, y, x + 89, y + 116],
+            "physical_offset_from_source": [x - left, y - top,
+                                            x + 89 - right, y + 116 - bottom],
+            "inner_outline_template_sha256": template_sha,
+            "segment_max_errors": segment_errors,
+            "masked_max_error": int(max(segment_errors.values())),
+            "required_pixels": int(mask.sum()), "unique_match": True,
+            "proof_roi": [x + 3, y + 2, x + 86, y + 113]}
+
+
 def _post_troop_reading(session: Any, post_path: Any, source_path: str,
                         point: tuple[int, int], bbox: tuple[int, int, int, int], *,
                         unit_id: str | None = None) -> dict:
@@ -743,12 +817,17 @@ def _post_troop_reading(session: Any, post_path: Any, source_path: str,
                                       max(0, left - 12):min(1280, right + 12)], cv2.COLOR_BGR2GRAY)
     portrait = cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY)
     matches = []
+    portrait_peaks = []
     for scale in (1., 1.05, 1.1):
         template = cv2.resize(portrait, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
         if template.shape[0] <= region.shape[0] and template.shape[1] <= region.shape[1]:
-            _, score, _, (x, y) = cv2.minMaxLoc(cv2.matchTemplate(region, template, cv2.TM_CCOEFF_NORMED))
+            match_map = cv2.matchTemplate(region, template, cv2.TM_CCOEFF_NORMED)
+            _, score, _, (x, y) = cv2.minMaxLoc(match_map)
             if math.isfinite(score):
                 matches.append((score, scale, x, y))
+                for py, px in zip(*np.where(match_map >= .92)):
+                    portrait_peaks.append((round(max(0, left - 12) + int(px) - 20 * scale),
+                                           round(max(0, top + 15) + int(py) - 38 * scale)))
     if not matches:
         return {}
     score, scale, x, y = max(matches)
@@ -761,6 +840,19 @@ def _post_troop_reading(session: Any, post_path: Any, source_path: str,
         border = _closed_card_border(current, bbox)
         if border is None and unit_id == "dragon":
             border = _closed_dragon_card_border_18_647_2(current, bbox)
+        if border is None and unit_id == "dragon" and portrait_peaks and all(
+                abs(px - estimated_left) <= 6 and abs(py - estimated_top) <= 6
+                for px, py in portrait_peaks):
+            border = _closed_dragon_inner_outline_18_647_2(
+                current, bbox, (estimated_left, estimated_top))
+            if border is not None:
+                border.update({"frame": str(post_path),
+                               "frame_sha256": _file_sha256(post_path),
+                               "source_frame": str(source_path),
+                               "source_sha256": _file_sha256(source_path),
+                               "client_version": _CLIENT_VERSION,
+                               "portrait_score": score,
+                               "unique_portrait": True})
         if border is None:
             return {}
     from .locator import scale_box
