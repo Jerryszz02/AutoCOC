@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from autococ.config import load_config
 from autococ.device import DeviceManager
+from autococ.errors import AutoCOCError
 from autococ.session import GameSession
 from autococ.vision_collection import collect_samples
 
@@ -43,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
                                  max_search_cost_gold=args.max_search_cost_gold)
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return 0 if result["status"] == "completed" else 1
-    except (OSError, ValueError) as exc:
+    except (AutoCOCError, OSError, ValueError) as exc:
         print(json.dumps({"status": "failed", "reason": str(exc)}, ensure_ascii=False))
         return 1
     finally:

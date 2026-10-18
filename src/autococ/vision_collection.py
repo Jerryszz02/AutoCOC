@@ -193,6 +193,7 @@ def collect_samples(session, output: Path, *, max_samples: int,
     manifest.touch()
     _write_json(output / "collection.json", report)
     current = None
+    exit_started = False
     committed = 0
     try:
         home = return_to_village(session)
@@ -295,6 +296,7 @@ def collect_samples(session, output: Path, *, max_samples: int,
             if report["reason"]:
                 break
         if current is not None:
+            exit_started = True  # Never retry an exit whose input became uncertain.
             _safe_exit(session)
         home = return_to_village(session)
         report["returned_home"] = True
@@ -318,20 +320,30 @@ def collect_samples(session, output: Path, *, max_samples: int,
     except (AutoCOCError, OSError, ValueError) as exc:
         report["status"] = "failed"
         report["reason"] = str(exc)
-        if not report["attempts"]:
-            last = getattr(session, "last_snapshot", None)
-            if last is not None and last.scene in {"village", "search", "training"}:
-                try:
+        last = getattr(session, "last_snapshot", None)
+        recover_preview = (not exit_started and current is not None
+                           and current.scene == "enemy_village" and bool(report["attempts"])
+                           and report["attempts"][-1]["state"] == "candidate_confirmed")
+        recover_home = (not report["attempts"] and last is not None
+                        and last.scene in {"village", "search", "training"})
+        if recover_preview or recover_home:
+            try:
+                if recover_preview:
+                    # Confirmation permits a fresh observation, never an exit
+                    # using the old preview or after an uncertain paid input.
+                    _safe_exit(session)
+                    home = return_to_village(session)
+                else:
                     home = return_to_village(session, initial_snapshot=last)
-                    report["returned_home"] = True
-                    after = (home.observations.get("resources") or {}).get("gold")
-                    if (home.observations.get("resource_source") == "village_inventory"
-                            and type(after) is int and after >= 0):
-                        report["home_gold_after"] = after
-                        if report["home_gold_before"] is not None and report["home_gold_before"] >= after:
-                            report["actual_search_cost_gold"] = report["home_gold_before"] - after
-                except AutoCOCError as recovery_error:
-                    report["recovery_error"] = str(recovery_error)
+                report["returned_home"] = True
+                after = (home.observations.get("resources") or {}).get("gold")
+                if (home.observations.get("resource_source") == "village_inventory"
+                        and type(after) is int and after >= 0):
+                    report["home_gold_after"] = after
+                    if report["home_gold_before"] is not None and report["home_gold_before"] >= after:
+                        report["actual_search_cost_gold"] = report["home_gold_before"] - after
+            except (AutoCOCError, OSError, ValueError) as recovery_error:
+                report["recovery_error"] = str(recovery_error)
     except BaseException:
         report["status"] = "interrupted"
         report["reason"] = "Collection interrupted after recorded actions"

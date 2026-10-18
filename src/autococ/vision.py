@@ -669,7 +669,8 @@ class ScreenshotRecognizer:
             observations["resources"] = resources
             observations["resource_evidence"] = evidence
             observations["resource_source"] = "village_inventory"
-            observations["resource_capacities"] = self._village_resource_capacities(texts)
+            observations["resource_capacities"] = self._village_resource_capacities(
+                texts, new_home_hud=new_home_hud)
             observations["collectibles"] = detect_collectibles(path, baseline_resolution=self.baseline_resolution)
         elif scene == SCENE_TRAINING:
             observations["army"] = self._army_capacities(path, texts, resolution)
@@ -2414,10 +2415,14 @@ class ScreenshotRecognizer:
                     evidence[name].update(tight_evidence)
         return values, evidence
 
-    def _village_resource_capacities(self, texts: list[OCRText]) -> dict[str, int | None]:
+    def _village_resource_capacities(
+        self, texts: list[OCRText], *, new_home_hud: bool = False,
+    ) -> dict[str, int | None]:
         """Only a current, unambiguous HUD numerator/denominator proves capacity."""
         width, height = self.baseline_resolution
-        bands = {"gold": (.025, .085), "elixir": (.12, .18), "dark_elixir": (.215, .28)}
+        bands = ({"gold": (.025, .085), "elixir": (.095, .155), "dark_elixir": (.165, .22)}
+                 if new_home_hud else
+                 {"gold": (.025, .085), "elixir": (.12, .18), "dark_elixir": (.215, .28)})
         values: dict[str, int | None] = {name: None for name in bands}
         for name, (top, bottom) in bands.items():
             candidates = [parse_capacity(item.text) for item in texts

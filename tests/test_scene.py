@@ -376,6 +376,20 @@ class SceneTests(unittest.TestCase):
             self.assertIsNone(conflicting_gold.observations["resources"]["gold"])
             provider.recognize_line.return_value = [OCRText("27280000", .95, (2016, 38, 2480, 120))]
 
+            original_texts = provider.recognize.return_value
+            provider.recognize.return_value = original_texts[:2] + [
+                OCRText("27280000/29000000", .99, (2016, 48, 2440, 104)),
+                OCRText("19780430/29000000", .99, (2016, 148, 2440, 184)),
+                OCRText("286817/400000", .99, (2128, 246, 2440, 296)),
+                original_texts[-1],
+            ]
+            ratios = recognizer.recognize(path)
+            self.assertEqual(ratios.scene, SCENE_VILLAGE)
+            self.assertEqual(ratios.observations["resource_capacities"], {
+                "gold": 29000000, "elixir": 29000000, "dark_elixir": 400000,
+            })
+            provider.recognize.return_value = original_texts
+
             image[590:665, 45:120] = 0
             cv2.imwrite(str(path), cv2.resize(image, (2560, 1440), interpolation=cv2.INTER_NEAREST))
             missing_icon = recognizer.recognize(path)

@@ -1,7 +1,9 @@
 """Collection never deploys troops and preserves uncertain paid-input evidence."""
 
 import hashlib
+import io
 import json
+from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import time
@@ -12,11 +14,12 @@ from unittest.mock import patch
 import cv2
 import numpy as np
 
-from autococ.errors import FlowError
+from autococ.errors import ConfigError, DeviceConnectionError, FlowError
 from autococ.ocr import OCRText
 from autococ.scene import SceneSnapshot
 from autococ.vision_collection import collect_samples
 from training.vision.data import validate
+from scripts import collect_vision_samples
 
 
 class FakeSession:
@@ -195,6 +198,55 @@ class VisionCollectionTests(unittest.TestCase):
         self.assertFalse(leave.called)
         self.assertEqual(json.loads((output / "collection.json").read_text())["status"], "failed")
 
+    def test_sample_write_failure_recovers_confirmed_preview_with_fresh_frame(self):
+        with patch("autococ.vision_collection._save_sample", side_effect=OSError("disk full")):
+            report, output, home, _, leave = self.collect()
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["reason"], "disk full")
+        self.assertTrue(report["returned_home"])
+        self.assertEqual(report["actual_search_cost_gold"], 10)
+        self.assertEqual(home.call_count, 2)
+        leave.assert_called_once_with(self.session, self.exit_frame)
+        self.assertEqual(json.loads((output / "collection.json").read_text()),
+                         json.loads(json.dumps(report)))
+
+    def test_recovery_rejects_fresh_battle_frame(self):
+        self.session.fresh = self.frame("battle", "battle")
+        with patch("autococ.vision_collection._save_sample", side_effect=OSError("disk full")):
+            report, _, home, _, leave = self.collect()
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["reason"], "disk full")
+        self.assertIn("observed battle", report["recovery_error"])
+        self.assertFalse(report["returned_home"])
+        self.assertEqual(home.call_count, 1)
+        leave.assert_not_called()
+
+    def test_recovery_observation_failure_preserves_original_error(self):
+        with patch("autococ.vision_collection._save_sample", side_effect=OSError("disk full")), \
+                patch.object(self.session, "observe", side_effect=OSError("capture failed")):
+            report, _, home, _, leave = self.collect()
+        self.assertEqual(report["reason"], "disk full")
+        self.assertEqual(report["recovery_error"], "capture failed")
+        self.assertFalse(report["returned_home"])
+        self.assertEqual(home.call_count, 1)
+        leave.assert_not_called()
+
+    def test_second_paid_transition_cannot_recover_using_previous_preview(self):
+        report, _, home, _, leave = self.collect(
+            max_samples=2, candidates=[self.scout1, FlowError("next uncertain")])
+        self.assertEqual(report["attempts"][-1]["state"], "input_uncertain")
+        self.assertFalse(report["returned_home"])
+        self.assertEqual(home.call_count, 1)
+        leave.assert_not_called()
+
+    def test_exit_failure_is_not_retried(self):
+        with patch("autococ.vision_collection._safe_exit", side_effect=FlowError("exit uncertain")) as safe_exit:
+            report, _, home, _, _ = self.collect()
+        self.assertEqual(report["reason"], "exit uncertain")
+        self.assertFalse(report["returned_home"])
+        self.assertEqual(home.call_count, 1)
+        safe_exit.assert_called_once_with(self.session)
+
     def test_short_preview_stops_next_search_and_uses_fresh_exit_frame(self):
         self.scout1 = self.frame("short-scout", "enemy_village", fee=20,
                                  enemy_gold=300, countdown=4)
@@ -294,6 +346,27 @@ class VisionCollectionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             collect_samples(self.session, self.root, max_samples=1,
                             max_search_cost_gold=1)
+
+
+class VisionCollectionCliTests(unittest.TestCase):
+    def test_framework_setup_failures_return_structured_json(self):
+        for stage, error in (("config", ConfigError("missing config")),
+                             ("device", DeviceConnectionError("emulator unavailable")),
+                             ("session", FlowError("session unavailable"))):
+            with self.subTest(stage=stage), TemporaryDirectory() as directory, \
+                    patch.object(collect_vision_samples, "load_config") as config, \
+                    patch.object(collect_vision_samples, "DeviceManager") as manager, \
+                    patch.object(collect_vision_samples.GameSession, "connect") as connect, \
+                    redirect_stdout(io.StringIO()) as stdout:
+                target = {"config": config, "device": manager.return_value.connect,
+                          "session": connect}[stage]
+                target.side_effect = error
+                result = collect_vision_samples.main([
+                    "--output", str(Path(directory) / "samples"),
+                    "--max-samples", "1", "--max-search-cost-gold", "10"])
+                self.assertEqual(result, 1)
+                self.assertEqual(json.loads(stdout.getvalue()),
+                                 {"status": "failed", "reason": str(error)})
 
 
 if __name__ == "__main__":

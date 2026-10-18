@@ -17,10 +17,11 @@ def _version(source: dict) -> str:
     return source.get("client_version") or "unknown"
 
 
-def _counts(items: list[tuple[dict, dict]]) -> dict:
+def _counts(items: list[tuple[dict, dict]], *, label: str | None = None) -> dict:
     sources = [source for _, source in items]
     return {"images": len(items),
-            "instances": sum(len(row.get("boxes", [])) for row, _ in items),
+            "instances": sum(sum(label is None or box["class"] == label
+                                 for box in row.get("boxes", [])) for row, _ in items),
             "leakage_groups": len({row["group_id"] for row, _ in items}),
             "source_sessions": len({source["source_session"] for source in sources
                                     if source.get("source_session")}),
@@ -76,10 +77,12 @@ def coverage_report(scene_root: Path, building_root: Path, *,
             enabled = sorted(by_class)
         per_class = {}
         for label in all_classes:
-            splits = {split: _counts(by_class[label][split]) for split in SPLITS}
+            class_label = label if task == "building" else None
+            splits = {split: _counts(by_class[label][split], label=class_label) for split in SPLITS}
             formal = {split: _counts([(row, source) for row, source in by_class[label][split]
                                       if source.get("review_method") == "human"
-                                      and _version(source) == current_client_version])
+                                      and _version(source) == current_client_version],
+                                     label=class_label)
                       for split in SPLITS}
             raw_test, eligible_test = splits["test"], formal["test"]
             if task == "scene":

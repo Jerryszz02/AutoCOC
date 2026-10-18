@@ -14,6 +14,7 @@ import numpy as np
 
 from scripts.vision_candidate_coverage import main as candidate_coverage_main
 from training.vision.candidate_coverage import candidate_coverage_report
+from training.vision.coverage import coverage_report
 from training.vision.data import (DatasetError, _pixel_hash, leakage_groups, load_taxonomy,
                                   sha256, split, write_jsonl)
 
@@ -375,6 +376,53 @@ class CandidateCoverageTests(unittest.TestCase):
                 self.assertEqual(candidate_coverage_main(args), 2)
             self.assertIn("Taxonomy must be an object", stderr.getvalue())
             self.assertFalse(output.exists())
+
+
+class FrozenCoverageTests(unittest.TestCase):
+    def test_building_class_instances_count_only_matching_boxes(self) -> None:
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            scene, building = root / "scene", root / "building"
+            scene.mkdir()
+            building.mkdir()
+            (scene / "taxonomy.json").write_text(
+                json.dumps({"scene_classes": [], "unknown_scene": "unknown"}), encoding="utf-8")
+            (building / "class_mapping.json").write_text(
+                json.dumps({"output_indices": {"town_hall": 0, "air_defense": 1}}),
+                encoding="utf-8")
+            rows = [
+                {"sample_id": "one", "image": "images/one.png", "group_id": "one",
+                 "boxes": [{"class": "town_hall"}, {"class": "town_hall"},
+                           {"class": "air_defense"}]},
+                {"sample_id": "two", "image": "images/two.png", "group_id": "two",
+                 "boxes": [{"class": "air_defense"}]},
+            ]
+            sources = [{"sample_id": row["sample_id"], "source_session": row["sample_id"],
+                        "layout_group_id": row["sample_id"], "review_method": "human",
+                        "client_version": "18.647.2"} for row in rows]
+
+            def read_fixture(path: Path) -> list[dict]:
+                if path.parent == scene:
+                    return []
+                return sources if path.name == "reviewed-manifest.jsonl" else rows
+
+            def verified(root: Path, task: str) -> dict:
+                return {"paths": {"train": [], "val": [],
+                                  "test": [] if task == "scene" else [row["image"] for row in rows]},
+                        "snapshot_sha256": "snapshot", "split_sha256": "split",
+                        "metadata": {"prototype_only": False, "review_policy": "human"}}
+
+            acceptance = Path(__file__).resolve().parents[1] / "training/vision/acceptance-v1.json"
+            with patch("training.vision.coverage.verify_snapshot", side_effect=verified), \
+                 patch("training.vision.coverage.read_jsonl", side_effect=read_fixture):
+                report = coverage_report(scene, building, acceptance_path=acceptance,
+                                         current_client_version="18.647.2")
+            classes = report["building"]["classes"]
+            self.assertEqual(report["building"]["splits"]["test"]["instances"], 4)
+            self.assertEqual(classes["town_hall"]["splits"]["test"]["instances"], 2)
+            self.assertEqual(classes["air_defense"]["splits"]["test"]["instances"], 2)
+            self.assertEqual(classes["town_hall"]["human_current_version"]["test"]["instances"], 2)
+            self.assertEqual(classes["air_defense"]["formal_test_deficit"]["test_instances"], 48)
 
 
 if __name__ == "__main__":
