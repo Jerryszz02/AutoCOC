@@ -1,0 +1,67 @@
+{
+  "purpose": "current_frame_preparation_countdown_geometry_regression_not_training_ground_truth",
+  "client_version": "18.647.2",
+  "source_events": "reports/completion-20261015/live/20261016-180147-656684-466b9586/events.jsonl",
+  "source_events_sha256": "aeaafc055d9580e322d6a3790c90cd7a56b37987f227f24eef4bf145a5c2fec1",
+  "cached_ocr_filter": "Only exact heading 开战倒计时 and timer 25秒 with boxes wholly inside 1280x720 center-top rectangle [500,0,750,100]; all other OCR discarded. No OCR run for this fixture.",
+  "human_reviewed": false,
+  "counts_toward_battle_acceptance": false,
+  "frames": [
+    {
+      "source_frame": "reports/completion-20261015/live/20261016-180147-656684-466b9586/frames/00009-scout-camera-ready.png",
+      "source_sha256": "88a5742dfd5af664122f7b0443d9c3fb583c38e4be2f0cbce50b2f866496ae2c",
+      "scene": "enemy_village",
+      "cached_ocr": [
+        {
+          "text": "开战倒计时",
+          "confidence": 0.99959,
+          "bbox": [
+            584,
+            14,
+            680,
+            39
+          ]
+        },
+        {
+          "text": "25秒",
+          "confidence": 0.99983,
+          "bbox": [
+            598,
+            32,
+            682,
+            80
+          ]
+        }
+      ],
+      "expected_seconds": 25
+    },
+    {
+      "source_frame": "reports/completion-20261015/live/20261016-180147-656684-466b9586/frames/00027-scout-camera-ready.png",
+      "source_sha256": "f8ecf873ed790852201ef8b1991bb57f914bbf560e7af4c0e47db2d5814c0805",
+      "scene": "enemy_village",
+      "cached_ocr": [
+        {
+          "text": "开战倒计时",
+          "confidence": 0.99972,
+          "bbox": [
+            583,
+            12,
+            681,
+            40
+          ]
+        },
+        {
+          "text": "25秒",
+          "confidence": 0.98403,
+          "bbox": [
+            594,
+            30,
+            686,
+            88
+          ]
+        }
+      ],
+      "expected_seconds": 25
+    }
+  ]
+}

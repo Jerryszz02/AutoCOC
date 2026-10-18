@@ -1,0 +1,14 @@
+{
+  "client_version": "18.647.2",
+  "source": "reports/completion-20261015/probes/20261016-035742-manual-probed-skill/frames/00012-line-boundary.png",
+  "source_sha256": "d30cba448be9252bdd4fda8adfbf9bc838af665b6404f90b1032f4272ff3794d",
+  "crop_native_xyxy": [
+    170,
+    1140,
+    1100,
+    1440
+  ],
+  "transform": "exact native BGR crop; reinsert into zero-valued 2560x1440 BGR canvas at the same coordinates for recognition replay",
+  "fixture_sha256": "78be05d817c5b6ff8feece63fbec048d631dc8577e518d52c409253d4b81c3ce",
+  "purpose": "full-vs-local current dragon x1 OCR regression; no enemy name or resources retained"
+}

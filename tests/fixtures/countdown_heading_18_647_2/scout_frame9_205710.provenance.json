@@ -1,0 +1,45 @@
+{
+  "client_version": "18.647.2",
+  "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-205710-668546-bd6c872b\\frames\\00009-scout-camera-ready.png",
+  "source_sha256": "f6e2cc0e9136c954876c264e70b732c1646805dfd74340ee8f10225f9079673d",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "native_preserved_xyxy": [
+    1150,
+    0,
+    1425,
+    180
+  ],
+  "native_preserved_pixel_sha256": "57f46413d67f3fef9d402b893b0fb171ba62f64fadeb47df6017e6280ebcbd97",
+  "output_sha256": "a72846fc70435ca5466fa21041e5e26812f45b77d11f319d13bad1dba2d49d8e",
+  "output_preserved_pixel_sha256": "57f46413d67f3fef9d402b893b0fb171ba62f64fadeb47df6017e6280ebcbd97",
+  "outside_preserved_area": "black masked",
+  "events_source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-205710-668546-bd6c872b\\events.jsonl",
+  "events_sha256": "48670333db0d914d6eb9f73fc8f3218d79477f7bf798ab66a611a9e6b02d9b24",
+  "cached_ocr_filter": "Only OCR whose bbox is wholly within baseline x575..720 and top y<90; no other text retained.",
+  "cached_ocr_heading_and_timer": [
+    {
+      "text": "开战倒计时↑",
+      "confidence": 0.89474,
+      "bbox": [
+        580,
+        10,
+        710,
+        42
+      ]
+    },
+    {
+      "text": "25秒",
+      "confidence": 0.99985,
+      "bbox": [
+        600,
+        36,
+        692,
+        80
+      ]
+    }
+  ],
+  "purpose": "Development-only source-bound current-frame heading OCR regression; not human truth or heldout."
+}

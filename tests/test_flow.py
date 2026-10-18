@@ -17,6 +17,20 @@ from autococ.session import GameSession
 
 
 class FlowTests(unittest.TestCase):
+    def test_interrupted_model_free_line_retains_uncertain_input_without_vision_claim(self):
+        runner = self.runner(("battle",))
+        receipt = {"mode": "model_free_line_continuous", "attempted_placements": 1,
+                   "issued_placements": 0, "completed": False, "verified": False,
+                   "actions": [{"status": "uncertain"}]}
+        self.session.frozen_line_receipt = receipt
+        with patch("autococ.combat.run_battle", side_effect=KeyboardInterrupt):
+            stats = runner.run_profile("test")
+        result = stats.task_results[-1]
+        self.assertEqual(result.metrics["deployment"], receipt)
+        self.assertEqual(result.metrics["line_execution"]["status"], "cancelled")
+        self.assertNotIn("vision_agent", result.metrics)
+        self.assertEqual(stats.battles_completed, 0)
+
     def test_interrupted_continuous_battle_retains_partial_inputs_in_report(self):
         runner = self.runner(("battle",))
         receipt = {"plan_id": "frozen", "input_count": 5, "attempted_placements": 2,
@@ -300,6 +314,89 @@ class FlowTests(unittest.TestCase):
         self.session.back.assert_not_called()
         self.assertEqual([result.task for result in stats.task_results], ["collect"])
 
+    def test_maintenance_profile_stops_on_unexpected_battle_scene_before_social_tasks(self) -> None:
+        for scene in ("enemy_village", "battle"):
+            with self.subTest(scene=scene):
+                runner = self.runner(("launch", "collect", "request", "donate"))
+                village = self.snapshot("village")
+                frame_path = self.root / f"{scene}.png"
+                frame_path.write_bytes(b"unexpected-scene")
+                unexpected = replace(self.snapshot(scene), screenshot_path=frame_path)
+                unexpected.observations["buttons"] = []
+                frames = iter((village, unexpected))
+
+                def observe(*_args, **_kwargs):
+                    self.session.last_snapshot = next(frames)
+                    return self.session.last_snapshot
+
+                self.session.observe.reset_mock(side_effect=True)
+                self.session.observe.side_effect = observe
+                stats = runner.run_profile("test")
+                self.assertEqual([(result.task, result.status) for result in stats.task_results],
+                                 [("launch", "succeeded"), ("collect", "failed")])
+                self.assertIn(scene, stats.task_results[-1].reason)
+                self.assertEqual(stats.task_results[-1].evidence, [unexpected.screenshot_path])
+                self.assertEqual(stats.battles_completed, 0)
+                self.assertEqual(stats.attempts, 2)
+                self.assertEqual([call.args[0] for call in self.session.observe.call_args_list],
+                                 ["launch-home-check", "collect-before"])
+                for action in (self.session.tap, self.session.click, self.session.click_template,
+                               self.session.back, self.session.swipe):
+                    action.assert_not_called()
+
+    def test_disabled_social_tasks_do_not_input_on_clan_chat(self) -> None:
+        runner = self.runner(("collect",))
+        chat = self.snapshot("clan_chat")
+        chat.observations["buttons"] = [
+            {"name": "send", "point": [500, 500], "text": "Send"},
+            {"name": "donate", "point": [200, 400], "text": "Donate"},
+        ]
+        self.session.last_snapshot = chat
+        self.session.observe.return_value = chat
+        stats = runner.run_profile("test")
+        self.assertEqual([(result.task, result.status) for result in stats.task_results],
+                         [("collect", "failed")])
+        self.assertIn("clan_chat", stats.task_results[0].reason)
+        self.assertEqual(stats.task_results[0].evidence, [chat.screenshot_path])
+        self.assertEqual([call.args[0] for call in self.session.observe.call_args_list], ["collect-before"])
+        for action in (self.session.tap, self.session.click, self.session.click_template,
+                       self.session.back, self.session.swipe):
+            action.assert_not_called()
+
+    def test_completed_maintenance_profile_never_observes_disabled_social_chat(self) -> None:
+        runner = self.runner(("launch", "collect"))
+        village = self.snapshot("village")
+        collect_frame = self.root / "collect-village.png"
+        collect_frame.write_bytes(b"collect-village")
+        collect = SceneSnapshot("village", .95, collect_frame, {
+            "resource_source": "village_inventory",
+            "resources": {"gold": 100, "elixir": 100, "dark_elixir": 100},
+            "collectibles": [],
+        })
+        chat_frame = self.root / "social-chat.png"
+        chat_frame.write_bytes(b"social-chat")
+        chat = SceneSnapshot("clan_chat", .95, chat_frame, {"buttons": [
+            {"name": "send", "point": [500, 500], "text": "Send"},
+            {"name": "donate", "point": [200, 400], "text": "Donate"},
+        ]})
+        frames = iter((village, collect))
+
+        def observe(*_args, **_kwargs):
+            self.session.last_snapshot = next(frames, chat)
+            return self.session.last_snapshot
+
+        self.session.observe.side_effect = observe
+        stats = runner.run_profile("test")
+        self.assertEqual([(result.task, result.status) for result in stats.task_results],
+                         [("launch", "succeeded"), ("collect", "skipped")])
+        self.assertEqual([call.args[0] for call in self.session.observe.call_args_list],
+                         ["launch-home-check", "collect-before"])
+        self.assertEqual((stats.attempts, stats.skipped), (1, 1))
+        self.assertEqual(stats.battles_completed, 0)
+        for action in (self.session.tap, self.session.click, self.session.click_template,
+                       self.session.back, self.session.swipe):
+            action.assert_not_called()
+
     def test_unknown_launch_scene_does_not_trigger_blind_recovery(self) -> None:
         runner = self.runner(("launch",))
         self.session.last_snapshot = self.snapshot("unknown", 0.0)
@@ -311,6 +408,33 @@ class FlowTests(unittest.TestCase):
         self.session.back.assert_not_called()
         self.session.tap.assert_not_called()
         self.session.click.assert_not_called()
+
+    def test_account_in_use_launch_fails_immediately_without_reload_or_next_task(self) -> None:
+        runner = self.runner(("launch", "battle"))
+        occupied = self.snapshot("account_in_use")
+        occupied.observations["buttons"] = []
+        self.session.last_snapshot = occupied
+        self.session.observe.return_value = occupied
+        with patch("autococ.combat.run_battle") as battle:
+            stats = runner.run_profile("test")
+        self.assertEqual([(result.task, result.status) for result in stats.task_results],
+                         [("launch", "failed")])
+        self.assertIn("account_in_use", stats.task_results[0].reason)
+        self.assertEqual(stats.task_results[0].metrics["retry_actions"], 0)
+        self.assertEqual(stats.task_results[0].evidence, [occupied.screenshot_path])
+        self.session.click.assert_not_called()
+        self.session.tap.assert_not_called()
+        self.session.back.assert_not_called()
+        self.session.wait_for.assert_not_called()
+        battle.assert_not_called()
+
+    def test_account_in_use_return_to_village_never_waits_or_inputs(self) -> None:
+        occupied = self.snapshot("account_in_use")
+        with self.assertRaisesRegex(FlowError, "account_in_use"):
+            return_to_village(self.session, initial_snapshot=occupied)
+        self.session.wait_for.assert_not_called()
+        self.session.click.assert_not_called()
+        self.session.back.assert_not_called()
 
     def test_explicit_recover_uses_single_retry_and_requires_verified_village(self) -> None:
         runner = self.runner(("recover",))
@@ -422,6 +546,27 @@ class FlowTests(unittest.TestCase):
         self.assertNotIn("request", targets[0])
         self.assertIn("clan_chat", targets[0])
         self.assertNotIn("clan_chat", targets[1])
+
+    def test_return_home_waits_for_overlay_to_finish_without_more_input(self) -> None:
+        partial = self.snapshot()
+        partial.observations["buttons"] = [{"name": "shop"}]
+        home = self.snapshot()
+        self.session.observe.side_effect = [self.snapshot("popup"), home]
+        with patch("autococ.flow.time.sleep"):
+            self.assertIs(return_to_village(self.session, initial_snapshot=partial), home)
+        self.assertEqual(self.session.observe.call_count, 2)
+        self.session.back.assert_not_called()
+        self.session.click.assert_not_called()
+
+    def test_background_shop_never_counts_as_verified_home(self) -> None:
+        partial = self.snapshot()
+        partial.observations["buttons"] = [{"name": "shop"}]
+        self.session.observe.return_value = partial
+        with patch("autococ.flow.time.sleep"), self.assertRaisesRegex(FlowError, "HOME navigation evidence"):
+            return_to_village(self.session, initial_snapshot=partial)
+        self.assertEqual(self.session.observe.call_count, 2)
+        self.session.back.assert_not_called()
+        self.session.click.assert_not_called()
 
     def test_recovery_does_not_repeat_back_without_scene_progress(self) -> None:
         self.session.observe.return_value = self.snapshot("request")

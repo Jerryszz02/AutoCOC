@@ -1,0 +1,55 @@
+{
+  "kind": "warden_yellow_ready_anonymous_train_fixture_v1",
+  "source_role": "TRAIN_development_offline_pixel_prototype",
+  "human_review": false,
+  "formal_acceptance": false,
+  "original_failure_unchanged": true,
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "retained_native_rect_xyxy": [
+    1000,
+    1010,
+    1690,
+    1440
+  ],
+  "mask": "black_outside_rectangle_keep_inside_bytes",
+  "rows": [
+    {
+      "source": "live/20261017-113248-916295-c8ee9009/frames/00162-battle-settlement.png",
+      "source_sha256": "034bb8c43cf11381de496cd9b7622678f346f6edb3ec285bd4800f2a86cc0201",
+      "fixture": "00162-battle-settlement.png",
+      "fixture_sha256": "7ebf6c547511ca09c76ab4c82fdf6866dd6e574853c9d16063b01012d4b6c33c",
+      "retained_pixels_sha256": "99f75153657f0d8f87692b937990232fafec27cd5220675ff5175d00950d78e7"
+    },
+    {
+      "source": "live/20261017-113248-916295-c8ee9009/frames/00165-battle-settlement.png",
+      "source_sha256": "dfa3c70d050b1b23d38475380bac87218113687408311381aeb419d24711567e",
+      "fixture": "00165-battle-settlement.png",
+      "fixture_sha256": "b0194f6d20cd9c3ce1a44726583bc66a6b5eb7fa06aee6c0f520ae1e4d3e7225",
+      "retained_pixels_sha256": "498cdf7c415323c8dc10ff1e9bd3e416b516434ea6547b0ef168f88f3e25ccbb"
+    },
+    {
+      "source": "live/20261017-113248-916295-c8ee9009/frames/00166-battle-settlement.png",
+      "source_sha256": "2d695f1e6ccd0b944726f288296536b0d1a3a111f176d548c1b6fcfb103da93e",
+      "fixture": "00166-battle-settlement.png",
+      "fixture_sha256": "6eb9680e94a5b9215efe87dca5c61f84cc0e7eeb51a884239954ffed78bec28b",
+      "retained_pixels_sha256": "ab626a3d7f8a90d5e52e171a16de9bb209c8bbb6be670f90619a411e24ad089a"
+    },
+    {
+      "source": "live/20261017-113248-916295-c8ee9009/frames/00167-battle-settlement.png",
+      "source_sha256": "7f02106b0f0d273c9e9c8a66e148ef5e65b2b0000b68443e6fc8699fae0c713d",
+      "fixture": "00167-battle-settlement.png",
+      "fixture_sha256": "65fb3cbf4a12dbd8402883a9014c4973c14ff7d235bc169126716ada5a1fc54a",
+      "retained_pixels_sha256": "cdf66bc96d7f531833a77dd0e276aedbbf21f48b1aadf26a99b8993a554b1796"
+    },
+    {
+      "source": "live/20261017-113248-916295-c8ee9009/frames/00168-battle-settlement.png",
+      "source_sha256": "4efff7312fd3ef2990b5c43bf4caa8b4abe251ce997c410e23564a278178bab6",
+      "fixture": "00168-battle-settlement.png",
+      "fixture_sha256": "e80c531d27e8edebdc59fb4f85fb51875fa914e6f25654724a9774a15ac49731",
+      "retained_pixels_sha256": "6a5c7d415477a002da5a2f8e42910f0fdc54f968a9b88c6e1cdee58baf551034"
+    }
+  ]
+}

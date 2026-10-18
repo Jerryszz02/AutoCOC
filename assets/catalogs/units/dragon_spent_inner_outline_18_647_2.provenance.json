@@ -1,0 +1,19 @@
+{
+  "schema": "autococ-versioned-card-inner-outline-v1",
+  "client_version": "18.647.2",
+  "unit_id": "dragon",
+  "source_role": "existing_TRAIN_development_fixture",
+  "source_fixture": "tests/fixtures/dragon_exact_gray_053700_18_647_2/00099-toolbar.png",
+  "source_fixture_sha256": "87c61d3154ddfa1b5249da73299a44dd359dce26063591216f8b6278cc9f71bc",
+  "source_original_sha256": "8270742f12e4f49ce780c1ba0bc21226c246fa3d235963a81b75df742b4e8546",
+  "source_run": "20261017-053700-913562-8b4d661b",
+  "crop_at_1280x720": [
+    144,
+    597,
+    227,
+    708
+  ],
+  "pixel_transform": "cv2.resize anonymous PNG to 1280x720 INTER_AREA, cv2.COLOR_BGR2GRAY, crop; no 063750 pixels",
+  "asset_sha256": "7dfc78c7b215fd64af5d5791c4e73e9f05578e7669cf19f14518472bda604f20",
+  "not_training_label": true
+}

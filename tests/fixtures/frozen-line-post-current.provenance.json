@@ -1,0 +1,50 @@
+{
+  "frozen-line-00012-toolbar-current.png": {
+    "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261015-215245-013077-d6fb30ed\\frames\\00012-line-zoom-verified.png",
+    "source_sha256": "1c72dc7821edd6621fc1b67be75d8cc53718d28ba1943df1f69c25c1ed62b212",
+    "fixture_sha256": "50b78a26d4c087b4d633338b7b01a749794851a5612355ef4db82a1340c3e983",
+    "retained_roi_1280": [
+      0,
+      545,
+      1280,
+      720
+    ],
+    "derivation": "resize to 1280x720; zero all pixels outside battle toolbar"
+  },
+  "frozen-line-00015-toolbar-current.png": {
+    "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261015-215245-013077-d6fb30ed\\frames\\00015-frozen-line-post.png",
+    "source_sha256": "0a4e47ad587fe9b3dcb1727ba8287ff34a2fc55143946469b77f184c97312968",
+    "fixture_sha256": "c2235a1c1b1d3d6585dc301a132c2c6641a74ef09d0bce4ccd2182e3db79f468",
+    "retained_roi_1280": [
+      0,
+      545,
+      1280,
+      720
+    ],
+    "derivation": "resize to 1280x720; zero all pixels outside battle toolbar"
+  },
+  "frozen-line-00016-toolbar-current.png": {
+    "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261015-215245-013077-d6fb30ed\\frames\\00016-battle-settlement.png",
+    "source_sha256": "da3e4e498182ebf3fdef6b381d526c81f683261bb51e59e6fcbad9324230b76c",
+    "fixture_sha256": "b0591d5191add848fd0a63083eeac72bc8b69aa1765e67a6a0479ddc45169c29",
+    "retained_roi_1280": [
+      0,
+      545,
+      1280,
+      720
+    ],
+    "derivation": "resize to 1280x720; zero all pixels outside battle toolbar"
+  },
+  "frozen-line-00020-toolbar-current.png": {
+    "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261015-215245-013077-d6fb30ed\\frames\\00020-battle-settlement.png",
+    "source_sha256": "d5137e30be3ef3a2e4e3e47fff78743d678e00a618fb78ee52dc96ea53e55310",
+    "fixture_sha256": "4ad9b7853e8725efdd5d020d7bdd94b0efff480803dc27096c6ef5b5e31dc308",
+    "retained_roi_1280": [
+      0,
+      545,
+      1280,
+      720
+    ],
+    "derivation": "resize to 1280x720; zero all pixels outside battle toolbar"
+  }
+}

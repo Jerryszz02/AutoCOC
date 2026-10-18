@@ -1,0 +1,20 @@
+{
+  "client_version": "18.647.2",
+  "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-090242-641838-776de966\\frames\\00037-line-boundary.png",
+  "source_sha256": "45bd4ee688522ff783e2c2f2e064a19635e552985f74be42167c0d6e94a4717e",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "native_preserved_xyxy": [
+    180,
+    1160,
+    1100,
+    1440
+  ],
+  "native_preserved_pixel_sha256": "cd85c026f94ea2c685fff22d7fe628e95902a229c6c508c081b4a0457ac3d329",
+  "output_sha256": "dff45919e5c6bbf456a05b82d62ccefa9f252a14836cf84d458b83d49714f810",
+  "output_preserved_pixel_sha256": "cd85c026f94ea2c685fff22d7fe628e95902a229c6c508c081b4a0457ac3d329",
+  "outside_preserved_area": "black masked",
+  "purpose": "Anonymized independent battle toolbar source/current-frame regression."
+}

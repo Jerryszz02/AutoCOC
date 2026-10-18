@@ -1,0 +1,384 @@
+{
+  "client_version": "18.647.2",
+  "purpose": "development_regression_for_source_bound_89px_spent_balloon_inner_lower_outline_not_training_ground_truth",
+  "human_reviewed": false,
+  "formal_success": false,
+  "counts_toward_acceptance": false,
+  "anonymization": "Native pixels retained only in full timer [1060,0,1500,190] and toolbar [0,1160,2560,1440] rectangles; elsewhere BGR45. Cached OCR retained only if bbox wholly within scaled equivalents.",
+  "source_events": "reports/completion-20261015/live/20261016-181600-526993-cf66942e/events.jsonl",
+  "source_events_sha256": "21ecfc6746be447241bfef6b06db42f0c9bb518d8b77e4539cb76a2fed486f3b",
+  "frames": [
+    {
+      "path": "tests/fixtures/mixed_balloon_spent_89_inner_00013_18_647_2.png",
+      "sha256": "14b9ec0f1c322c760f93b1de8753d0cee4ee16d34eecfcb550c2901caa7e2b03",
+      "source_frame": "reports/completion-20261015/live/20261016-181600-526993-cf66942e/frames/00013-line-boundary.png",
+      "source_sha256": "4b66a4668db275965793cbd0d0497ff2061691985a8ac8d581e4d6ab38049a41",
+      "scene": "enemy_village",
+      "retained_native_rectangles_xyxy": [
+        [
+          0,
+          1160,
+          2560,
+          1440
+        ],
+        [
+          1060,
+          0,
+          1500,
+          190
+        ]
+      ],
+      "retained_baseline_rectangles_xyxy": [
+        [
+          0,
+          580,
+          1280,
+          720
+        ],
+        [
+          530,
+          0,
+          750,
+          95
+        ]
+      ],
+      "cached_ocr": [
+        {
+          "text": "开战倒计时",
+          "confidence": 0.99987,
+          "bbox": [
+            578,
+            10,
+            682,
+            40
+          ]
+        },
+        {
+          "text": "15秒",
+          "confidence": 0.99966,
+          "bbox": [
+            604,
+            35,
+            676,
+            80
+          ]
+        },
+        {
+          "text": "x10",
+          "confidence": 0.99867,
+          "bbox": [
+            130,
+            588,
+            182,
+            616
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.9958,
+          "bbox": [
+            245,
+            595,
+            276,
+            620
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99564,
+          "bbox": [
+            342,
+            594,
+            372,
+            620
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99639,
+          "bbox": [
+            438,
+            595,
+            468,
+            620
+          ]
+        },
+        {
+          "text": "x6",
+          "confidence": 0.99439,
+          "bbox": [
+            1044,
+            592,
+            1086,
+            622
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.99689,
+          "bbox": [
+            1142,
+            592,
+            1183,
+            622
+          ]
+        },
+        {
+          "text": "12",
+          "confidence": 0.99999,
+          "bbox": [
+            200,
+            680,
+            217,
+            697
+          ]
+        },
+        {
+          "text": "29",
+          "confidence": 1.0,
+          "bbox": [
+            604,
+            680,
+            630,
+            698
+          ]
+        },
+        {
+          "text": "16",
+          "confidence": 0.98571,
+          "bbox": [
+            708,
+            680,
+            723,
+            696
+          ]
+        },
+        {
+          "text": "80",
+          "confidence": 0.99999,
+          "bbox": [
+            894,
+            680,
+            920,
+            698
+          ]
+        },
+        {
+          "text": "12",
+          "confidence": 1.0,
+          "bbox": [
+            1007,
+            678,
+            1026,
+            700
+          ]
+        }
+      ]
+    },
+    {
+      "path": "tests/fixtures/mixed_balloon_spent_89_inner_00015_18_647_2.png",
+      "sha256": "4d5eeea5144d306184ad99354d01c81b0597dd4af613d6d1fa2537bd4661a5b4",
+      "source_frame": "reports/completion-20261015/live/20261016-181600-526993-cf66942e/frames/00015-mixed-balloon-selected-1.png",
+      "source_sha256": "e612a4e36e9726600653b41a10605edca4deba183911e2bdec7bf32afa41edaf",
+      "scene": "enemy_village",
+      "retained_native_rectangles_xyxy": [
+        [
+          0,
+          1160,
+          2560,
+          1440
+        ],
+        [
+          1060,
+          0,
+          1500,
+          190
+        ]
+      ],
+      "retained_baseline_rectangles_xyxy": [
+        [
+          0,
+          580,
+          1280,
+          720
+        ],
+        [
+          530,
+          0,
+          750,
+          95
+        ]
+      ],
+      "cached_ocr": [
+        {
+          "text": "x1",
+          "confidence": 0.99014,
+          "bbox": [
+            437,
+            587,
+            472,
+            620
+          ],
+          "source": "fast_selected_header_line"
+        }
+      ]
+    },
+    {
+      "path": "tests/fixtures/mixed_balloon_spent_89_inner_00017_18_647_2.png",
+      "sha256": "5ae77ae7b097984d19228210cf249d74570ac6fee952631f4ee71555ace02e86",
+      "source_frame": "reports/completion-20261015/live/20261016-181600-526993-cf66942e/frames/00017-mixed-balloon-post-1.png",
+      "source_sha256": "e4d3464b5292c2906b3b745d1e0b2e188a35fbe8ef88136e4171c54a77b0adc5",
+      "scene": "battle",
+      "retained_native_rectangles_xyxy": [
+        [
+          0,
+          1160,
+          2560,
+          1440
+        ],
+        [
+          1060,
+          0,
+          1500,
+          190
+        ]
+      ],
+      "retained_baseline_rectangles_xyxy": [
+        [
+          0,
+          580,
+          1280,
+          720
+        ],
+        [
+          530,
+          0,
+          750,
+          95
+        ]
+      ],
+      "cached_ocr": [
+        {
+          "text": "离战斗结束还有：",
+          "confidence": 0.99538,
+          "bbox": [
+            565,
+            12,
+            705,
+            39
+          ]
+        },
+        {
+          "text": "3分钟0秒",
+          "confidence": 0.92058,
+          "bbox": [
+            563,
+            35,
+            716,
+            80
+          ]
+        },
+        {
+          "text": "x10",
+          "confidence": 0.99613,
+          "bbox": [
+            130,
+            592,
+            179,
+            621
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.9957,
+          "bbox": [
+            245,
+            595,
+            275,
+            620
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99589,
+          "bbox": [
+            342,
+            595,
+            372,
+            620
+          ]
+        },
+        {
+          "text": "x6",
+          "confidence": 0.99444,
+          "bbox": [
+            1044,
+            592,
+            1086,
+            622
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.99688,
+          "bbox": [
+            1142,
+            592,
+            1183,
+            622
+          ]
+        },
+        {
+          "text": "12",
+          "confidence": 0.99999,
+          "bbox": [
+            200,
+            680,
+            217,
+            697
+          ]
+        },
+        {
+          "text": "29",
+          "confidence": 1.0,
+          "bbox": [
+            604,
+            680,
+            630,
+            698
+          ]
+        },
+        {
+          "text": "16",
+          "confidence": 0.98571,
+          "bbox": [
+            708,
+            680,
+            723,
+            696
+          ]
+        },
+        {
+          "text": "80",
+          "confidence": 0.99999,
+          "bbox": [
+            894,
+            680,
+            920,
+            698
+          ]
+        },
+        {
+          "text": "12",
+          "confidence": 1.0,
+          "bbox": [
+            1007,
+            678,
+            1026,
+            700
+          ]
+        }
+      ]
+    }
+  ]
+}

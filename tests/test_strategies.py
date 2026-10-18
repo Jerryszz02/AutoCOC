@@ -4,7 +4,8 @@ import unittest
 
 from autococ.config import BattleConfig, load_config
 from autococ.desktop import RunOptions, desktop_config, load_options, save_options
-from autococ.strategies import BattleContext, STRATEGIES
+from autococ.errors import FlowError
+from autococ.strategies import BattleContext, STRATEGIES, TwoEdgeFurnaceStrategy, TwoEdgeSplitStrategy
 
 
 def troop(x, count, source="army"):
@@ -31,6 +32,43 @@ class StrategyTests(unittest.TestCase):
         self.assertTrue(all(y <= 260 for step in plan.troops for x, y in step.points))
         self.assertEqual(plan.heroes[0].points, ((400, 180),))
 
+    def test_explicit_two_edge_split_preserves_counts_and_uses_both_verified_edges(self):
+        counts = {"electro_dragon": 10, "dragon": 1, "baby_dragon": 1,
+                  "balloon": 2, "archer": 3}
+        troops = tuple({"unit_id": unit_id, "count": count, "point": [100 + index * 90, 650]}
+                       for index, (unit_id, count) in enumerate(counts.items()))
+        hero_ids = ("grand_warden", "dragon_duke", "minion_prince", "archer_queen")
+        heroes = tuple({"unit_id": unit_id, "point": [650 + index * 90, 650]}
+                      for index, unit_id in enumerate(hero_ids))
+        terrain = tuple({"edge": edge, "point": point} for edge, points in (
+            (0, ((454, 194), (404, 232))), (1, ((150, 447), (198, 480)))) for point in points)
+        plan = TwoEdgeSplitStrategy().build_plan(BattleContext(troops, heroes, terrain))
+        self.assertEqual([item.card["unit_id"] for item in plan.troops],
+                         ["baby_dragon", "dragon", "balloon", "electro_dragon", "archer"])
+        self.assertEqual({item.card["unit_id"]: len(item.points) for item in plan.troops}, counts)
+        by_id = {item.card["unit_id"]: item.points for item in plan.troops}
+        self.assertEqual(by_id["baby_dragon"], ((429, 213),))
+        self.assertEqual(by_id["dragon"], ((174, 464),))
+        self.assertEqual(by_id["balloon"], ((429, 213), (174, 464)))
+        self.assertEqual(sum(y < 300 for _, y in by_id["electro_dragon"]), 7)
+        self.assertEqual(sum(y > 300 for _, y in by_id["electro_dragon"]), 3)
+        self.assertEqual(sum(y < 300 for _, y in by_id["archer"]), 2)
+        self.assertEqual(sum(y > 300 for _, y in by_id["archer"]), 1)
+        self.assertEqual([(step.card["unit_id"], step.points[0][1] < 300)
+                          for step in plan.heroes],
+                         [("grand_warden", True), ("archer_queen", True),
+                          ("dragon_duke", False), ("minion_prince", False)])
+        four_card = TwoEdgeSplitStrategy().build_plan(BattleContext(troops[:-1], heroes, terrain))
+        self.assertEqual([step.card["unit_id"] for step in four_card.troops],
+                         ["baby_dragon", "dragon", "balloon", "electro_dragon"])
+        self.assertEqual(sum(len(step.points) for step in four_card.troops), 14)
+        with self.assertRaises(FlowError):
+            TwoEdgeSplitStrategy().build_plan(BattleContext(troops[1:], heroes, terrain))
+        with self.assertRaises(FlowError):
+            TwoEdgeSplitStrategy().build_plan(BattleContext(troops, heroes[:-1], terrain))
+        with self.assertRaises(FlowError):
+            TwoEdgeSplitStrategy().build_plan(BattleContext(troops, heroes, terrain[:2]))
+
     def test_battle_context_extends_old_planners_with_objective_evidence(self):
         original = self.context()
         self.assertEqual(original.spells, ())
@@ -42,6 +80,45 @@ class StrategyTests(unittest.TestCase):
                                  target_progress={"destroyed": 1, "required": 3})
         self.assertEqual(extended.target_progress["required"], 3)
         self.assertEqual(len(STRATEGIES["two_edge"].planner.build_plan(extended).troops), 3)
+
+    def test_mixed_furnace_planner_is_exact_and_separate(self):
+        counts = {"electro_dragon": 10, "dragon": 1, "furnace": 1, "balloon": 1}
+        troops = tuple({"unit_id": unit_id, "source": "army", "count": count,
+                        "point": [100 + i * 90, 650]}
+                       for i, (unit_id, count) in enumerate(counts.items()))
+        heroes = tuple({"unit_id": unit_id, "point": [600 + i * 90, 650]}
+                      for i, unit_id in enumerate(("grand_warden", "archer_queen",
+                                                   "dragon_duke", "minion_prince")))
+        terrain = tuple({"edge": edge, "point": point} for edge, points in (
+            (0, ((454, 194), (404, 232))), (1, ((150, 447), (198, 480)))) for point in points)
+        context = BattleContext(troops, heroes, terrain)
+        plan = TwoEdgeFurnaceStrategy().build_plan(context)
+        self.assertEqual([row.card["unit_id"] for row in plan.troops],
+                         ["balloon", "dragon", "furnace", "electro_dragon"])
+        self.assertEqual([len(row.points) for row in plan.troops], [1, 1, 1, 10])
+        self.assertEqual([sum(y < 300 for _, y in row.points) for row in plan.troops],
+                         [1, 0, 1, 6])
+        self.assertEqual([sum(y > 300 for _, y in row.points) for row in plan.troops],
+                         [0, 1, 0, 4])
+        for archers in (1, 3, 9):
+            with self.subTest(archers=archers):
+                filler = {"unit_id": "archer", "source": "army", "count": archers,
+                          "point": [550, 650]}
+                filled = TwoEdgeFurnaceStrategy().build_plan(BattleContext(
+                    (*troops, filler), heroes, terrain))
+                self.assertEqual([row.card["unit_id"] for row in filled.troops],
+                                 ["balloon", "dragon", "furnace", "electro_dragon", "archer"])
+                self.assertEqual(len(filled.troops[-1].points), archers)
+                self.assertEqual(sum(y < 300 for _, y in filled.troops[-1].points),
+                                 (archers + 1) // 2)
+                self.assertEqual(sum(y > 300 for _, y in filled.troops[-1].points),
+                                 archers // 2)
+        for changed in (troops[:-1], tuple({**row, "count": 2} if row["unit_id"] == "balloon" else row
+                                            for row in troops)):
+            with self.assertRaises(FlowError):
+                TwoEdgeFurnaceStrategy().build_plan(BattleContext(changed, heroes, terrain))
+        with self.assertRaises(FlowError):
+            TwoEdgeSplitStrategy().build_plan(context)
 
     def test_new_strategy_survives_config_and_saved_gui_options(self):
         with TemporaryDirectory() as directory:

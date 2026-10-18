@@ -85,9 +85,15 @@ min_expected_resources = 300000
 # Maximum observed candidates, including the first. Never attack below the threshold to exhaust this budget.
 max_searches = 30
 deploy_timeout_sec = 180
-# Optional independent wait for settlement after deployment. If omitted, reuses
-# deploy_timeout_sec for compatibility. Session/task deadlines still apply.
-# settlement_timeout_sec = 300
+# Independent wait for settlement after deployment defaults to 240 seconds.
+# Set a positive integer to override it. Session/task deadlines still apply.
+# settlement_timeout_sec = 240
+# Development options below require strategy = "edrag_line"; see docs/STRATEGIES.md.
+# line_execution_mode = "continuous"
+# line_tactics = "two_edge_probed_anchors"
+# line_tactics = "two_edge_furnace_mixed_probes" # Experimental exact 10 electro dragons, 1 dragon, 1 furnace, 1 balloon.
+# post_deployment_hero_skill = "grand_warden" # Empty by default; sampled equipment only.
+# hero_skill_delay_sec = 20 # Integer 0..30 after verified deployment.
 
 [reporting]
 write_markdown = true

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AutoCOC vision manifest row v1",
+  "type": "object",
+  "required": ["schema_version", "sample_id", "image_path", "file_sha256", "pixel_sha256", "width", "height", "source_domain", "source_ref", "source_session", "battle_id", "layout_group_id", "leakage_group_id", "parent_sample_id", "client_version", "review_status", "split"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "sample_id": {"type": "string", "minLength": 1},
+    "image_path": {"type": "string", "minLength": 1, "description": "Relative to dataset root; forward slashes"},
+    "file_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "pixel_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "width": {"type": "integer", "minimum": 1},
+    "height": {"type": "integer", "minimum": 1},
+    "source_domain": {"type": "string"},
+    "source_ref": {"type": ["string", "null"]},
+    "source_session": {"type": ["string", "null"]},
+    "battle_id": {"type": ["string", "null"]},
+    "layout_group_id": {"type": ["string", "null"]},
+    "leakage_group_id": {"type": ["string", "null"]},
+    "parent_sample_id": {"type": ["string", "null"]},
+    "client_version": {"type": ["string", "null"]},
+    "review_status": {"enum": ["pending", "reviewed", "rejected"]},
+    "reviewer": {"type": ["string", "null"]},
+    "review_evidence": {"type": ["string", "null"]},
+    "review_method": {"enum": ["human", "agent_visual", null]},
+    "split": {"enum": ["unassigned", "train", "val", "test"]}
+  },
+  "additionalProperties": true
+}

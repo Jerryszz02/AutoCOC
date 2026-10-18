@@ -7,8 +7,10 @@ import re
 from .errors import ConfigError
 
 RESOURCES = ("gold", "elixir", "dark_elixir")
-TASK_KINDS = ("collect", "request", "donate", "resources", "event", "clan_games")
+TASK_KINDS = ("collect", "request", "donate", "train", "event_reward", "ore_inventory",
+              "resources", "event", "clan_games")
 BATTLE_KINDS = frozenset(("resources", "event", "clan_games"))
+FREE_REWARD_TARGETS = ("shiny", "glowy")
 _DEFAULT_RESOURCE_FILTER = object()
 
 
@@ -70,6 +72,7 @@ class TaskSpec:
     max_searches: int = 30
     resource_filter: ResourceFilter = field(default=_DEFAULT_RESOURCE_FILTER)
     goal: GoalConfig = field(default_factory=GoalConfig)
+    free_reward_target: str = ""
 
     def __post_init__(self):
         if self.resource_filter is _DEFAULT_RESOURCE_FILTER:
@@ -82,6 +85,14 @@ class TaskSpec:
             raise ConfigError("task.id must be a short lowercase identifier")
         if self.kind not in TASK_KINDS or type(self.enabled) is not bool:
             raise ConfigError("Invalid daily task kind/enabled")
+        if not isinstance(self.free_reward_target, str):
+            raise ConfigError("task.free_reward_target must be a string")
+        if self.kind == "event_reward":
+            targets = FREE_REWARD_TARGETS if self.enabled else ("",) + FREE_REWARD_TARGETS
+            if self.free_reward_target not in targets:
+                raise ConfigError("event_reward requires free_reward_target shiny or glowy when enabled")
+        elif self.free_reward_target:
+            raise ConfigError("free_reward_target is only valid for event_reward tasks")
         if not isinstance(self.strategy, str) or not isinstance(self.strategy_file, str):
             raise ConfigError("task strategy and strategy_file must be strings")
         if self.strategy not in ("two_edge", "edrag_line", "verified"):
@@ -162,7 +173,7 @@ def default_routine(config) -> RoutineConfig:
     profile = config.profiles.get("core-loop", next(iter(config.profiles.values())))
     tasks = []
     for kind in TASK_KINDS:
-        enabled = ("battle" if kind == "resources" else kind) in profile.enabled_tasks
+        enabled = kind != "ore_inventory" and ("battle" if kind == "resources" else kind) in profile.enabled_tasks
         tasks.append(TaskSpec(kind, kind, enabled=enabled, strategy=config.battle.strategy,
             strategy_file=config.battle.strategy_file if kind == "resources" else "",
             max_battles=config.stop.max_runs, max_duration_sec=config.stop.max_duration_sec,

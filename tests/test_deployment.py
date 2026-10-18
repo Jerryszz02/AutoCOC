@@ -1,20 +1,28 @@
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import asdict, replace
+import hashlib
+import json
+import os
+from datetime import datetime
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from autococ.deployment import _prepare_two_edge_view, _remaining, deploy_army, spread_along_edges
-from autococ.errors import CaptureError, DeploymentError, FlowError, StopRequested
+from autococ.deployment import (_minimum_zoom_motion, _prepare_two_edge_view, _remaining, _verified_line_card_reading,
+                                deploy_army, spread_along_edges)
+from autococ.errors import CaptureError, DeploymentError, FlowError, SceneError, StopRequested
 from autococ.scene import SceneSnapshot
 from autococ.session import GameSession
 from autococ.vision import ScreenshotRecognizer
+from autococ.ocr import RapidOCRProvider
 
 
 def card(kind: str = "troop", count: int | None = 10, left: int = 180) -> dict:
     return {"kind": kind, "count": count, "bbox": [left, 590, left + 70, 700],
-            "point": [left + 35, 645]}
+            "point": [left + 35, 645],
+            "unit_id": "grand_warden" if kind == "hero" else None}
 
 
 class Clock:
@@ -29,6 +37,7 @@ class FakeSession:
 
     def __init__(self, clock: Clock, cards: list[dict] | None = None) -> None:
         self.clock = clock
+        self.client_version = "18.600.7"
         self.cards = deepcopy(cards or [card()])
         self.counts = {item["point"][0]: item["count"] for item in self.cards}
         self.config = SimpleNamespace(
@@ -38,6 +47,7 @@ class FakeSession:
         )
         self.last_snapshot = None
         self.frames, self.taps, self.events, self.swipes = [], [], [], []
+        self.enrichments = []
         self.action_count = 0
         self.context = SimpleNamespace(swipe=self.swipe)
         self.selected = None
@@ -69,16 +79,49 @@ class FakeSession:
                 left = item["bbox"][0]
                 ocr.append({"text": f"x{count}", "confidence": 0.99,
                             "bbox": [left + 5, 590, left + 50, 618]})
-        frame = SceneSnapshot("enemy_village" if not self.taps else "battle", 0.95,
+        fast_boundary = options.get("purpose") == "line_boundary_wait"
+        scene = "enemy_village" if not self.taps or fast_boundary or label == "line-boundary-confirm" else "battle"
+        frame = SceneSnapshot(scene, 0.95,
                               Path(f"deployment-{len(self.frames)}.png"), {
                                   "observed_at_monotonic": captured_at,
-                                  "battle": {"slots": slots}, "ocr": ocr,
+                                  "battle": {"slots": [] if fast_boundary else slots,
+                                             **({"phase": "scout"} if scene == "enemy_village" and not fast_boundary else {})},
+                                  "ocr": [] if fast_boundary else ocr,
+                                  **({"recognition_scope": "line_boundary_wait", "fast_fallback": False,
+                                      "matched_reasons": ["two_current_hud_anchors"],
+                                      "buttons": [], "cloud_cover": {"obscured": False},
+                                      "modal_visible": False} if fast_boundary else {}),
                               })
         if self.observe_hook is not None:
             frame = self.observe_hook(label, frame)
         self.frames.append(frame)
         self.last_snapshot = frame
         return frame
+
+    def enrich_current_boundary_capture(self, snapshot: SceneSnapshot, *, expires_at: float) -> SceneSnapshot:
+        if snapshot is not self.last_snapshot or self.clock.now >= expires_at:
+            self.last_snapshot = None
+            raise FlowError("Boundary enrichment source is no longer current")
+        self.enrichments.append(snapshot)
+        self.clock.advance(.2)
+        slots, ocr = [], []
+        for item in self.cards:
+            count = self.counts[item["point"][0]]
+            if count != 0:
+                slots.append(deepcopy(item))
+            if count is not None:
+                left = item["bbox"][0]
+                ocr.append({"text": f"x{count}", "confidence": .99,
+                            "bbox": [left + 5, 590, left + 50, 618]})
+        full = SceneSnapshot("enemy_village", .95, snapshot.screenshot_path, {
+            "observed_at_monotonic": snapshot.observations["observed_at_monotonic"],
+            "frame_id": snapshot.observations.get("frame_id"),
+            "recognition_scope": "full", "battle": {"slots": slots, "phase": "scout"},
+            "ocr": ocr})
+        if self.observe_hook is not None:
+            full = self.observe_hook("line-boundary-confirm", full)
+        self.last_snapshot = full
+        return full
 
     def tap(self, snapshot: SceneSnapshot, point: list[int], *, reason: str) -> None:
         self._validate_snapshot(snapshot)
@@ -173,6 +216,96 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(reading["frame"], str(path))
         self.assertGreaterEqual(reading["confidence"], .9)
 
+    def test_current_dragon_gray_zero_uses_current_glyph_and_gray_card(self) -> None:
+        import cv2
+        import numpy as np
+
+        fixtures = Path(__file__).parent / "fixtures"
+        box = (360, 1140, 590, 1440)
+        cases = (("selected_x1", 1), ("gray_x0", 0),
+                 ("gray_x0_heldout", 0), ("gray_x0_anchored", 0),
+                 ("gray_x0_weak_header", 0))
+        with TemporaryDirectory() as directory:
+            for state, expected in cases:
+                with self.subTest(state=state):
+                    crop = cv2.imread(str(fixtures / f"battle_dragon_{state}_18_647_2_20261015.png"))
+                    self.assertIsNotNone(crop)
+                    image = np.zeros((1440, 2560, 3), dtype=np.uint8)
+                    image[box[1]:box[3], box[0]:box[2]] = crop
+                    path = Path(directory) / f"{state}.png"
+                    ok, encoded = cv2.imencode(".png", image)
+                    self.assertTrue(ok)
+                    encoded.tofile(path)
+                    recognizer = ScreenshotRecognizer()
+                    recognizer.client_version = "18.647.2"
+                    for count_bbox in (None, (245, 595, 276, 620)):
+                        with self.subTest(state=state, count_bbox=count_bbox):
+                            slot = {"kind": "troop", "unit_id": "dragon", "count": 1,
+                                    "bbox": [190, 595, 278, 711], "point": [234, 653]}
+                            if count_bbox is not None:
+                                slot["evidence"] = {"count": {"text": "x1", "confidence": .99,
+                                                               "bbox": list(count_bbox)}}
+                            kwargs = {"count_bbox": count_bbox} if count_bbox is not None else {}
+                            reading = recognizer.recognize_slot_count(path, tuple(slot["bbox"]), **kwargs)
+                            self.assertEqual(reading["count"], expected)
+                            self.assertGreaterEqual(reading["confidence"], .9)
+                            if expected == 0:
+                                self.assertIn("gray_card_current_glyph_threshold_line",
+                                              [item["source"] for item in reading["readings"]])
+                            frame = SceneSnapshot("battle", .95, path, {"ocr": []})
+                            self.assertEqual(_remaining(frame, slot, recognizer=recognizer), expected)
+                            if expected == 0:
+                                recognizer.client_version = "unknown"
+                                self.assertIsNone(recognizer.recognize_slot_count(
+                                    path, tuple(slot["bbox"]), **kwargs)["count"])
+                                recognizer.client_version = "18.647.2"
+
+    def test_current_gray_zero_rejects_conflicting_count(self) -> None:
+        import cv2
+        import numpy as np
+        from autococ.ocr import OCRText
+
+        crop = cv2.imread(str(Path(__file__).parent /
+                              "fixtures/battle_dragon_gray_x0_18_647_2_20261015.png"))
+        image = np.zeros((1440, 2560, 3), dtype=np.uint8)
+        image[1140:1440, 360:590] = crop
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "conflicting.png"
+            ok, encoded = cv2.imencode(".png", image)
+            self.assertTrue(ok)
+            encoded.tofile(path)
+            provider = Mock()
+            provider.recognize.return_value = [OCRText("x0", .85, (466, 1176, 556, 1240))]
+            provider.recognize_line.return_value = [OCRText("x1", .99)]
+            provider.recognize_line_image.return_value = [OCRText("x0", .96)]
+            recognizer = ScreenshotRecognizer(provider=provider)
+            recognizer.client_version = "18.647.2"
+            reading = recognizer.recognize_slot_count(path, (190, 595, 278, 711))
+            self.assertIsNone(reading["count"])
+            self.assertEqual(reading["reason"], "header_count_unverified")
+
+    def test_current_gray_card_without_header_glyph_does_not_invent_zero(self) -> None:
+        import cv2
+        import numpy as np
+
+        crop = cv2.imread(str(Path(__file__).parent /
+                              "fixtures/battle_dragon_gray_x0_weak_header_18_647_2_20261015.png"))
+        image = np.zeros((1440, 2560, 3), dtype=np.uint8)
+        image[1140:1440, 360:590] = crop
+        image[1172:1250, 460:556] = 0
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "blank-header.png"
+            ok, encoded = cv2.imencode(".png", image)
+            self.assertTrue(ok)
+            encoded.tofile(path)
+            recognizer = ScreenshotRecognizer()
+            recognizer.client_version = "18.647.2"
+            for count_bbox in (None, (245, 595, 276, 620)):
+                with self.subTest(count_bbox=count_bbox):
+                    reading = recognizer.recognize_slot_count(path, (190, 595, 278, 711),
+                                                              count_bbox=count_bbox)
+                    self.assertIsNone(reading["count"])
+
     def test_roi_anchor_rejects_changed_identity_count_and_geometry(self) -> None:
         slot = {"kind": "troop", "unit_id": "electro_dragon", "count": 10,
                 "bbox": [90, 589, 184, 709], "point": [137, 649],
@@ -247,6 +380,23 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(result["deployed_units"], 40)
         self.assertEqual(result["consumption_events"][0]["consumed"], 40)
 
+    def test_line_receipt_keeps_local_gray_zero_read_after_observation(self):
+        session, _ = self.line_session([card(count=1)])
+        def hide_gray_ocr(label, frame):
+            if label == "line-consumption":
+                frame.observations["ocr"] = []
+            return frame
+        session.observe_hook = hide_gray_ocr
+        session.recognizer = Mock()
+        session.recognizer.recognize_slot_count.side_effect = lambda path, bbox: {
+            "count": 0, "confidence": .96, "frame": str(path), "slot_bbox": list(bbox),
+            "readings": [{"text": "x0", "confidence": .96, "source": "gray_card_current_glyph_threshold_line"}]}
+        receipt = deploy_army(session, session.scout).observations["deployment"]
+        self.assertEqual(receipt["deployed_units"], 1)
+        self.assertEqual(len(receipt["count_reads"]), 1)
+        self.assertEqual(receipt["count_reads"][0]["frame"], receipt["consumption_events"][0]["after_frame"])
+        self.assertEqual(sum(kind == "deployment_count_read" for kind, _ in session.events), 1)
+
     def test_line_partial_consumption_retains_failure_without_replaying(self):
         session, terrain = self.line_session()
         session.blocked_points = {tuple(point) for point in spread_along_edges(terrain, 40)[20:]}
@@ -255,6 +405,26 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(len(session.placements), 40)
         self.assertEqual(error.exception.partial_receipt["deployed_units"], 20)
         self.assertFalse(error.exception.partial_receipt["completed"])
+
+    def test_probed_boundary_failure_receipt_proves_no_probe_or_field_placement(self):
+        for tactics in ("two_edge_probed_anchors", "two_edge_furnace_mixed_probes"):
+            with self.subTest(tactics=tactics):
+                session, _ = self.line_session()
+                session.config.battle.strategy = "edrag_line"
+                session.config.battle.line_execution_mode = "continuous"
+                session.config.battle.line_tactics = tactics
+                session.config.vision_agent = SimpleNamespace(enabled=False)
+                with patch("autococ.deployment._prepare_two_edge_view",
+                           side_effect=FlowError("Two current deployment boundaries could not be verified")):
+                    with self.assertRaisesRegex(DeploymentError, "Two current deployment boundaries") as raised:
+                        deploy_army(session, session.scout)
+                receipt = raised.exception.partial_receipt
+                self.assertEqual(receipt["phase"], "boundary_scan")
+                self.assertEqual([receipt[name] for name in ("attempted_placements", "issued_placements",
+                                                             "offensive_actions", "deployed_units")], [0, 0, 0, 0])
+                self.assertEqual(receipt["terrain_evidence"], [])
+                self.assertEqual(receipt["consumption_events"], [])
+                self.assertEqual(session.placements, [])
 
     def test_line_stop_propagates_before_another_click(self):
         session, _ = self.line_session()
@@ -284,6 +454,70 @@ class DeploymentTests(unittest.TestCase):
         self.assertFalse(any("ability" in tap[2].lower() for tap in session.taps))
         self.assertEqual(session.counts[415], 2)
         self.assertFalse(any(tap[1] == [515, 645] for tap in session.taps))
+
+    def test_line_reacquires_full_hero_roster_after_count_only_troop_frame(self):
+        session, _ = self.line_session([card(count=1), card("hero", None, 280)])
+        session.client_version = "18.647.2"
+        session.config.battle.strategy = "edrag_line"
+        labels = []
+        def scoped(label, snapshot):
+            labels.append(label)
+            if label == "line-consumption":
+                snapshot.observations["recognition_scope"] = "troop_count"
+                snapshot.observations["battle"]["slots"] = []
+            elif label == "line-hero-roster":
+                snapshot.observations["recognition_scope"] = "full"
+            return snapshot
+        session.observe_hook = scoped
+        self.hero_state.side_effect = [
+            {"selected": True, "deployed": None}, {"selected": False, "deployed": True}]
+        receipt = deploy_army(session, session.scout).observations["deployment"]
+        self.assertTrue(receipt["completed"])
+        self.assertLess(labels.index("line-consumption"), labels.index("line-hero-roster"))
+        self.assertLess(labels.index("line-hero-roster"), labels.index("line-hero-selected"))
+        self.assertEqual(receipt["support_attempts"][0]["selection_frame"],
+                         str(session.frames[labels.index("line-hero-roster") + 1].screenshot_path))
+
+    def test_line_missing_hero_in_fresh_full_roster_never_selects_hero(self):
+        session, _ = self.line_session([card(count=1), card("hero", None, 280)])
+        session.client_version = "18.647.2"
+        session.config.battle.strategy = "edrag_line"
+        def scoped(label, snapshot):
+            if label == "line-consumption":
+                snapshot.observations["recognition_scope"] = "troop_count"
+                snapshot.observations["battle"]["slots"] = []
+            elif label == "line-hero-roster":
+                snapshot.observations["recognition_scope"] = "full"
+                snapshot.observations["battle"]["slots"] = []
+            return snapshot
+        session.observe_hook = scoped
+        with self.assertRaisesRegex(DeploymentError, "Hero identity is unverified"):
+            deploy_army(session, session.scout)
+        self.assertFalse(any("Select hero" in reason for _, _, reason, _ in session.taps))
+
+    def test_line_refreshes_identity_again_after_first_hero_fast_state(self):
+        session, _ = self.line_session([card(count=1), card("hero", None, 280),
+                                        card("hero", None, 380)])
+        session.client_version = "18.647.2"
+        session.config.battle.strategy = "edrag_line"
+        labels = []
+        def scoped(label, snapshot):
+            labels.append(label)
+            if label in {"line-consumption", "line-hero-selected", "line-hero-deployed"}:
+                snapshot.observations["recognition_scope"] = "hero" if label.startswith("line-hero") else "troop_count"
+                snapshot.observations["battle"]["slots"] = []
+            elif label == "line-hero-roster":
+                snapshot.observations["recognition_scope"] = "full"
+            return snapshot
+        session.observe_hook = scoped
+        self.hero_state.side_effect = [
+            {"selected": True, "deployed": None}, {"selected": False, "deployed": True},
+            {"selected": True, "deployed": None}, {"selected": False, "deployed": True}]
+        receipt = deploy_army(session, session.scout).observations["deployment"]
+        self.assertTrue(receipt["completed"])
+        self.assertEqual(labels.count("line-hero-roster"), 2)
+        self.assertEqual(len(receipt["support_attempts"]), 2)
+        self.assertTrue(all(item["verified"] for item in receipt["support_attempts"]))
 
     def test_edrag_unverified_hero_is_not_replayed_or_marked_complete(self):
         session, _ = self.line_session([card(count=1), card("hero", None, 280)])
@@ -328,6 +562,271 @@ class DeploymentTests(unittest.TestCase):
         self.assertTrue(receipt["completed"])
         self.assertEqual(receipt["deployed_units"], 11)
 
+    def test_current_selected_bar_binds_small_count_to_same_frame_portrait(self):
+        import cv2
+        import numpy as np
+
+        bar = cv2.imread(str(Path(__file__).parent / "fixtures/battle_bar_selected_18_647_2_20261015.png"))
+        image = np.zeros((1440, 2560, 3), dtype=np.uint8)
+        image[1170:1440, 170:2380] = bar
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "selected.png"
+            cv2.imwrite(str(path), image)
+            recognizer = ScreenshotRecognizer(provider=RapidOCRProvider())
+            recognizer.client_version = "18.647.2"
+            session = SimpleNamespace(recognizer=recognizer, client_version="18.647.2")
+            snapshot = SceneSnapshot("battle", .92, path)
+            dragon = {"unit_id": "dragon", "bbox": [190, 595, 278, 711], "count": 1}
+            raw = recognizer.recognize_slot_count(path, tuple(dragon["bbox"]))
+            self.assertEqual(raw["reason"], "explicit_header_count")
+            self.assertNotIn("portrait_score", raw)
+            verified = _verified_line_card_reading(session, snapshot, dragon)
+            self.assertEqual(verified["count"], 1)
+            self.assertGreaterEqual(verified["portrait_score"], .94)
+            self.assertEqual(verified["portrait_source"], "current_frame_versioned_battle_template")
+            for change in ({"unit_id": "baby_dragon"}, {"count": 2}):
+                with self.subTest(change=change):
+                    rejected = _verified_line_card_reading(session, snapshot, {**dragon, **change})
+                    self.assertNotIn("portrait_score", rejected)
+            session.client_version = "unknown"
+            self.assertNotIn("portrait_score", _verified_line_card_reading(session, snapshot, dragon))
+
+    def test_current_noisy_threshold_line_requires_unique_original_count_and_portrait(self):
+        import cv2
+        import numpy as np
+
+        bar = cv2.imread(str(Path(__file__).parent / "fixtures/battle_bar_selected_noisy_count_18_647_2_20261015.png"))
+        image = np.zeros((1440, 2560, 3), dtype=np.uint8)
+        image[1170:1440, 170:2380] = bar
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "selected.png"
+            cv2.imwrite(str(path), image)
+            recognizer = ScreenshotRecognizer(provider=RapidOCRProvider())
+            recognizer.client_version = "18.647.2"
+            session = SimpleNamespace(recognizer=recognizer, client_version="18.647.2")
+            snapshot = SceneSnapshot("battle", .92, path)
+            dragon = {"unit_id": "dragon", "bbox": [190, 595, 278, 711], "count": 1}
+            original = {"text": "x1", "confidence": .989, "bbox": [240, 591, 278, 624],
+                        "source": "header_region_ocr"}
+            noise = {"text": "一风", "confidence": .949, "bbox": [190, 579, 278, 635],
+                     "source": "header_threshold_line"}
+            raw = {"reason": "header_count_unverified", "count": None, "confidence": .989,
+                   "frame": str(path), "slot_bbox": dragon["bbox"], "readings": [original, noise]}
+            with patch.object(recognizer, "recognize_slot_count", return_value=raw):
+                verified = _verified_line_card_reading(session, snapshot, dragon)
+                self.assertEqual(verified["count"], 1)
+                self.assertEqual(verified["reason"], "portrait_bound_full_header_count")
+                self.assertGreaterEqual(verified["portrait_score"], .94)
+                for extra in ({"text": "x2", "confidence": .98, "source": "header_threshold_line"},
+                              {"text": "other", "confidence": .98, "source": "header_region_ocr"}):
+                    with self.subTest(extra=extra):
+                        recognizer.recognize_slot_count.return_value = {
+                            **raw, "readings": [original, noise, extra]}
+                        self.assertNotIn("portrait_score", _verified_line_card_reading(session, snapshot, dragon))
+                recognizer.recognize_slot_count.return_value = raw
+                session.client_version = "unknown"
+                self.assertNotIn("portrait_score", _verified_line_card_reading(session, snapshot, dragon))
+
+    @staticmethod
+    def _current_dragon_header_fixture(directory: Path, source: str):
+        import cv2
+        import numpy as np
+
+        fixture = Path(__file__).parent / "fixtures" / f"battle_bar_dragon_{source}_18_647_2.png"
+        crop = cv2.imread(str(fixture))
+        assert crop is not None and crop.shape == (300, 930, 3)
+        image = np.zeros((1440, 2560, 3), dtype=np.uint8)
+        image[1140:1440, 170:1100] = crop
+        path = directory / f"{source}.png"
+        assert cv2.imwrite(str(path), image)
+        recognizer = ScreenshotRecognizer(provider=RapidOCRProvider())
+        recognizer.client_version = "18.647.2"
+        resolution = recognizer._resolution(path)
+        texts = [recognizer._baseline_result(item, resolution)
+                 for item in recognizer.provider.recognize(path)]
+        battle = recognizer._battle_observation(path, texts, "enemy_village")
+        snapshot = SceneSnapshot("enemy_village", .95, path, {
+            "ocr": [asdict(item) for item in texts], "battle": battle,
+            "baseline_resolution": [1280, 720], "source_resolution": [2560, 1440],
+            "recognition_scope": "full",
+        })
+        dragon = next(card for card in battle["slots"] if card.get("unit_id") == "dragon")
+        session = SimpleNamespace(recognizer=recognizer, client_version="18.647.2")
+        return session, snapshot, dragon
+
+    def test_current_dragon_full_header_fallback_replays_real_local_ocr_failure(self):
+        with TemporaryDirectory() as directory:
+            session, snapshot, dragon = self._current_dragon_header_fixture(
+                Path(directory), "weak_044100")
+            local = session.recognizer.recognize_slot_count(
+                snapshot.screenshot_path, tuple(dragon["bbox"]))
+            self.assertEqual(local["reason"], "header_count_unverified")
+            self.assertIsNone(local["count"])
+            self.assertEqual(dragon["evidence"]["method"], "independent_card_border")
+            self.assertEqual(dragon["evidence"]["count"]["text"], "x1")
+            verified = _verified_line_card_reading(session, snapshot, dragon)
+            self.assertEqual(verified["count"], 1)
+            self.assertEqual(verified["reason"], "portrait_bound_current_full_header_count")
+            self.assertGreaterEqual(verified["confidence"], .95)
+            self.assertGreaterEqual(verified["portrait_score"], .94)
+            self.assertEqual(verified["full_header"]["frame"], str(snapshot.screenshot_path))
+
+            old_session, old_snapshot, old_dragon = self._current_dragon_header_fixture(
+                Path(directory), "old_035742")
+            old_local = old_session.recognizer.recognize_slot_count(
+                old_snapshot.screenshot_path, tuple(old_dragon["bbox"]))
+            self.assertEqual(old_local["count"], 1)
+            self.assertEqual(old_local["reason"], "explicit_header_count")
+            old_verified = _verified_line_card_reading(old_session, old_snapshot, old_dragon)
+            self.assertEqual(old_verified["count"], 1)
+            self.assertEqual(old_verified["reason"], "explicit_header_count")
+            self.assertNotIn("full_header", old_verified)
+
+    def test_current_dragon_header_fixtures_are_bound_to_real_crops(self):
+        import cv2
+        import numpy as np
+
+        for source in ("weak_044100", "old_035742"):
+            with self.subTest(source=source):
+                fixture = Path(__file__).parent / "fixtures" / f"battle_bar_dragon_{source}_18_647_2.png"
+                provenance = json.loads(fixture.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+                self.assertEqual(provenance["client_version"], "18.647.2")
+                self.assertEqual(provenance["crop_native_xyxy"], [170, 1140, 1100, 1440])
+                self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(),
+                                 provenance["fixture_sha256"])
+                original = Path(__file__).resolve().parents[1] / provenance["source"]
+                if original.is_file():
+                    self.assertEqual(hashlib.sha256(original.read_bytes()).hexdigest(),
+                                     provenance["source_sha256"])
+                    pixels = cv2.imread(str(original))[1140:1440, 170:1100]
+                    self.assertTrue(np.array_equal(cv2.imread(str(fixture)), pixels))
+
+    def test_current_dragon_full_header_fallback_rejects_conflict_and_unbound_sources(self):
+        import cv2
+
+        with TemporaryDirectory() as directory:
+            session, snapshot, dragon = self._current_dragon_header_fixture(
+                Path(directory), "weak_044100")
+            original = session.recognizer.recognize_slot_count
+
+            def rejected(*, snapshot=snapshot, dragon=dragon):
+                reading = _verified_line_card_reading(session, snapshot, dragon)
+                self.assertNotIn("portrait_score", reading)
+
+            # A preceding roster count is a plan, never a substitute for this
+            # frame's OCR. The strong x1 on the adjacent baby-dragon card is not
+            # the dragon's quantity either.
+            without_current_ocr = replace(snapshot, observations={**snapshot.observations,
+                "ocr": [item for item in snapshot.observations["ocr"]
+                        if not (item.get("bbox") and 180 < item["bbox"][0] < 235
+                                and item["bbox"][1] > 570)]})
+            rejected(snapshot=without_current_ocr)
+            strong = next(item for item in snapshot.observations["ocr"]
+                          if item.get("text") == "x1" and item.get("bbox")
+                          and 180 < item["bbox"][0] < 235 and item["bbox"][1] > 570)
+            for changed in (
+                {**strong, "text": "x2"},
+                {**strong, "confidence": .89},
+                {**strong, "bbox": [240, 594, 269, 621]},
+            ):
+                with self.subTest(ocr=changed):
+                    candidate = replace(snapshot, observations={**snapshot.observations,
+                        "ocr": [changed]})
+                    rejected(snapshot=candidate)
+            duplicate = replace(snapshot, observations={**snapshot.observations,
+                "ocr": [*snapshot.observations["ocr"], {**strong, "bbox": [193, 594, 226, 621]}]})
+            rejected(snapshot=duplicate)
+            conflict = original(snapshot.screenshot_path, tuple(dragon["bbox"]))
+            conflict["readings"].append({"source": "header_threshold_line", "text": "x2",
+                                         "confidence": .97})
+            with patch.object(session.recognizer, "recognize_slot_count", return_value=conflict):
+                rejected()
+            old_session, old_snapshot, old_dragon = self._current_dragon_header_fixture(
+                Path(directory), "old_035742")
+            old_local = old_session.recognizer.recognize_slot_count(
+                old_snapshot.screenshot_path, tuple(old_dragon["bbox"]))
+            self.assertEqual(old_local["count"], 1)
+            full_conflict = replace(old_snapshot, observations={**old_snapshot.observations,
+                "ocr": [{**strong, "text": "x2", "bbox": [194, 594, 226, 621]}]})
+            old_rejected = _verified_line_card_reading(old_session, full_conflict, old_dragon)
+            self.assertEqual(old_rejected["reason"], "strong_count_conflict")
+            self.assertIsNone(old_rejected["count"])
+            rejected(dragon={**dragon, "unit_id": "baby_dragon"})
+            session.client_version = "unknown"
+            rejected()
+            session.client_version = "18.647.2"
+            no_border = replace(snapshot, observations={**snapshot.observations,
+                "battle": {**snapshot.observations["battle"], "slots": [
+                    item for item in snapshot.observations["battle"]["slots"]
+                    if item.get("unit_id") != "dragon"]}})
+            rejected(snapshot=no_border)
+            not_full = replace(snapshot, observations={**snapshot.observations,
+                "recognition_scope": "troop_count"})
+            rejected(snapshot=not_full)
+
+            # Re-run the real current card detector after removing its bottom
+            # edge; the header OCR and portrait alone cannot close the card.
+            image = cv2.imread(str(snapshot.screenshot_path))
+            image[1402:1440, 284:460] = 0
+            damaged = Path(directory) / "missing-bottom.png"
+            self.assertTrue(cv2.imwrite(str(damaged), image))
+            resolution = session.recognizer._resolution(damaged)
+            texts = [session.recognizer._baseline_result(item, resolution)
+                     for item in session.recognizer.provider.recognize(damaged)]
+            damaged_battle = session.recognizer._battle_observation(damaged, texts, "enemy_village")
+            self.assertFalse(any(item.get("unit_id") == "dragon"
+                                 for item in damaged_battle["slots"]))
+            rejected(snapshot=SceneSnapshot("enemy_village", .95, damaged, {
+                "ocr": [asdict(item) for item in texts], "battle": damaged_battle,
+                "baseline_resolution": [1280, 720], "source_resolution": [2560, 1440],
+                "recognition_scope": "full"}))
+
+    def test_boundary_without_terrain_skips_card_ocr(self):
+        session = FakeSession(self.clock, [card(count=1)])
+        session.native = Mock()
+        session.recognizer = Mock()
+        self.camera_motion.return_value = {"stationary": True}
+        with patch("autococ.battle_vision.selected_card_bbox", return_value=[177, 587, 253, 703]), \
+             patch("autococ.deployment._verified_line_card_reading") as read_card, \
+             patch("autococ.terrain.find_line_deployment_edges", return_value=[]) as terrain:
+            with self.assertRaisesRegex(FlowError, "Two current deployment boundaries"):
+                _prepare_two_edge_view(session, session.scout, {"evidence": []})
+        self.assertEqual(terrain.call_count, 3)
+        read_card.assert_not_called()
+
+    def test_boundary_with_terrain_still_rejects_unverified_card(self):
+        candidate = [{"edge": 0, "point": [450, 210]}]
+        for reading in ({"count": 1, "portrait_score": None},
+                        {"count": 2, "portrait_score": .99}):
+            with self.subTest(reading=reading):
+                session = FakeSession(self.clock, [card(count=1)])
+                session.native = Mock()
+                session.recognizer = Mock()
+                session.recognizer.recognize_slot_count.return_value = reading
+                self.camera_motion.return_value = {"stationary": True}
+                with patch("autococ.battle_vision.selected_card_bbox", return_value=[177, 587, 253, 703]), \
+                     patch("autococ.terrain.find_line_deployment_edges", return_value=candidate) as terrain:
+                    with self.assertRaisesRegex(FlowError, "troop card portrait or count unverified"):
+                        _prepare_two_edge_view(session, session.scout, {"evidence": []})
+                self.assertEqual(terrain.call_count, 3)
+
+    def test_boundary_reads_cards_only_on_first_current_terrain_candidate(self):
+        session = FakeSession(self.clock, [card(count=1)])
+        session.native = Mock()
+        session.recognizer = Mock()
+        self.camera_motion.return_value = {"stationary": True}
+        candidate = [{"edge": 0, "point": [450, 210]}]
+        with patch("autococ.battle_vision.selected_card_bbox", return_value=[177, 587, 253, 703]), \
+             patch("autococ.deployment._verified_line_card_reading",
+                   return_value={"count": 1, "portrait_score": .99}) as read_card, \
+             patch("autococ.terrain.find_line_deployment_edges",
+                   side_effect=[[], candidate]) as terrain:
+            current, observed = _prepare_two_edge_view(session, session.scout, {"evidence": []})
+        self.assertEqual(observed, candidate)
+        self.assertEqual(current.screenshot_path, session.frames[-1].screenshot_path)
+        self.assertEqual(terrain.call_count, 2)
+        read_card.assert_called_once()
+
     def test_boundary_selection_keeps_only_reidentified_card_glyph_roi(self):
         original = {**card(count=10), "unit_id": "electro_dragon",
                     "evidence": {"count": {"text": "x10", "confidence": .99,
@@ -354,6 +853,421 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(anchor["verified_slot_bbox"], selected_box)
         self.assertEqual(anchor["unit_id"], "electro_dragon")
         self.assertNotIn("bbox", slot["evidence"]["count"], "Fast count ROI is not a glyph box")
+
+    def _continuous_zoom_session(self, countdown=24):
+        session = FakeSession(self.clock, [card(count=10)])
+        session.native = Mock()
+        session.native.zoom_out.side_effect = lambda: self.clock.advance(1.7)
+        session.recognizer = Mock()
+        preview_end = session.scout.observations["observed_at_monotonic"] + countdown
+
+        def add_countdown(label, frame):
+            if label == "line-boundary":
+                return frame
+            seconds = max(1, int(preview_end - frame.observations["observed_at_monotonic"]))
+            frame.observations["battle"].update(countdown_seconds=seconds, countdown_evidence={
+                "frame": str(frame.screenshot_path), "source": "current_frame_ocr", "confidence": .99})
+            return frame
+
+        session.observe_hook = add_countdown
+        add_countdown("scout", session.scout)
+        return session
+
+    @staticmethod
+    def _motion(scale=1.0):
+        return {"stationary": True, "matched_points": 800, "inliers": 800,
+                "affine": [[scale, 0.0, 0.0], [0.0, scale, 0.0]]}
+
+    def test_continuous_zoom_stops_after_verified_gesture_and_keeps_full_roster(self):
+        session = self._continuous_zoom_session()
+        session.observe = Mock(wraps=session.observe)
+        self.camera_motion.side_effect = [self._motion(.9958), self._motion(),
+                                          self._motion(), self._motion(), self._motion()]
+        terrain = [{"edge": edge, "point": point} for edge, points in (
+            (0, ([450, 210], [300, 320])), (1, ([300, 370], [440, 470]))) for point in points]
+        receipt = {"evidence": []}
+        with patch("autococ.battle_vision.selected_card_bbox", return_value=[177, 587, 253, 703]), \
+             patch("autococ.deployment._verified_line_card_reading",
+                   return_value={"count": 10, "portrait_score": .99}), \
+             patch("autococ.terrain.find_line_deployment_edges", return_value=terrain):
+            current, result = _prepare_two_edge_view(session, session.scout, receipt,
+                                                     capture_context={})
+        self.assertEqual(result, terrain)
+        self.assertEqual(session.native.zoom_out.call_count, 2)
+        self.assertEqual(receipt["minimum_zoom"]["gesture_count"], 2)
+        self.assertEqual(receipt["minimum_zoom"]["frame"], str(session.frames[-2].screenshot_path))
+        self.assertEqual(current.observations["battle"]["slots"][0]["count"], 10)
+        self.assertEqual(len(receipt["zoom_probes"]), 2)
+        self.assertEqual(sum(event == "line_zoom_probe" for event, _ in session.events), 2)
+        self.assertTrue(all(probe["gesture_elapsed_sec"] > 0 for probe in receipt["zoom_probes"]))
+        self.assertEqual([call.kwargs.get("purpose") for call in session.observe.call_args_list
+                          if call.args[0] == "line-zoom-probe"], ["settlement", "settlement"])
+
+    def test_continuous_boundary_three_fast_negative_frames_use_no_full_confirmation(self):
+        session = self._continuous_zoom_session(countdown=30)
+        session.observe = Mock(wraps=session.observe)
+        self.camera_motion.return_value = self._motion()
+        receipt = {"evidence": [], "phase": "boundary_scan", "terrain_evidence": [],
+                   "consumption_events": [], "attempted_placements": 0,
+                   "issued_placements": 0, "offensive_actions": 0, "deployed_units": 0}
+        with patch("autococ.battle_vision.selected_card_bbox", return_value=[177, 587, 253, 703]), \
+             patch("autococ.terrain.find_line_deployment_edges", return_value=[]) as terrain, \
+             patch("autococ.deployment._verified_line_card_reading") as read_card:
+            with self.assertRaisesRegex(FlowError, "Two current deployment boundaries"):
+                _prepare_two_edge_view(session, session.scout, receipt, capture_context={})
+        boundary_calls = [call for call in session.observe.call_args_list
+                          if call.args[0].startswith("line-boundary")]
+        self.assertEqual(len(boundary_calls), 3)
+        self.assertTrue(all(call.kwargs == {"purpose": "line_boundary_wait"}
+                            for call in boundary_calls))
+        self.assertEqual([row["status"] for row in receipt["line_boundary_scan"]],
+                         ["no_boundary"] * 3)
+        self.assertEqual(terrain.call_count, 3)
+        read_card.assert_not_called()
+        self.assertEqual(len(session.taps), 1)  # Selection, never a field input.
+        self.assertEqual(receipt["terrain_evidence"], [])
+
+    def test_continuous_boundary_candidate_needs_full_proof_from_same_capture(self):
+        session = self._continuous_zoom_session(countdown=30)
+        session.observe = Mock(wraps=session.observe)
+        self.camera_motion.return_value = self._motion()
+        fast_terrain = [{"edge": 0, "point": [400, 200]}]
+        confirmed = [{"edge": edge, "point": point} for edge, points in (
+            (0, ([450, 210], [300, 320])), (1, ([300, 370], [440, 470]))) for point in points]
+        receipt, context = {"evidence": []}, {}
+        with patch("autococ.battle_vision.selected_card_bbox", return_value=[177, 587, 253, 703]) as selected, \
+             patch("autococ.terrain.find_line_deployment_edges",
+                   side_effect=[fast_terrain, confirmed]) as terrain, \
+             patch("autococ.deployment._verified_line_card_reading",
+                   return_value={"count": 10, "portrait_score": .99}) as read_card:
+            current, result = _prepare_two_edge_view(session, session.scout, receipt,
+                                                     capture_context=context)
+        self.assertEqual(result, confirmed)
+        self.assertNotEqual(result, fast_terrain)
+        self.assertIs(current, session.last_snapshot)
+        self.assertEqual(receipt["line_boundary_confirmation"]["frame"], str(current.screenshot_path))
+        self.assertEqual(receipt["line_boundary_confirmation"]["status"], "roster_verified")
+        self.assertEqual(receipt["line_boundary_confirmation"]["candidate_frame"], str(current.screenshot_path))
+        self.assertTrue(receipt["line_boundary_confirmation"]["same_capture"])
+        self.assertEqual(context["toolbar_before"].screenshot_path, session.frames[-2].screenshot_path)
+        self.assertEqual(selected.call_count, 2)
+        self.assertEqual(terrain.call_count, 2)
+        read_card.assert_called_once()
+        calls = [call for call in session.observe.call_args_list
+                 if call.args[0].startswith("line-boundary")]
+        self.assertEqual([call.args[0] for call in calls], ["line-boundary"])
+        self.assertEqual(calls[0].kwargs, {"purpose": "line_boundary_wait"})
+        self.assertEqual(session.enrichments, [session.frames[-1]])
+        self.assertEqual(len(session.taps), 1)
+
+    def test_continuous_boundary_full_frame_cannot_inherit_fast_card_or_terrain(self):
+        for missing in ("selected", "terrain"):
+            with self.subTest(missing=missing):
+                session = self._continuous_zoom_session(countdown=30)
+                session.observe = Mock(wraps=session.observe)
+                self.camera_motion.side_effect = None
+                self.camera_motion.return_value = self._motion()
+                candidate = [{"edge": 0, "point": [400, 200]}]
+                boxes = [[177, 587, 253, 703], None if missing == "selected" else [177, 587, 253, 703]]
+                terrains = [candidate, [] if missing == "terrain" else candidate]
+                with patch("autococ.battle_vision.selected_card_bbox", side_effect=boxes), \
+                     patch("autococ.terrain.find_line_deployment_edges", side_effect=terrains), \
+                     patch("autococ.deployment._verified_line_card_reading") as read_card:
+                    with self.assertRaisesRegex(FlowError, "Full boundary confirmation lost"):
+                        _prepare_two_edge_view(session, session.scout, {"evidence": []},
+                                               capture_context={})
+                read_card.assert_not_called()
+                self.assertEqual(len(session.taps), 1)
+                self.assertEqual(sum(call.args[0] == "line-boundary-confirm"
+                                     for call in session.observe.call_args_list), 0)
+                self.assertEqual(len(session.enrichments), 1)
+
+    def test_continuous_boundary_full_frame_rejects_missing_timer_or_roster(self):
+        for missing in ("timer", "roster"):
+            with self.subTest(missing=missing):
+                session = self._continuous_zoom_session(countdown=30)
+                session.observe = Mock(wraps=session.observe)
+                self.camera_motion.side_effect = None
+                self.camera_motion.return_value = self._motion()
+                original = session.observe_hook
+
+                def alter(label, frame):
+                    frame = original(label, frame)
+                    if label == "line-boundary-confirm" and missing == "timer":
+                        frame.observations["battle"].pop("countdown_evidence")
+                    return frame
+
+                session.observe_hook = alter
+                with patch("autococ.battle_vision.selected_card_bbox",
+                           return_value=[177, 587, 253, 703]), \
+                     patch("autococ.terrain.find_line_deployment_edges",
+                           return_value=[{"edge": 0, "point": [400, 200]}]), \
+                     patch("autococ.deployment._verified_line_card_reading",
+                           return_value={"count": None, "portrait_score": None,
+                                         "reason": "header_count_unverified"} if missing == "roster" else
+                           {"count": 10, "portrait_score": .99}) as read_card:
+                    with self.assertRaises(FlowError):
+                        _prepare_two_edge_view(session, session.scout, {"evidence": []},
+                                               capture_context={})
+                self.assertEqual(read_card.call_count, 0 if missing == "timer" else 1)
+                self.assertEqual(len(session.taps), 1)
+                self.assertEqual(sum(call.args[0] == "line-boundary-confirm"
+                                     for call in session.observe.call_args_list), 0)
+                self.assertEqual(len(session.enrichments), 1)
+
+    def test_continuous_boundary_unknown_stale_moving_or_expired_never_confirms(self):
+        for failure in ("hud", "account", "modal", "cloud", "fallback", "old_frame",
+                        "old_time", "camera", "expired"):
+            with self.subTest(failure=failure):
+                session = self._continuous_zoom_session(countdown=30)
+                session.observe = Mock(wraps=session.observe)
+                self.camera_motion.side_effect = None
+                self.camera_motion.return_value = self._motion()
+                if failure == "camera":
+                    self.camera_motion.side_effect = [self._motion(), self._motion(),
+                                                      self._motion(.97)]
+                original = session.observe_hook
+
+                def alter(label, frame):
+                    frame = original(label, frame)
+                    if label != "line-boundary":
+                        return frame
+                    if failure in {"hud", "account"}:
+                        frame = replace(frame, scene="account_in_use" if failure == "account" else "unknown")
+                    elif failure == "modal":
+                        frame.observations["modal_visible"] = True
+                    elif failure == "cloud":
+                        frame.observations["cloud_cover"]["obscured"] = True
+                    elif failure == "fallback":
+                        frame.observations["fast_fallback"] = True
+                    elif failure == "old_frame":
+                        frame = replace(frame, screenshot_path=session.frames[-1].screenshot_path)
+                    elif failure == "old_time":
+                        frame.observations["observed_at_monotonic"] = session.frames[-1].observations[
+                            "observed_at_monotonic"]
+                    elif failure == "expired":
+                        self.clock.advance(40)
+                    return frame
+
+                session.observe_hook = alter
+                with patch("autococ.battle_vision.selected_card_bbox", return_value=[177, 587, 253, 703]), \
+                     patch("autococ.terrain.find_line_deployment_edges",
+                           return_value=[{"edge": 0, "point": [400, 200]}]):
+                    with self.assertRaises(FlowError) as raised:
+                        _prepare_two_edge_view(session, session.scout, {"evidence": []},
+                                               capture_context={})
+                self.assertNotEqual(str(raised.exception),
+                                    "Two current deployment boundaries could not be verified")
+                self.assertEqual(len(session.taps), 1)
+                self.assertEqual(sum(call.args[0] == "line-boundary-confirm"
+                                     for call in session.observe.call_args_list), 0)
+
+    def _countdown_recheck_session(self, *, second="strong", countdown=24):
+        from autococ.battle_vision import attach_preparation_countdown
+
+        fixture = json.loads((Path(__file__).parent / "fixtures" /
+                              "line_countdown_recheck_18_647_2_20261016.json").read_text(encoding="utf-8"))
+        session = self._continuous_zoom_session(countdown=countdown)
+        original = session.observe_hook
+
+        def hook(label, frame):
+            frame = original(label, frame)
+            if label in {"line-zoom-verified", "line-countdown-recheck"}:
+                frame.observations["battle"].pop("countdown_seconds", None)
+                frame.observations["battle"].pop("countdown_evidence", None)
+                frame.observations["ocr"] = deepcopy(fixture["frames"][0 if label == "line-zoom-verified"
+                                                                      or second == "weak" else 1]["cached_ocr"])
+                attach_preparation_countdown(frame)
+            return frame
+
+        session.observe_hook = hook
+        return session
+
+    def _prepare_recheck(self, session, receipt=None):
+        terrain = [{"edge": 0, "point": [450, 210]}, {"edge": 1, "point": [300, 370]}]
+        self.camera_motion.return_value = self._motion()
+        with patch("autococ.battle_vision.selected_card_bbox", return_value=[177, 587, 253, 703]), \
+             patch("autococ.deployment._verified_line_card_reading",
+                   return_value={"count": 10, "portrait_score": .99}), \
+             patch("autococ.terrain.find_line_deployment_edges", return_value=terrain):
+            return _prepare_two_edge_view(session, session.scout, receipt or {"evidence": []},
+                                          capture_context={})
+
+    def test_countdown_recheck_uses_new_strict_frame_and_only_one_full_observe(self):
+        session = self._countdown_recheck_session()
+        session.observe = Mock(wraps=session.observe)
+        receipt, context = {"evidence": []}, {}
+        self.camera_motion.return_value = self._motion()
+        with patch("autococ.battle_vision.selected_card_bbox", return_value=[177, 587, 253, 703]), \
+             patch("autococ.deployment._verified_line_card_reading",
+                   return_value={"count": 10, "portrait_score": .99}), \
+             patch("autococ.terrain.find_line_deployment_edges", return_value=[{"edge": 0}, {"edge": 1}]):
+            current, _ = _prepare_two_edge_view(session, session.scout, receipt, capture_context=context)
+        rechecked = session.frames[-2]
+        self.assertIs(context["toolbar_before"], rechecked)
+        self.assertEqual(receipt["minimum_zoom"]["frame"], str(rechecked.screenshot_path))
+        self.assertEqual(receipt["countdown_recheck"]["frame"], str(rechecked.screenshot_path))
+        self.assertEqual(receipt["countdown_recheck"]["countdown_evidence"]["frame"], str(rechecked.screenshot_path))
+        self.assertEqual([call.args[0] for call in session.observe.call_args_list].count("line-countdown-recheck"), 1)
+        self.assertEqual(session.native.zoom_out.call_count, 1)
+        self.assertEqual(len(session.taps), 1)  # Only the original boundary-reveal selection.
+        self.assertEqual(session.taps[0][0], rechecked)
+
+    def test_countdown_recheck_twice_weak_stops_without_selection(self):
+        session = self._countdown_recheck_session(second="weak")
+        session.observe = Mock(wraps=session.observe)
+        with self.assertRaisesRegex(FlowError, "Current preparation countdown is unavailable"):
+            self._prepare_recheck(session)
+        self.assertEqual([call.args[0] for call in session.observe.call_args_list].count("line-countdown-recheck"), 1)
+        self.assertEqual(session.native.zoom_out.call_count, 1)
+        self.assertEqual(session.taps, [])
+
+    def test_countdown_recheck_second_frame_conflict_cannot_grant_time(self):
+        session = self._countdown_recheck_session()
+        original = session.observe_hook
+
+        def conflict(label, frame):
+            frame = original(label, frame)
+            if label == "line-countdown-recheck":
+                frame.observations["ocr"].append({"text": "17秒", "confidence": .99,
+                                                    "bbox": [602, 38, 680, 78]})
+                from autococ.battle_vision import attach_preparation_countdown
+                attach_preparation_countdown(frame)
+            return frame
+
+        session.observe_hook = conflict
+        with self.assertRaisesRegex(FlowError, "Current preparation countdown is unavailable"):
+            self._prepare_recheck(session)
+        self.assertEqual(session.taps, [])
+
+    def test_countdown_recheck_never_extends_original_preview_end(self):
+        session = self._countdown_recheck_session(countdown=10)
+        original = session.observe_hook
+
+        def slow_recheck(label, frame):
+            frame = original(label, frame)
+            if label == "line-countdown-recheck":
+                self.clock.advance(1)
+            return frame
+
+        session.observe_hook = slow_recheck
+        session.observe = Mock(wraps=session.observe)
+        with self.assertRaisesRegex(FlowError, "Preview time expired during countdown recheck"):
+            self._prepare_recheck(session)
+        self.assertEqual([call.args[0] for call in session.observe.call_args_list].count("line-countdown-recheck"), 1)
+        self.assertEqual(session.taps, [])
+
+    def test_countdown_recheck_rejects_conflict_and_stale_evidence_before_retry(self):
+        for change in ("second_strong_timer", "duplicate_anchor", "stale_evidence"):
+            with self.subTest(change=change):
+                session = self._countdown_recheck_session()
+                original = session.observe_hook
+
+                def conflict(label, frame):
+                    frame = original(label, frame)
+                    if label == "line-zoom-verified":
+                        if change == "second_strong_timer":
+                            frame.observations["ocr"].append({"text": "20秒", "confidence": .99,
+                                                                "bbox": [710, 40, 744, 76]})
+                        elif change == "duplicate_anchor":
+                            frame.observations["ocr"].append(deepcopy(frame.observations["ocr"][0]))
+                        else:
+                            frame.observations["battle"]["countdown_seconds"] = 21
+                            frame.observations["battle"]["countdown_evidence"] = {
+                                "frame": "stale.png", "source": "current_frame_ocr", "confidence": .99}
+                    return frame
+
+                session.observe_hook = conflict
+                session.observe = Mock(wraps=session.observe)
+                with self.assertRaisesRegex(FlowError, "Current preparation countdown is unavailable"):
+                    self._prepare_recheck(session)
+                self.assertFalse(any(call.args[0] == "line-countdown-recheck"
+                                     for call in session.observe.call_args_list))
+                self.assertEqual(session.taps, [])
+
+    def test_countdown_recheck_rejects_deadlines_scene_camera_and_reused_frame(self):
+        for change in ("pre_deadline", "post_deadline", "account_popup", "camera_move",
+                       "same_path", "old_capture_time"):
+            with self.subTest(change=change):
+                session = self._countdown_recheck_session()
+                if change == "pre_deadline":
+                    session.task_deadline = self.clock.now + 7
+                if change == "post_deadline":
+                    session.deadline = self.clock.now + 15
+                original = session.observe_hook
+
+                def alter(label, frame):
+                    frame = original(label, frame)
+                    if label == "line-countdown-recheck":
+                        if change == "post_deadline":
+                            self.clock.advance(8)
+                        elif change == "account_popup":
+                            frame = replace(frame, scene="account_in_use")
+                        elif change == "same_path":
+                            frame = replace(frame, screenshot_path=session.frames[-1].screenshot_path)
+                        elif change == "old_capture_time":
+                            frame.observations["observed_at_monotonic"] = session.frames[-1].observations[
+                                "observed_at_monotonic"]
+                    return frame
+
+                session.observe_hook = alter
+                session.observe = Mock(wraps=session.observe)
+                if change == "camera_move":
+                    self.camera_motion.side_effect = [self._motion(), self._motion(), self._motion(.99)]
+                else:
+                    self.camera_motion.side_effect = None
+                with self.assertRaises(FlowError):
+                    self._prepare_recheck(session)
+                count = sum(call.args[0] == "line-countdown-recheck" for call in session.observe.call_args_list)
+                self.assertEqual(count, 0 if change == "pre_deadline" else 1)
+                self.assertEqual(session.taps, [])
+
+    def test_continuous_zoom_rejects_short_preview_before_any_gesture(self):
+        session = self._continuous_zoom_session(countdown=4)
+        with self.assertRaisesRegex(FlowError, "Preview time is insufficient"):
+            _prepare_two_edge_view(session, session.scout, {"evidence": []}, capture_context={})
+        session.native.zoom_out.assert_not_called()
+
+    def test_continuous_zoom_does_not_treat_tolerated_scale_drift_as_minimum(self):
+        session = self._continuous_zoom_session(countdown=60)
+        self.camera_motion.return_value = self._motion(.9958)
+        with self.assertRaisesRegex(FlowError, "Minimum zoom did not stabilize"):
+            _prepare_two_edge_view(session, session.scout, {"evidence": []}, capture_context={})
+        self.assertEqual(session.native.zoom_out.call_count, 4)
+        self.assertEqual(len([frame for frame in session.frames if frame is not session.scout]), 4)
+        inconsistent = self._motion()
+        inconsistent["affine"][1][1] = .99
+        self.assertFalse(_minimum_zoom_motion(inconsistent))
+
+    def test_continuous_zoom_rejects_lost_preview_or_nonfinite_confidence(self):
+        for scene, confidence in (("battle", .99), ("unknown", .0), ("enemy_village", float("nan"))):
+            with self.subTest(scene=scene, confidence=confidence):
+                session = self._continuous_zoom_session()
+                original = session.observe_hook
+
+                def lose_preview(label, frame):
+                    frame = original(label, frame)
+                    return replace(frame, scene=scene, confidence=confidence) if label == "line-zoom-probe" else frame
+
+                session.observe_hook = lose_preview
+                with self.assertRaisesRegex(FlowError, "Enemy preview was lost"):
+                    _prepare_two_edge_view(session, session.scout, {"evidence": []}, capture_context={})
+                self.assertEqual(session.native.zoom_out.call_count, 1)
+                self.assertEqual(session.taps, [])
+
+    def test_continuous_zoom_missing_camera_frame_or_interrupted_gesture_never_selects(self):
+        session = self._continuous_zoom_session()
+        self.camera_motion.side_effect = SceneError("Unable to decode camera screenshot")
+        with self.assertRaises(SceneError):
+            _prepare_two_edge_view(session, session.scout, {"evidence": []}, capture_context={})
+        self.assertEqual(session.native.zoom_out.call_count, 1)
+        self.assertEqual(session.taps, [])
+        session = self._continuous_zoom_session()
+        session.native.zoom_out.side_effect = KeyboardInterrupt()
+        with self.assertRaises(KeyboardInterrupt):
+            _prepare_two_edge_view(session, session.scout, {"evidence": []}, capture_context={})
+        self.assertEqual(session.native.zoom_out.call_count, 1)
+        self.assertEqual(session.taps, [])
 
     def test_edrag_waits_for_selection_animation_without_clicking_again(self):
         session, _ = self.line_session([card(count=1), card("hero", None, 280)])
@@ -1111,6 +2025,15 @@ class DeploymentTests(unittest.TestCase):
         self.assertFalse(result["completed"])
         self.assertFalse(any("ability" in reason.lower() for _, _, reason, _ in session.taps))
 
+    def test_unknown_client_does_not_select_hero_from_old_slot(self) -> None:
+        session = FakeSession(self.clock, [card(count=1), card("hero", None, 280)])
+        session.client_version = "unknown"
+        result = deploy_army(session, session.scout).observations["deployment"]
+        self.assertEqual(result["support_attempts"][0]["status"], "identity_unverified")
+        self.assertFalse(result["support_deployment_verified"])
+        self.assertFalse(any("hero" in reason.lower() for _, _, reason, _ in session.taps))
+        self.hero_state.assert_not_called()
+
     def test_verified_hero_ability_clicked_once_and_waits_through_flash(self) -> None:
         session = FakeSession(self.clock, [card(count=1), card("hero", None, 280)])
         self.hero_state.side_effect = [
@@ -1128,6 +2051,9 @@ class DeploymentTests(unittest.TestCase):
         self.assertTrue(result["completed"])
         self.assertEqual(sum("Activate hero ability" in reason for _, _, reason, _ in session.taps), 1)
         self.assertNotEqual(attempt["ability_before_frame"], attempt["ability_after_frame"])
+        self.assertTrue(all(call.kwargs["unit_id"] == "grand_warden"
+                            and call.kwargs["client_version"] == "18.600.7"
+                            for call in self.hero_state.call_args_list))
 
     def test_uncertain_hero_activation_never_retries_click(self) -> None:
         session = FakeSession(self.clock, [card(count=1), card("hero", None, 280)])
@@ -1158,6 +2084,7 @@ class DeploymentTests(unittest.TestCase):
                 self.assertEqual(receipt["support_attempts"][0]["verified"], verified is True)
                 self.assertEqual(receipt["completed"], verified is True)
                 self.assertEqual(sum(point == [315, 645] for _, point, _, _ in session.taps), 1)
+                self.assertEqual(self.siege_state.call_args.kwargs["client_version"], "18.600.7")
 
     def test_settlement_at_final_observation_preserves_verified_empty_army(self) -> None:
         session = FakeSession(self.clock, [card(count=1)])
@@ -1191,6 +2118,8 @@ class DeploymentTests(unittest.TestCase):
         self.assertFalse(receipt["completed"])
         self.assertTrue(receipt["verified"])
         self.assertEqual(receipt["deployed_units"], 1)
+        self.assertNotIn("offensive_actions", receipt)  # Old verified partial path retains its fallback.
+        self.assertNotIn("phase", receipt)
         self.assertEqual(receipt["consumption_events"], confirmed)
         self.assertEqual(receipt["evidence"], [str(frame.screenshot_path) for frame in session.frames])
 
@@ -1301,6 +2230,46 @@ class DeploymentTests(unittest.TestCase):
         spell_events = [event for event in result["consumption_events"] if event["unit_kind"] == "spell"]
         self.assertEqual(sum(event["consumed"] for event in spell_events), 10)
         self.assertTrue(all(event["consumed"] <= 8 for event in spell_events))
+
+
+class CurrentPreviewZoomReplayTests(unittest.TestCase):
+    def test_current_preview_camera_and_time_evidence(self):
+        """Optional replay uses original local frames; no synthesized map or timer."""
+        report = os.environ.get("AUTOCOC_CURRENT_BATTLE_REPLAY")
+        if not report:
+            self.skipTest("Set AUTOCOC_CURRENT_BATTLE_REPLAY to the preserved live run")
+        root = Path(report)
+        observations = {}
+        for line in (root / "events.jsonl").read_text(encoding="utf-8").splitlines():
+            event = json.loads(line)
+            if event.get("kind") == "observation":
+                observations[Path(event["frame"]).name] = event
+        names = ("00011-battle-candidate.png", "00012-scout-camera-ready.png",
+                 "00013-line-zoom-out.png", "00014-line-zoom-verified.png",
+                 "00017-continuous-line-failure-check.png")
+        self.assertTrue(all(name in observations for name in names))
+        countdowns = [observations[name]["observations"]["battle"]["countdown_seconds"]
+                      for name in names[:4]]
+        self.assertEqual(countdowns, [28, 24, 14, 7])
+        captured = [datetime.fromisoformat(observations[name]["observations"]["captured_at_utc"])
+                    for name in names[:4]]
+        self.assertGreater((captured[3] - captured[1]).total_seconds(), 15)
+        self.assertLess((captured[3] - captured[1]).total_seconds(), 18)
+        from autococ.terrain import measure_camera_motion
+
+        first = measure_camera_motion(root / "frames" / names[1], root / "frames" / names[2])
+        second = measure_camera_motion(root / "frames" / names[2], root / "frames" / names[3])
+        self.assertTrue(first["stationary"])  # General camera tolerance is too wide for minimum zoom.
+        self.assertFalse(_minimum_zoom_motion(first))
+        self.assertTrue(_minimum_zoom_motion(second))
+        recognizer = ScreenshotRecognizer()
+        recognizer.client_version = "18.647.2"
+        for name, scene in ((names[1], "enemy_village"), (names[3], "enemy_village"),
+                            (names[4], "battle")):
+            with self.subTest(frame=name):
+                observed = recognizer.recognize_battle(root / "frames" / name,
+                                                       purpose="settlement", previous=None)
+                self.assertEqual(observed.scene, scene)
 
 
 if __name__ == "__main__":

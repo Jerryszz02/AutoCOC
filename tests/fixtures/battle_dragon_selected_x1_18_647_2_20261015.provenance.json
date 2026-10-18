@@ -1,0 +1,18 @@
+{
+  "client_version": "18.647.2",
+  "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261015-192725-196937-2f0c35e9\\frames\\00017-line-selected.png",
+  "source_sha256": "843e9f3dfed957de49899b2e6ac10deccf87d2c97e97df79040acd6775aa73f6",
+  "crop_xyxy_native": [
+    360,
+    1140,
+    590,
+    1440
+  ],
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "output_sha256": "3d67fa5bb6b8ed4c92ed67939e0ad6d847cd9e7688403abebaa664529a107b36",
+  "contents": "Only battle HUD dragon card and adjacent card edges; no player name or village background.",
+  "purpose": "Selected x1 to gray x0 local count OCR regression."
+}

@@ -1,0 +1,149 @@
+{
+  "client_version": "18.647.2",
+  "purpose": "same_pixels_local_cpu_ocr_development_replay_not_original_live_trace",
+  "source_report_sha256": "9c016b4443c78199b04210ceeabe44066f65923be88edf44efc6e1da544c27da",
+  "source_frame_sha256": "54f45ffc395e0013c16294d4bf529bf600fdf332850c182b464c34f7ff8ca239",
+  "current_frame_sha256": "1d140181061226a6099413d825dda0ab5092829de7f4edb9148b815fb1747243",
+  "events_sha256": "1a9c21eb839e56d71153345ce67e596d7aff890d77f0697e1a6edeec37bd8d44",
+  "probed_anchor_sha256": "a2ebaf327c95633c40969ecc2e910e51d562a60f2445b3ded4082e13b793ad57",
+  "human_reviewed": false,
+  "counts_toward_acceptance": false,
+  "raw_calls": [
+    {
+      "stage": "probe_count",
+      "input_shape": [
+        70,
+        168,
+        3
+      ],
+      "elapsed_sec": 0.010693,
+      "output": [
+        {
+          "text": "x0",
+          "confidence": 0.63338,
+          "bbox": [
+            0,
+            0,
+            168,
+            70
+          ]
+        }
+      ]
+    },
+    {
+      "stage": "probe_count",
+      "input_shape": [
+        70,
+        168
+      ],
+      "elapsed_sec": 0.010698,
+      "output": [
+        {
+          "text": "x0",
+          "confidence": 0.95918,
+          "bbox": [
+            0,
+            0,
+            168,
+            70
+          ]
+        }
+      ]
+    }
+  ],
+  "post_troop_reading": {
+    "count": 0,
+    "confidence": 0.95918,
+    "frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-173539-614225-f37bc7ce\\frames\\00018-mixed-balloon-post-1.png",
+    "slot_bbox": [
+      383,
+      595,
+      472,
+      711
+    ],
+    "roi": [
+      386,
+      593,
+      470,
+      628
+    ],
+    "readings": [
+      {
+        "text": "x0",
+        "confidence": 0.95918,
+        "bbox": [
+          386,
+          593,
+          470,
+          628
+        ],
+        "source": "fast_header_threshold_line"
+      }
+    ],
+    "portrait_score": 0.9998849630355835,
+    "portrait_scale": 1.0,
+    "portrait_source": "current_frame_saved_battle_portrait"
+  },
+  "probe_count_border": {
+    "method": "spent_balloon_89_versioned_closed_outline",
+    "left_edge": 221.0,
+    "right_edge": -214.0,
+    "straight_left_min": 213.0,
+    "straight_right_max": -142.0,
+    "corner_trace": [
+      [
+        702,
+        384,
+        470
+      ],
+      [
+        703,
+        384,
+        470
+      ],
+      [
+        704,
+        384,
+        470
+      ],
+      [
+        705,
+        384,
+        470
+      ],
+      [
+        706,
+        385,
+        469
+      ],
+      [
+        707,
+        385,
+        469
+      ],
+      [
+        708,
+        386,
+        468
+      ],
+      [
+        709,
+        387,
+        467
+      ],
+      [
+        710,
+        389,
+        465
+      ]
+    ],
+    "corner_endpoints": [
+      389,
+      465
+    ],
+    "core_template_sha256": "82a82f970d61d1a5e0971103cb6a3ca6025110bb6ad704db65ffadd3c489f797",
+    "core_max_error": 0,
+    "lower_rebound_min": 10.0,
+    "continuous_columns": 73
+  }
+}

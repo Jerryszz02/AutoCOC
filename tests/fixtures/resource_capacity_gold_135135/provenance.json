@@ -1,0 +1,25 @@
+{
+  "schema": "anonymous_resource_capacity_gold_135135_v1",
+  "client_version": "18.647.2",
+  "source_split": "prospective_whole_session_train",
+  "transform": "native top-left [0,0,500,250] set black; no resize or other pixel changes",
+  "fixtures": {
+    "home": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-135135-222671-d3a0280b\\frames\\00136-battle-return-home.png",
+      "source_sha256": "cdbd736d49a25f71b54c3db0207775b1cec5a74e2784135861e793bc3356d676",
+      "derived_sha256": "1e203ed22be7434155627e3ed357b15071f19566d32319f08e0ab6789763593c"
+    },
+    "opening": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-135135-222671-d3a0280b\\frames\\00137-gold-storage-detail.png",
+      "source_sha256": "c9a35c0b7dbba89bf5c1230ac4cc37d648713a5544478ff2a671698ad72c0ad7",
+      "derived_sha256": "f4120bab1489d48e6e1a44e209df20caf2ad7f8c3ba60996c0b9cf3df2c8abb2"
+    },
+    "settled": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-135135-222671-d3a0280b\\frames\\00138-gold-storage-detail-settled.png",
+      "source_sha256": "da700dabefc2daf0be56d2812a18850ac9ac6afa3fc54a66e119ededacced3c3",
+      "derived_sha256": "23107b3f3ad43890353e404c23b3e8854468332ba55fc5678ba43bbdbdea7178"
+    }
+  },
+  "human_review": false,
+  "purpose": "local strict tooltip capacity regression; not formal inventory acceptance"
+}

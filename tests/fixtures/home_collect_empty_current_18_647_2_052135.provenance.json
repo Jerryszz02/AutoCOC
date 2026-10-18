@@ -1,0 +1,44 @@
+{
+  "source_run": "20261016-052135-830319-3b36a4e4",
+  "source_frame": "00002-collect-before.png",
+  "source_sha256": "36800b7fbcc483a3400b2a00219bf4b7e586013f490a4fbffc7c4276e7bb2d8b",
+  "source_client_version": "18.647.2",
+  "source_scene": "village",
+  "preserved_resolution": [
+    2560,
+    1440
+  ],
+  "masks_at_native_2560x1440": [
+    {
+      "reason": "player portrait and level",
+      "xyxy": [
+        0,
+        0,
+        245,
+        270
+      ]
+    },
+    {
+      "reason": "player name and clan line",
+      "xyxy": [
+        245,
+        100,
+        510,
+        225
+      ]
+    },
+    {
+      "reason": "chat control and any private overlay",
+      "xyxy": [
+        28,
+        608,
+        250,
+        830
+      ]
+    }
+  ],
+  "derivation": "BGR pixels copied without scaling, interpolation or enhancement; only the listed privacy rectangles are set to zero. The map, event droplet, decoration, generic collect text, and all resource-bubble search pixels outside these rectangles remain original.",
+  "fixture_sha256": "b480e7796026b9e488b3b728be056ba35f41334079fa2b6b154fe50cdba7e225",
+  "review_method": "agent_visual",
+  "training_status": "not_in_training"
+}

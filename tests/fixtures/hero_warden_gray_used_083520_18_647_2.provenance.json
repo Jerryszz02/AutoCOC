@@ -1,0 +1,11 @@
+{
+  "kind": "anonymous_grand_warden_used_card_fixture",
+  "client_version": "18.647.2",
+  "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261017-083520-202309-7aceaf73\\frames\\00028-post-deployment-skill-after-1.png",
+  "source_sha256": "dc51e72b82bfdda9dd125b2b96c73196a407b2c638903c9208fb74129bab34d8",
+  "fixture_sha256": "cf7c4ed9b55e4e67e7ae24a8231f282a86d048f92881ae91b635a4c9afaae1df",
+  "transformation": "INTER_AREA 2560x1440 to 1280x720, rows 0:515 black",
+  "human_ground_truth": false,
+  "formal_battle_acceptance": false,
+  "purpose": "development regression for same-frame gray used card, HP, book and card"
+}

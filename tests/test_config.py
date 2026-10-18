@@ -109,6 +109,56 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaises(ConfigError):
                 load_config(path)
 
+    def test_continuous_line_is_explicit_and_scoped_to_edrag_line(self):
+        self.assertEqual(BattleConfig().line_execution_mode, "verified")
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text('[battle]\nstrategy = "edrag_line"\nline_execution_mode = "continuous"\n', encoding="utf-8")
+            self.assertEqual(load_config(path).battle.line_execution_mode, "continuous")
+        for kwargs in ({"line_execution_mode": "continuous"},
+                       {"strategy": "two_edge", "line_execution_mode": "continuous"},
+                       {"strategy": "edrag_line", "line_execution_mode": "guess"}):
+            with self.subTest(kwargs=kwargs), self.assertRaises(ConfigError):
+                BattleConfig(**kwargs)
+
+    def test_two_edge_modes_require_explicit_continuous_edrag_line(self):
+        self.assertEqual(BattleConfig().line_tactics, "single_edge")
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            for tactics in ("two_edge_split", "two_edge_probed_anchors",
+                            "two_edge_furnace_mixed_probes"):
+                with self.subTest(tactics=tactics):
+                    path.write_text('[battle]\nstrategy="edrag_line"\n'
+                                    'line_execution_mode="continuous"\n'
+                                    f'line_tactics="{tactics}"\n', encoding="utf-8")
+                    self.assertEqual(load_config(path).battle.line_tactics, tactics)
+                for strategy in ("verified", "edrag_line", "two_edge"):
+                    with self.subTest(tactics=tactics, strategy=strategy), self.assertRaises(ConfigError):
+                        BattleConfig(strategy=strategy, line_tactics=tactics)
+        with self.assertRaises(ConfigError):
+            BattleConfig(strategy="edrag_line", line_execution_mode="continuous", line_tactics="unknown")
+
+    def test_post_deployment_skill_is_explicit_scoped_and_bounded(self):
+        self.assertEqual(BattleConfig().post_deployment_hero_skill, "")
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text('[battle]\nstrategy="edrag_line"\nline_execution_mode="continuous"\n'
+                            'post_deployment_hero_skill="grand_warden"\nhero_skill_delay_sec=20\n', encoding="utf-8")
+            config = load_config(path).battle
+            self.assertEqual(config.post_deployment_hero_skill, "grand_warden")
+            self.assertEqual(config.hero_skill_delay_sec, 20)
+        for changes in ({"strategy": "verified", "line_execution_mode": "verified"},
+                        {"line_execution_mode": "verified"}, {"strategy_file": "custom.toml"},
+                        {"post_deployment_hero_skill": "archer_queen"},
+                        {"post_deployment_hero_skill": None}, {"post_deployment_hero_skill": []},
+                        {"hero_skill_delay_sec": -1}, {"hero_skill_delay_sec": 31},
+                        {"hero_skill_delay_sec": True}, {"hero_skill_delay_sec": 1.5}):
+            values = {"strategy": "edrag_line", "line_execution_mode": "continuous",
+                      "post_deployment_hero_skill": "grand_warden"}
+            values.update(changes)
+            with self.subTest(changes=changes), self.assertRaises(ConfigError):
+                BattleConfig(**values)
+
     def test_legacy_weights_are_explicitly_ignored_for_existing_local_configs(self) -> None:
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.toml"
@@ -123,6 +173,24 @@ class ConfigTests(unittest.TestCase):
                        {"settlement_timeout_sec": 0}, {"settlement_timeout_sec": True}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ConfigError):
                 BattleConfig(**kwargs)
+
+    def test_settlement_wait_has_independent_default_and_preserves_explicit_values(self) -> None:
+        self.assertEqual(BattleConfig().settlement_timeout_sec, 240)
+        self.assertEqual(BattleConfig(deploy_timeout_sec=90).settlement_timeout_sec, 240)
+        self.assertIsNone(BattleConfig(settlement_timeout_sec=None).settlement_timeout_sec)
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text('[battle]\ndeploy_timeout_sec = 90\n', encoding="utf-8")
+            battle = load_config(path).battle
+            self.assertEqual((battle.deploy_timeout_sec, battle.settlement_timeout_sec), (90, 240))
+            path.write_text('[battle]\ndeploy_timeout_sec = 90\nsettlement_timeout_sec = 120\n',
+                            encoding="utf-8")
+            self.assertEqual(load_config(path).battle.settlement_timeout_sec, 120)
+            for value in ("0", "-1", "true", "1.5"):
+                with self.subTest(value=value):
+                    path.write_text(f'[battle]\nsettlement_timeout_sec = {value}\n', encoding="utf-8")
+                    with self.assertRaises(ConfigError):
+                        load_config(path)
 
     def test_rejects_unknown_profile_task(self) -> None:
         with TemporaryDirectory() as tmp:

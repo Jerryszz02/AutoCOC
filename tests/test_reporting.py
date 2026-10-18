@@ -5,12 +5,14 @@ import hashlib
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from autococ.config import ProfileConfig, load_config
 from autococ.reporting import (DecisionTrace, RunStats, TaskResult, capture_run_provenance,
-                               resource_metrics, summarize_run, vision_agent_metrics, write_report)
+                               interrupted_battle_metrics, resource_metrics, summarize_run,
+                               vision_agent_metrics, write_report)
 
 
 def success(task: str, **metrics: object) -> TaskResult:
@@ -18,6 +20,45 @@ def success(task: str, **metrics: object) -> TaskResult:
 
 
 class ReportingTests(unittest.TestCase):
+    def test_cancelled_battle_keeps_only_current_chest_input_receipt(self) -> None:
+        old = {"kind": "battle_chest_ui", "input_attempts": [{"action": "old"}]}
+        session = SimpleNamespace(battle_reward_receipt=old,
+                                  _battle_reward_run_initial_receipt=old,
+                                  frozen_line_receipt=None, prepared_battle_receipt=None)
+        self.assertNotIn("battle_reward", interrupted_battle_metrics(session))
+        current = {"kind": "battle_chest_ui", "status": "incomplete", "input_attempts": [
+            {"action": "claim_battle_reward", "input_attempted": True, "input_returned": False}]}
+        session.battle_reward_receipt = current
+        self.assertIs(interrupted_battle_metrics(session)["battle_reward"], current)
+
+    def test_cancelled_probed_anchor_keeps_attempted_issued_and_verified_partial(self) -> None:
+        receipt = {"mode": "model_free_line_probed_anchors", "line_tactics": "two_edge_probed_anchors",
+                   "attempted_placements": 2, "issued_placements": 1,
+                   "deployed_units": 1, "verified": False, "completed": False,
+                   "input_sent": False, "any_input_sent": True,
+                   "probe_events": [{"edge": 0, "status": "verified", "after_count": 1},
+                                    {"edge": 1, "status": "uncertain"}]}
+        metrics = interrupted_battle_metrics(SimpleNamespace(frozen_line_receipt=receipt,
+                                                              prepared_battle_receipt=None))
+        self.assertIs(metrics["deployment"], receipt)
+        self.assertEqual(metrics["line_execution"],
+                         {"mode": "two_edge_probed_anchors", "status": "cancelled"})
+        self.assertEqual(metrics["deployment"]["deployed_units"], 1)
+        self.assertFalse(metrics["deployment"]["completed"])
+
+    def test_cancelled_mixed_probe_keeps_distinct_partial_mode(self) -> None:
+        receipt = {"mode": "model_free_line_mixed_probes",
+                   "line_tactics": "two_edge_furnace_mixed_probes",
+                   "attempted_placements": 2, "issued_placements": 1,
+                   "deployed_units": 1, "verified": False, "completed": False,
+                   "probe_events": [{"unit_id": "balloon", "status": "verified"},
+                                    {"unit_id": "dragon", "status": "uncertain"}]}
+        metrics = interrupted_battle_metrics(SimpleNamespace(frozen_line_receipt=receipt,
+                                                              prepared_battle_receipt=None))
+        self.assertIs(metrics["deployment"], receipt)
+        self.assertEqual(metrics["line_execution"],
+                         {"mode": "two_edge_furnace_mixed_probes", "status": "cancelled"})
+
     def test_vision_agent_report_keeps_failed_partial_and_unknown_attempts(self) -> None:
         complete = {"mode": "continuous", "status": "consumption_verified", "plan_ready": True,
                     "input_sent": True, "consumption_verified": True,
@@ -104,7 +145,9 @@ class ReportingTests(unittest.TestCase):
     def test_resource_ledger_separates_gross_collection_and_costs(self) -> None:
         stats = RunStats(task_results=[
             success("battle", loot_gold=100, bonus_gold=20, search_cost_gold=3,
-                    loot_elixir=200, bonus_elixir=40, search_cost_elixir=0),
+                    loot_elixir=200, bonus_elixir=40, search_cost_elixir=0,
+                    inventory_reconciled=True, battle_credited_gold=120, overflow_gold=0,
+                    battle_credited_elixir=240, overflow_elixir=0),
             success("collect", collected_gold=50, collected_elixir=60),
             success("donate", donation_cost_gold=10, donation_cost_elixir=30),
             TaskResult("battle", "simulated", "not real", metrics={"loot_gold": 90000}),
@@ -127,12 +170,43 @@ class ReportingTests(unittest.TestCase):
             success("morning", receipt_kind="collect", collected_gold=50),
             success("help-clan", receipt_kind="donate", donation_cost_gold=2),
             success("gold-farm", receipt_kind="battle", returned_home=True, rounds_completed=1,
-                    loot_gold=100, bonus_gold=10, search_cost_gold=3),
+                    loot_gold=100, bonus_gold=10, search_cost_gold=3,
+                    inventory_reconciled=True, battle_credited_gold=110, overflow_gold=0),
             success("gold-farm", receipt_kind="goal_progress", battle_id="same-battle"),
         ])
         gold = resource_metrics(stats)["resources"]["gold"]
         self.assertEqual(gold["battle_gross"], 110)
         self.assertEqual(gold["operating_net"], 155)
+
+    def test_full_storage_keeps_gross_reward_but_only_credited_amount_in_net(self) -> None:
+        battle = success("battle", loot_gold=675655, bonus_gold=375000, search_cost_gold=1700,
+                         inventory_reconciled=True, battle_credited_gold=3400, overflow_gold=1047255)
+        stats = RunStats(task_results=[battle, success("collect", collected_gold=0)])
+        gold = resource_metrics(stats, elapsed_sec=3600)["resources"]["gold"]
+        self.assertEqual(gold["battle_gross"], 1050655)
+        self.assertEqual(gold["battle_credited"], 3400)
+        self.assertEqual(gold["battle_overflow"], 1047255)
+        self.assertEqual(gold["operating_net"], 1048955)
+        self.assertEqual(gold["credited_operating_net"], 1700)
+        with TemporaryDirectory() as directory:
+            report = write_report(Path(directory), stats).read_text(encoding="utf8")
+            self.assertIn("Battle credited | Overflow", report)
+
+    def test_unreconciled_or_inconsistent_storage_credit_cannot_claim_net(self) -> None:
+        base = {"loot_gold": 100, "bonus_gold": 20, "search_cost_gold": 3,
+                "inventory_reconciled": True, "battle_credited_gold": 50, "overflow_gold": 70}
+        for changed in ({"inventory_reconciled": False}, {"inventory_reconciled": None},
+                        {"battle_credited_gold": None}, {"battle_credited_gold": True},
+                        {"overflow_gold": -1}, {"overflow_gold": 71},
+                        {"overflow_gold": float("nan")}):
+            with self.subTest(changed=changed):
+                stats = RunStats(task_results=[success("battle", **(base | changed)),
+                                              success("collect", collected_gold=0)])
+                gold = resource_metrics(stats)["resources"]["gold"]
+                self.assertEqual(gold["battle_gross"], 120)
+                self.assertIsNone(gold["battle_credited"])
+                self.assertEqual(gold["operating_net"], 117)
+                self.assertIsNone(gold["credited_operating_net"])
 
     def test_absent_cost_events_are_zero(self) -> None:
         stats = RunStats(task_results=[

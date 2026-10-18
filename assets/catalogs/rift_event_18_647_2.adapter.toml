@@ -1,0 +1,24 @@
+version = 1
+id = "rift-event-18-647-2"
+kind = "event"
+client_versions = ["18.647.2"]
+
+entry_template = "daily_event_calendar_18_647_2"
+entry_roi = [270, 610, 365, 710]
+title = "活动"
+title_roi = [590, 20, 690, 90]
+foreground_label = "今日活动"
+foreground_evidence = "event_panel"
+foreground_roi = [195, 85, 310, 145]
+
+# One current-event card; the other cards' labels, clocks and values are outside it.
+section_roi = [205, 330, 1070, 635]
+active_label = "裂隙之乱"
+active_roi = [205, 335, 315, 395]
+remaining_pattern = '(?P<days>\d+)天(?:(?P<hours>\d+)小时)?'
+remaining_roi = [925, 335, 1065, 395]
+progress_roi = [880, 470, 1045, 525]
+scoring_condition = "battle"
+
+close_text = "X"
+close_roi = [1015, 20, 1090, 95]

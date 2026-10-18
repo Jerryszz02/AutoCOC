@@ -1,0 +1,80 @@
+{
+  "client_version": "18.647.2",
+  "source_kind": "agent_visual_manual_navigation_same_session_not_human_gt",
+  "human_review": false,
+  "formal_acceptance": false,
+  "transformation": {
+    "decode": "cv2.IMREAD_COLOR",
+    "resize": [
+      1280,
+      720
+    ],
+    "interpolation": "cv2.INTER_AREA",
+    "fill_bgr": [
+      24,
+      24,
+      24
+    ],
+    "mask_order": [
+      "resize",
+      "fill outside preserved_panel_roi"
+    ]
+  },
+  "fixtures": {
+    "roundtrip_panel_open": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-075126-471521-event-reward-roundtrip-v1\\frames\\00004-event-reward-panel-2.png",
+      "source_sha256": "bc14ad58f36a2330153385740054c6b7becb44d20a4ab65670279ef233f08fca",
+      "source_events_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-075126-471521-event-reward-roundtrip-v1\\events.jsonl",
+      "source_events_sha256": "d727affc076b5a615a2620dd59ad6012be07d3f788ab323a32b52e4e6fc94ad7",
+      "derived_path": "tests\\fixtures\\event_rewards_18_647_2\\roundtrip_panel_open.png",
+      "derived_sha256": "6a77651288f5736f263ea45f655a7a4019468f6ba819ea65c282f0095b718000",
+      "ocr_path": "tests\\fixtures\\event_rewards_18_647_2\\roundtrip_panel_open.ocr.json",
+      "ocr_sha256": "769e68cd1cf2270036066de6b00c773e5e1d7df1bc800807fcc3de8e1aa60030",
+      "ocr_whitelist": [
+        "X",
+        "今日活动",
+        "打开",
+        "活动",
+        "裂隙之乱"
+      ],
+      "preserved_panel_roi_xyxy": [
+        190,
+        20,
+        1095,
+        700
+      ],
+      "source_frame_id": "e5f69b11e3e845909a08420a94434e06",
+      "source_scene": "popup"
+    },
+    "roundtrip_track_shifted": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-075228-tap\\frames\\00002-after.png",
+      "source_sha256": "d7f4d6e72e46e0c69fb09981481d70f72d755be28aa165b5f665ad102684668f",
+      "source_events_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-075228-tap\\events.jsonl",
+      "source_events_sha256": "3ec72c81f7ca6a6ce69f742a4eefd99d0cc75c837b06c944472d0bc348ecbcd9",
+      "derived_path": "tests\\fixtures\\event_rewards_18_647_2\\roundtrip_track_shifted.png",
+      "derived_sha256": "47b9177e14f438ae334bbeb66e5b6b6beeb08b2e838aa3e71bb8765d3de9ba56",
+      "ocr_path": "tests\\fixtures\\event_rewards_18_647_2\\roundtrip_track_shifted.ocr.json",
+      "ocr_sha256": "660eca9ee47348174fe2fd323d376670dc7a689dc8b6334d44f7145a8097430b",
+      "ocr_whitelist": [
+        "100",
+        "1500",
+        "25",
+        "奖励清单",
+        "星辉矿石",
+        "璀璨矿石",
+        "能量点心",
+        "裂隙之乱",
+        "购买活动令牌",
+        "闪亮矿石"
+      ],
+      "preserved_panel_roi_xyxy": [
+        125,
+        20,
+        1155,
+        700
+      ],
+      "source_frame_id": "637658edbe72460b924a79a36f232313",
+      "source_scene": "unknown"
+    }
+  }
+}

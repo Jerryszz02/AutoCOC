@@ -129,6 +129,10 @@ def deploy_army(session: GameSession, scout: SceneSnapshot) -> SceneSnapshot:
         return _deploy_army(session, scout, receipt)
     except Exception as exc:
         # KeyboardInterrupt deliberately propagates to the runner unchanged.
+        if isinstance(exc, DeploymentError):
+            frames = receipt["evidence"]
+            receipt.update(exc.partial_receipt)
+            receipt["evidence"] = list(dict.fromkeys(frames + receipt.get("evidence", [])))
         last = session.last_snapshot
         if last is not None and str(last.screenshot_path) not in receipt["evidence"]:
             receipt["evidence"].append(str(last.screenshot_path))
@@ -217,8 +221,27 @@ def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, 
         check_deadline()
         return count
 
+    line_context = {}
+    continuous_line = getattr(session.config.battle, "line_execution_mode", "verified") == "continuous"
     if line_mode:
-        current, terrain = _prepare_two_edge_view(session, current, receipt)
+        probed_boundary_scan = (continuous_line and
+                                getattr(session.config.battle, "line_tactics", "single_edge")
+                                in {"two_edge_probed_anchors", "two_edge_furnace_mixed_probes"})
+        if probed_boundary_scan:
+            # This phase contains zoom and card selection, but no field tap or
+            # probe. These explicit zeroes are scoped to this phase only.
+            receipt.update(phase="boundary_scan", attempted_placements=0,
+                           issued_placements=0, offensive_actions=0)
+        if continuous_line:
+            if strategy != "edrag_line" or session.config.vision_agent.enabled:
+                raise FlowError("Continuous line requires model-free edrag_line")
+            current, terrain = _prepare_two_edge_view(session, current, receipt, capture_context=line_context)
+        else:
+            current, terrain = _prepare_two_edge_view(session, current, receipt)
+        if probed_boundary_scan:
+            receipt["phase"] = "boundary_verified"
+            for field in ("attempted_placements", "issued_placements", "offensive_actions"):
+                receipt.pop(field)
     else:
         terrain = find_west_deployment_points(current.screenshot_path,
                                               baseline_resolution=session.config.game.baseline_resolution)
@@ -303,6 +326,9 @@ def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, 
          "bbox": list(slot["bbox"]), "before_count": slot["count"]}
         for slot in planned_cards]
     if line_mode:
+        if continuous_line:
+            return _deploy_continuous_line(session, current, receipt, line_context,
+                                           scout.observations.get("expected_hero_manifest"), deadline)
         planner = STRATEGIES[strategy].planner
         plan = planner.build_plan(BattleContext(tuple(planned_cards),
             tuple(slot for slot in slots if slot["kind"] == "hero"), tuple(terrain)))
@@ -404,6 +430,16 @@ def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, 
                    if item["kind"] == slot["kind"] and abs(item["point"][0] - slot["point"][0]) < 25]
         if len(matches) != 1:
             continue
+        if slot["kind"] == "hero" and (
+            session.client_version not in {"18.600.7", "18.647.2"}
+            or not isinstance(slot.get("unit_id"), str)
+            or not slot["unit_id"]
+            or matches[0].get("unit_id") != slot["unit_id"]
+        ):
+            support_attempts.append({"kind": "hero", "point": matches[0]["point"],
+                                     "status": "identity_unverified", "verified": False,
+                                     "selection_frame": str(current.screenshot_path)})
+            continue
         attempt = {"kind": slot["kind"], "point": matches[0]["point"], "status": "attempted", "verified": False,
                    "selection_frame": str(current.screenshot_path), "placement_frame": None}
         support_attempts.append(attempt)
@@ -421,7 +457,8 @@ def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, 
             def read_hero(label: str) -> dict:
                 snapshot = observe(label)
                 state = recognize_hero_state(snapshot.screenshot_path, slot["bbox"],
-                                             baseline_resolution=session.config.game.baseline_resolution)
+                                             baseline_resolution=session.config.game.baseline_resolution,
+                                             unit_id=matches[0]["unit_id"], client_version=session.client_version)
                 states.append(state)
                 session.event("hero_state", **state)
                 return state
@@ -452,7 +489,8 @@ def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, 
             for _ in range(2):
                 snapshot = observe("deploy-siege-verify")
                 state = recognize_siege_state(snapshot.screenshot_path, slot["bbox"],
-                                               baseline_resolution=session.config.game.baseline_resolution)
+                                               baseline_resolution=session.config.game.baseline_resolution,
+                                               client_version=session.client_version)
                 states.append(state)
                 session.event("siege_state", **state)
                 if state["deployed"] is True:
@@ -495,33 +533,178 @@ def _deploy_army(session: GameSession, scout: SceneSnapshot, receipt: dict[str, 
     return current
 
 
-def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt: dict) -> tuple[SceneSnapshot, list[dict]]:
+def _minimum_zoom_motion(motion: dict) -> bool:
+    """Require near-identity map motion after a completed native zoom gesture."""
+    affine = motion.get("affine")
+    matches, inliers = motion.get("matched_points"), motion.get("inliers")
+    return bool(
+        motion.get("stationary") is True
+        and type(matches) is int and matches >= 40
+        and type(inliers) is int and inliers >= 40 and inliers / matches >= .8
+        and isinstance(affine, list) and len(affine) == 2
+        and all(isinstance(row, list) and len(row) == 3 for row in affine)
+        and all(type(value) in (int, float) and math.isfinite(value)
+                for row in affine for value in row)
+        and abs(affine[0][0] - 1) <= .002
+        and abs(affine[0][1]) <= .002
+        and abs(affine[1][0]) <= .002
+        and abs(affine[1][1] - 1) <= .002
+        and math.hypot(affine[0][2], affine[1][2]) < 3
+    )
+
+
+def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt: dict, *,
+                           capture_context: dict | None = None) -> tuple[SceneSnapshot, list[dict]]:
     from .battle_vision import selected_card_bbox
     from .terrain import find_line_deployment_edges, measure_camera_motion
 
     if session.native is None:
         raise FlowError("Two-edge minimum zoom requires the MuMu native transport")
-    for _ in range(3):
-        session._validate_snapshot(current)
+    if capture_context is not None:
+        # The continuous batch must be frozen inside the preparation countdown.
+        # Each native pinch takes about 1.7 s on the observed client. Observe
+        # after each pinch so a camera already at minimum scale costs one pinch,
+        # rather than spending the whole preview on four blind gestures.
+        from .prepared_battle import _remaining_seconds
+
+        if current.scene != "enemy_village":
+            raise FlowError("Minimum zoom requires the current enemy preview")
+        captured_at = current.observations.get("observed_at_monotonic")
+        if type(captured_at) not in (int, float) or not math.isfinite(captured_at):
+            raise FlowError("Minimum zoom requires a current preview capture time")
+        preview_end = captured_at + _remaining_seconds(current) - 1
+        before = current
+        motion = None
+        probes = receipt.setdefault("zoom_probes", [])
+        for attempt in range(4):
+            # Reserve time for one pinch, a full roster read, selected-border
+            # verification and freezing. The final freeze still applies its own
+            # stricter fresh-frame deadline.
+            if time.monotonic() + 7 >= preview_end:
+                raise FlowError("Preview time is insufficient to verify minimum zoom")
+            session._validate_snapshot(before)
+            gesture_started = time.monotonic()
+            session.native.zoom_out()
+            session.action_count += 1
+            gesture_elapsed = time.monotonic() - gesture_started
+            time.sleep(.2)
+            observation_started = time.monotonic()
+            after = session.observe("line-zoom-probe", purpose="settlement")
+            observation_elapsed = time.monotonic() - observation_started
+            receipt["evidence"].append(str(after.screenshot_path))
+            if (after.scene != "enemy_village" or not math.isfinite(after.confidence)
+                    or after.confidence < .8):
+                raise FlowError("Enemy preview was lost while verifying minimum zoom")
+            motion_started = time.monotonic()
+            motion = measure_camera_motion(before.screenshot_path, after.screenshot_path)
+            motion_elapsed = time.monotonic() - motion_started
+            # The general camera detector tolerates 2% scale drift. That is
+            # suitable for scene stability, but not proof of minimum zoom:
+            # the real 00012->00013 pair drifted 0.42% and the subsequent
+            # 00013->00014 pinch was still needed.
+            converged = _minimum_zoom_motion(motion)
+            probe = {"attempt": attempt + 1, "frame": str(after.screenshot_path),
+                     "gesture_elapsed_sec": gesture_elapsed,
+                     "observation_elapsed_sec": observation_elapsed,
+                     "motion_elapsed_sec": motion_elapsed,
+                     "converged": converged, "motion": motion}
+            probes.append(probe)
+            session.event("line_zoom_probe", **probe)
+            if converged:
+                break
+            before = after
+        else:
+            raise FlowError("Minimum zoom did not stabilize before line deployment")
+        if time.monotonic() + 5 >= preview_end:
+            raise FlowError("Preview time is insufficient for the selected boundary")
+        full_started = time.monotonic()
+        current = session.observe("line-zoom-verified")
+        full_elapsed = time.monotonic() - full_started
+        receipt["evidence"].append(str(current.screenshot_path))
+        if (current.scene != "enemy_village" or not math.isfinite(current.confidence)
+                or current.confidence < .8):
+            raise FlowError("Enemy preview was lost before line deployment")
+        confirmation = measure_camera_motion(after.screenshot_path, current.screenshot_path)
+        if not _minimum_zoom_motion(confirmation):
+            raise FlowError("Minimum zoom changed before the full roster read")
+        try:
+            _remaining_seconds(current)
+        except FlowError:
+            from .battle_vision import preparation_countdown_retry_candidate
+
+            weak_timer = preparation_countdown_retry_candidate(
+                current, session.config.game.baseline_resolution)
+            if weak_timer is None:
+                raise
+            # The scout's original preview end is the hard bound. The weak
+            # timer supplies no duration and cannot extend this permission.
+            hard_end = min(preview_end, getattr(session, "deadline", math.inf),
+                           getattr(session, "task_deadline", math.inf))
+            if time.monotonic() + 5 >= hard_end:
+                raise FlowError("Preview time is insufficient for a countdown recheck")
+            session._validate_snapshot(current)
+            previous = current
+            receipt["countdown_recheck"] = {"trigger": weak_timer["reason"],
+                                            "weak_frame": str(previous.screenshot_path),
+                                            "weak_timer_confidence": weak_timer["timer"]["confidence"]}
+            recheck_started = time.monotonic()
+            current = session.observe("line-countdown-recheck")
+            recheck_elapsed = time.monotonic() - recheck_started
+            receipt["evidence"].append(str(current.screenshot_path))
+            previous_at = previous.observations.get("observed_at_monotonic")
+            current_at = current.observations.get("observed_at_monotonic")
+            if (current.screenshot_path == previous.screenshot_path
+                    or type(previous_at) not in (int, float) or not math.isfinite(previous_at)
+                    or type(current_at) not in (int, float) or not math.isfinite(current_at)
+                    or current_at <= previous_at):
+                raise FlowError("Countdown recheck did not capture a new frame")
+            if (current.scene != "enemy_village" or not math.isfinite(current.confidence)
+                    or current.confidence < .8):
+                raise FlowError("Enemy preview was lost during countdown recheck")
+            recheck_motion = measure_camera_motion(previous.screenshot_path, current.screenshot_path)
+            if not _minimum_zoom_motion(recheck_motion):
+                raise FlowError("Minimum zoom changed during countdown recheck")
+            session._validate_snapshot(current)
+            if time.monotonic() + 5 >= hard_end:
+                raise FlowError("Preview time expired during countdown recheck")
+            _remaining_seconds(current)
+            receipt["countdown_recheck"].update(
+                frame=str(current.screenshot_path), elapsed_sec=recheck_elapsed,
+                motion=recheck_motion, countdown_evidence=current.observations["battle"]["countdown_evidence"])
+            receipt["minimum_zoom_initial_confirmation_motion"] = confirmation
+            confirmation = recheck_motion
+    else:
+        for _ in range(3):
+            session._validate_snapshot(current)
+            session.native.zoom_out()
+            session.action_count += 1
+            time.sleep(.5)
+        time.sleep(1)
+        before = session.observe("line-zoom-out")
+        _battle_frame(before)
+        session._validate_snapshot(before)
         session.native.zoom_out()
         session.action_count += 1
-        time.sleep(.5)
-    time.sleep(1)
-    before = session.observe("line-zoom-out")
-    _battle_frame(before)
-    session._validate_snapshot(before)
-    session.native.zoom_out()
-    session.action_count += 1
-    time.sleep(1)
-    current = session.observe("line-zoom-verified")
-    _battle_frame(current)
-    motion = measure_camera_motion(before.screenshot_path, current.screenshot_path)
-    receipt["evidence"].extend([str(before.screenshot_path), str(current.screenshot_path)])
+        time.sleep(1)
+        current = session.observe("line-zoom-verified")
+        _battle_frame(current)
+        motion = measure_camera_motion(before.screenshot_path, current.screenshot_path)
+        receipt["evidence"].extend([str(before.screenshot_path), str(current.screenshot_path)])
     receipt["minimum_zoom"] = {"verified": motion["stationary"] is True, "motion": motion,
                                "frame": str(current.screenshot_path)}
+    if capture_context is not None:
+        receipt["minimum_zoom"].update(confirmation_motion=confirmation,
+                                       gesture_count=attempt + 1,
+                                       gesture_frame=str(after.screenshot_path),
+                                       full_roster_elapsed_sec=full_elapsed)
     session.event("line_minimum_zoom", **receipt["minimum_zoom"])
     if motion["stationary"] is not True:
         raise FlowError("Minimum zoom did not stabilize before line deployment")
+    if capture_context is not None:
+        capture_context["toolbar_before"] = current
+        # Keep the original scout deadline even if a later full frame reads a
+        # newer countdown. A fast boundary frame has no timer of its own.
+        capture_context["preview_end"] = preview_end
     # Minimum scale alone does not fix camera translation or the build boundary.
     # Selecting a troop reveals the current red border without placing anything.
     troops = [slot for slot in current.observations.get("battle", {}).get("slots", [])
@@ -531,21 +714,136 @@ def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt
     session.recognizer.battle_observer.remember(current)
     identity_frame = str(current.screenshot_path)
     session.tap(current, troops[0]["point"], reason="Reveal current deployment boundaries")
+    failure_reason = "Selected troop card could not be verified while revealing deployment boundaries"
+    fast_scan = capture_context is not None
+    hard_end = (min(preview_end, getattr(session, "deadline", math.inf),
+                    getattr(session, "task_deadline", math.inf)) if fast_scan else math.inf)
+
+    def require_new_frame(previous: SceneSnapshot, observed: SceneSnapshot) -> None:
+        before_at = previous.observations.get("observed_at_monotonic")
+        after_at = observed.observations.get("observed_at_monotonic")
+        before_id = previous.observations.get("frame_id")
+        after_id = observed.observations.get("frame_id")
+        if (observed.screenshot_path == previous.screenshot_path
+                or type(before_at) not in (int, float) or not math.isfinite(before_at)
+                or type(after_at) not in (int, float) or not math.isfinite(after_at)
+                or after_at <= before_at
+                or before_id is not None and before_id == after_id):
+            raise FlowError("Boundary scan did not capture a fresh frame")
+
     for _ in range(3):
-        current = session.observe("line-boundary")
+        if fast_scan and time.monotonic() >= hard_end:
+            raise FlowError("Original preview deadline expired during boundary scan")
+        previous = current
+        observation_started = time.monotonic()
+        current = session.observe("line-boundary", **({"purpose": "line_boundary_wait"} if fast_scan else {}))
         receipt["evidence"].append(str(current.screenshot_path))
-        _battle_frame(current)
+        if fast_scan:
+            require_new_frame(previous, current)
+            observations = current.observations
+            cloud = observations.get("cloud_cover")
+            if (current.scene != "enemy_village" or not math.isfinite(current.confidence)
+                    or current.confidence < .8 or
+                    observations.get("recognition_scope") != "line_boundary_wait" or
+                    observations.get("fast_fallback") is not False or
+                    observations.get("matched_reasons") != ["two_current_hud_anchors"] or
+                    not isinstance(cloud, dict) or cloud.get("obscured") is not False or
+                    observations.get("modal_visible") is not False or
+                    observations.get("ocr") != [] or
+                    observations.get("buttons") != [] or
+                    observations.get("battle") != {"slots": []}):
+                receipt.setdefault("line_boundary_scan", []).append({
+                    "frame": str(current.screenshot_path), "status": "hud_unverified",
+                    "observation_elapsed_sec": time.monotonic() - observation_started})
+                raise FlowError("Current boundary HUD guard is unverified")
+            motion = measure_camera_motion(capture_context["toolbar_before"].screenshot_path,
+                                           current.screenshot_path)
+            if not _minimum_zoom_motion(motion):
+                raise FlowError("Boundary scan camera changed before full confirmation")
+            if time.monotonic() >= hard_end:
+                raise FlowError("Original preview deadline expired during boundary scan")
+        else:
+            _battle_frame(current)
         selected_box = selected_card_bbox(current.screenshot_path, troops[0]["bbox"],
                                           session.config.game.baseline_resolution)
         if selected_box is None:
+            if fast_scan:
+                receipt.setdefault("line_boundary_scan", []).append({
+                    "frame": str(current.screenshot_path), "status": "no_selected_card",
+                    "observation_elapsed_sec": time.monotonic() - observation_started})
             continue
+        terrain = find_line_deployment_edges(current.screenshot_path,
+                                             baseline_resolution=session.config.game.baseline_resolution)
+        if not terrain:
+            failure_reason = "Two current deployment boundaries could not be verified"
+            if fast_scan:
+                receipt.setdefault("line_boundary_scan", []).append({
+                    "frame": str(current.screenshot_path), "status": "no_boundary",
+                    "observation_elapsed_sec": time.monotonic() - observation_started})
+            continue
+        if fast_scan:
+            # The fast pixels only nominate a candidate. Fully recognize the
+            # same immutable capture, then prove every action-bearing fact
+            # again from its full result before any field input.
+            receipt.setdefault("line_boundary_scan", []).append({
+                "frame": str(current.screenshot_path), "status": "candidate_only",
+                "observation_elapsed_sec": time.monotonic() - observation_started})
+            if time.monotonic() + 2 >= hard_end:
+                raise FlowError("Original preview deadline cannot cover full boundary confirmation")
+            fast_candidate = current
+            confirmation_started = time.monotonic()
+            current = session.enrich_current_boundary_capture(fast_candidate, expires_at=hard_end)
+            confirmation_receipt = {
+                "candidate_frame": str(fast_candidate.screenshot_path),
+                "frame": str(current.screenshot_path), "status": "unverified",
+                "recognition_elapsed_sec": time.monotonic() - confirmation_started,
+                "same_capture": True,
+                "frame_id": current.observations.get("frame_id")}
+            receipt["line_boundary_confirmation"] = confirmation_receipt
+            if (current is fast_candidate or current.screenshot_path != fast_candidate.screenshot_path
+                    or current.observations.get("frame_id") != fast_candidate.observations.get("frame_id")
+                    or current.observations.get("observed_at_monotonic") !=
+                       fast_candidate.observations.get("observed_at_monotonic")):
+                confirmation_receipt["status"] = "capture_binding_mismatch"
+                raise FlowError("Full boundary confirmation capture binding changed")
+            if (current.scene != "enemy_village" or not math.isfinite(current.confidence)
+                    or current.confidence < .8 or
+                    current.observations.get("recognition_scope", "full") != "full" or
+                    current.observations.get("fast_fallback") is True or
+                    (current.observations.get("battle") or {}).get("phase") != "scout"):
+                confirmation_receipt["status"] = "preview_unverified"
+                raise FlowError("Full boundary confirmation lost the current enemy preview")
+            session._validate_snapshot(current)
+            _remaining_seconds(current)
+            if time.monotonic() >= hard_end:
+                raise FlowError("Original preview deadline expired during full boundary confirmation")
+            confirmation_motion = measure_camera_motion(
+                capture_context["toolbar_before"].screenshot_path, current.screenshot_path)
+            if not _minimum_zoom_motion(confirmation_motion):
+                confirmation_receipt["status"] = "camera_changed"
+                raise FlowError("Full boundary confirmation camera changed")
+            selected_box = selected_card_bbox(current.screenshot_path, troops[0]["bbox"],
+                                              session.config.game.baseline_resolution)
+            if selected_box is None:
+                confirmation_receipt["status"] = "selected_card_missing"
+                raise FlowError("Full boundary confirmation lost the selected card")
+            terrain = find_line_deployment_edges(current.screenshot_path,
+                                                 baseline_resolution=session.config.game.baseline_resolution)
+            if not terrain:
+                confirmation_receipt["status"] = "boundaries_missing"
+                raise FlowError("Full boundary confirmation lost the red boundaries")
+            confirmation_receipt.update(status="current_full_candidate", camera=confirmation_motion)
         # The selected white header can erase the hue used to classify a troop.
         # Its outline can also join a neighbor. Verify each original portrait and
         # current count independently before replacing any missing border detection.
         refreshed = []
         for index, troop in enumerate(troops):
-            reading = session.recognizer.recognize_slot_count(current.screenshot_path, tuple(troop["bbox"]))
-            if reading.get("portrait_score", 0) < .92 or reading.get("count") != troop["count"]:
+            reading = _verified_line_card_reading(session, current, troop)
+            portrait_score = reading.get("portrait_score")
+            if (not isinstance(portrait_score, (int, float)) or not math.isfinite(portrait_score)
+                    or portrait_score < .92 or reading.get("count") != troop["count"]):
+                failure_reason = (f"Current troop card portrait or count unverified before boundary scan: "
+                                  f"{troop.get('unit_id') or 'unknown'}")
                 break
             box = selected_box if index == 0 else troop["bbox"]
             new_evidence = {**troop.get("evidence", {}), "count": reading,
@@ -568,16 +866,226 @@ def _prepare_two_edge_view(session: GameSession, current: SceneSnapshot, receipt
                 "point": [(box[0] + box[2]) // 2, (box[1] + box[3]) // 2],
                 "count": reading["count"], "evidence": new_evidence})
         if len(refreshed) != len(troops):
+            if fast_scan:
+                receipt["line_boundary_confirmation"]["status"] = "roster_unverified"
+                raise FlowError(failure_reason)
             continue
         slots = current.observations["battle"]["slots"]
         current.observations["battle"]["slots"] = sorted(
             [slot for slot in slots if all(abs(slot["point"][0] - troop["point"][0]) >= 25 for troop in troops)] + refreshed,
             key=lambda slot: slot["point"][0])
-        terrain = find_line_deployment_edges(current.screenshot_path,
-                                            baseline_resolution=session.config.game.baseline_resolution)
-        if terrain:
-            return current, terrain
-    raise FlowError("Two current deployment boundaries could not be verified")
+        if fast_scan:
+            receipt["line_boundary_confirmation"]["status"] = "roster_verified"
+        return current, terrain
+    raise FlowError(failure_reason)
+
+
+def _deploy_continuous_line(session, current, receipt, context, hero_manifest, deadline):
+    from uuid import uuid4
+    from .frozen_line import execute_frozen_line, freeze_model_free_line
+    from .probed_anchor import execute_probed_anchor_line, freeze_probed_anchor_line, remainder_burst_limit
+    from .mixed_probe import execute_mixed_probe_line, freeze_mixed_probe_line
+    from .prepared_battle import _remaining_seconds
+
+    # Starting the batch must remain inside the observed preview countdown.
+    # Its separate execution budget covers the resulting active battle.
+    if current.scene != "enemy_village":
+        raise FlowError("Continuous line preparation did not finish inside the preview")
+    captured_at = current.observations.get("observed_at_monotonic")
+    if type(captured_at) not in (int, float) or not math.isfinite(captured_at):
+        raise FlowError("Continuous line preview has no capture timestamp")
+    latest_start = min(deadline, context.get("preview_end", math.inf),
+                       captured_at + min(10, _remaining_seconds(current) - 1))
+    if not isinstance(hero_manifest, dict) or hero_manifest.get("complete") is not True:
+        raise FlowError("Continuous line needs the independently verified hero roster")
+    rows = hero_manifest.get("cards")
+    if not isinstance(rows, list) or not rows or any(not isinstance(row, dict) for row in rows):
+        raise FlowError("Continuous line hero roster is unavailable")
+    tactics = getattr(session.config.battle, "line_tactics", "single_edge")
+    probed = tactics in {"two_edge_probed_anchors", "two_edge_furnace_mixed_probes"}
+    freeze = (freeze_probed_anchor_line if tactics == "two_edge_probed_anchors" else
+              freeze_mixed_probe_line if tactics == "two_edge_furnace_mixed_probes" else
+              freeze_model_free_line)
+    plan = freeze(session, current, toolbar_before=context["toolbar_before"],
+        terrain=receipt["terrain_evidence"], army_manifest=receipt["expected_army_manifest"],
+        minimum_zoom=receipt["minimum_zoom"], battle_id=uuid4().hex,
+        latest_start=latest_start, burst_limit_sec=10,
+        **({} if probed else {"line_tactics": tactics}),
+        hero_ids=[row.get("unit_id") for row in rows], hero_manifest=hero_manifest)
+    frozen = plan.base if probed else plan
+    session.event("model_free_line_plan", plan_id=frozen.plan_id,
+                  plan_sha256=plan.digest if probed else frozen.plan_sha256,
+                  frame=str(current.screenshot_path), latest_start=latest_start,
+                  input_count=len(plan.remaining) + (4 if tactics == "two_edge_furnace_mixed_probes" else 3)
+                  if probed else len(frozen.actions),
+                  burst_limit_sec=remainder_burst_limit(plan) if probed else frozen.burst_limit_sec,
+                  **({"probe_limit_sec": 12., "remainder_limit_sec": remainder_burst_limit(plan)} if probed else {}),
+                  line_tactics=tactics)
+    post = (execute_probed_anchor_line(session, plan) if tactics == "two_edge_probed_anchors" else
+            execute_mixed_probe_line(session, plan) if tactics == "two_edge_furnace_mixed_probes" else
+            execute_frozen_line(session, plan))
+    frames = receipt["evidence"]
+    receipt.update(post.observations["deployment"])
+    receipt["evidence"] = list(dict.fromkeys(frames + receipt["evidence"]))
+    post.observations["deployment"] = receipt
+    return post
+
+
+def _current_full_header_count(snapshot: SceneSnapshot, troop: dict,
+                               client_version: str) -> dict | None:
+    """Use the full recognizer's OCR only beside its own closed current card.
+
+    ``ScreenshotRecognizer.recognize`` builds ``ocr`` and ``battle.slots`` from
+    one screenshot path in the same call. Neither the earlier army count nor a
+    remembered BattleObserver card supplies this quantity.
+    """
+    if (client_version != "18.647.2" or snapshot.scene not in {"enemy_village", "battle"}
+            or type(snapshot.confidence) not in (int, float)
+            or not math.isfinite(snapshot.confidence) or snapshot.confidence < .8
+            or snapshot.observations.get("recognition_scope", "full") != "full"
+            or snapshot.observations.get("baseline_resolution") not in ([1280, 720], (1280, 720))):
+        return None
+    box = troop.get("bbox")
+    if (not isinstance(box, (list, tuple)) or len(box) != 4
+            or any(type(value) is not int for value in box)):
+        return None
+    left, top, right, bottom = box
+    if not (0 <= left < right <= 1280 and 575 <= top < bottom <= 720):
+        return None
+    battle = snapshot.observations.get("battle")
+    slots = battle.get("slots") if isinstance(battle, dict) else None
+    if not isinstance(slots, list):
+        return None
+    closed = [slot for slot in slots if isinstance(slot, dict)
+              and slot.get("kind") == "troop" and slot.get("unit_id") == troop.get("unit_id")
+              and slot.get("bbox") == list(box)
+              and isinstance(slot.get("evidence"), dict)
+              and slot["evidence"].get("method") == "independent_card_border"]
+    if len(closed) != 1:
+        return None
+    card = closed[0]
+    identity = card["evidence"].get("identity")
+    card_score = card.get("confidence")
+    identity_score = identity.get("confidence") if isinstance(identity, dict) else None
+    if (not isinstance(identity, dict) or identity.get("unit_id") != troop.get("unit_id")
+            or identity.get("version_verified") is not True
+            or identity.get("template_client_version") != client_version
+            or type(card_score) not in (int, float) or not math.isfinite(card_score)
+            or card_score < .94 or type(identity_score) not in (int, float)
+            or not math.isfinite(identity_score) or identity_score < .94):
+        return None
+    counts = _snapshot_header_numbers(snapshot, box)
+    if len(counts) != 1:
+        return None
+    count, item = counts[0]
+    # The detector's count is a consistency check, never a source of the
+    # recovered quantity. It may be absent, but may not contradict the OCR.
+    if type(card.get("count")) is int and card["count"] != count:
+        return None
+    return {"count": count, "text": item["text"], "confidence": item["confidence"],
+            "bbox": list(item["bbox"]), "frame": str(snapshot.screenshot_path),
+            "source": "current_snapshot_full_ocr"}
+
+
+def _snapshot_header_numbers(snapshot: SceneSnapshot, bbox: list[int] | tuple[int, ...]) -> list[tuple[int, dict]]:
+    texts = snapshot.observations.get("ocr")
+    if not isinstance(texts, list):
+        return []
+    left, top, right, _ = bbox
+    numbers = []
+    for item in texts:
+        if not isinstance(item, dict):
+            continue
+        box, confidence = item.get("bbox"), item.get("confidence")
+        if (not isinstance(box, (list, tuple)) or len(box) != 4
+                or any(type(value) not in (int, float) or not math.isfinite(value) for value in box)
+                or not (left <= box[0] < box[2] <= right and
+                        max(0, top - 16) <= box[1] < box[3] <= min(720, top + 40))
+                or type(confidence) not in (int, float) or not math.isfinite(confidence)
+                or not .95 <= confidence <= 1):
+            continue
+        match = re.fullmatch(r"[xX×]\s*([0-9]+)", str(item.get("text", "")).strip())
+        if match is not None:
+            numbers.append((int(match[1]), item))
+    return numbers
+
+
+def _verified_line_card_reading(session: GameSession, snapshot: SceneSnapshot, troop: dict) -> dict:
+    """Bind an OCR fallback to this frame's versioned troop portrait.
+
+    The fast count reader normally proves both portrait and quantity. A small
+    `x1` may fail local OCR even when the current full screenshot OCR reads it.
+    Fallbacks still need independent same-frame card geometry and identity;
+    neither a previous count nor a card position supplies the quantity.
+    """
+    reading = session.recognizer.recognize_slot_count(snapshot.screenshot_path, tuple(troop["bbox"]))
+    count, confidence = reading.get("count"), reading.get("confidence")
+    recovered_header = False
+    full_header = None
+    if reading.get("reason") == "header_count_unverified" and count is None:
+        # The thresholded line OCR can hallucinate text over a card outline.
+        # Try its unthresholded original first; only then consider the full
+        # OCR and independently closed card of this very same snapshot.
+        readings = reading.get("readings")
+        originals = [item for item in readings if item.get("source") == "header_region_ocr"] if isinstance(readings, list) else []
+        if len(originals) == 1:
+            original = originals[0]
+            match = re.fullmatch(r"[xX×]\s*([0-9]+)", str(original.get("text", "")).strip())
+            original_confidence = original.get("confidence")
+            if (match is not None and type(original_confidence) in (int, float)
+                    and math.isfinite(original_confidence) and original_confidence >= .95):
+                count, confidence = int(match[1]), original_confidence
+                recovered_header = True
+        if not recovered_header:
+            full_header = _current_full_header_count(snapshot, troop, session.client_version)
+            if full_header is None:
+                return reading
+            count, confidence = full_header["count"], full_header["confidence"]
+            recovered_header = True
+        if not isinstance(readings, list) or any(not isinstance(item, dict) for item in readings):
+            return reading
+        for item in readings:
+            if item.get("source") not in {"header_region_ocr", "header_threshold_line"}:
+                return reading
+            other = re.fullmatch(r"[xX×]\s*([0-9]+)", str(item.get("text", "")).strip())
+            if other is not None and int(other[1]) != count:
+                return reading
+        if full_header is None and any(item is not originals[0] and
+                                       item.get("source") != "header_threshold_line"
+                                       for item in readings):
+            return reading
+    if reading.get("reason") == "header_count_unverified" and not recovered_header:
+        return reading
+    if (reading.get("reason") not in {"explicit_header_count", "header_count_unverified"} or
+            count != troop.get("count") or
+            reading.get("frame") != str(snapshot.screenshot_path) or
+            reading.get("slot_bbox") != list(troop["bbox"]) or
+            not isinstance(troop.get("unit_id"), str)):
+        return reading
+    if not isinstance(confidence, (int, float)) or not math.isfinite(confidence) or confidence < .9:
+        return reading
+    if any(value != count for value, _ in _snapshot_header_numbers(snapshot, troop["bbox"])):
+        return {**reading, "count": None, "confidence": 0.0,
+                "portrait_score": None, "reason": "strong_count_conflict"}
+    from .images import read_frame
+    from .unit_catalog import recognize_card_identity
+    import cv2
+
+    source = read_frame(snapshot.screenshot_path, cv2.IMREAD_COLOR)
+    if source is None:
+        return reading
+    image = cv2.resize(source, (1280, 720), interpolation=cv2.INTER_AREA)
+    identity = recognize_card_identity(image, tuple(troop["bbox"]), "troop", surface="battle",
+                                       client_version=session.client_version)
+    if (identity["version_verified"] and identity["unit_id"] == troop["unit_id"]
+            and isinstance(identity["confidence"], (int, float)) and identity["confidence"] >= .94):
+        return {**reading, "count": count, "confidence": confidence,
+                "reason": ("portrait_bound_current_full_header_count" if full_header is not None else
+                           "portrait_bound_full_header_count" if recovered_header else reading["reason"]),
+                "portrait_score": identity["confidence"],
+                "portrait_source": "current_frame_versioned_battle_template", "portrait_identity": identity,
+                **({"full_header": full_header} if full_header is not None else {})}
+    return reading
 
 
 def spread_along_edges(terrain: list[dict], count: int) -> list[list[int]]:
@@ -599,13 +1107,17 @@ def _deploy_line_cards(session: GameSession, current: SceneSnapshot, receipt: di
         if time.monotonic() >= deadline:
             raise FlowError("Army deployment deadline exceeded")
 
+    def record_count_reads(frame: SceneSnapshot) -> None:
+        for reading in frame.observations.get("deployment_count_reads", []):
+            if reading not in receipt["count_reads"]:
+                receipt["count_reads"].append(reading)
+                session.event("deployment_count_read", **reading)
+
     def observe(label: str, *, purpose: str = "troop_count", slot: dict | None = None) -> SceneSnapshot:
         check()
         frame = session.observe(label, purpose=purpose, slot=slot)
         receipt["evidence"].append(str(frame.screenshot_path))
-        for reading in frame.observations.get("deployment_count_reads", []):
-            receipt["count_reads"].append(reading)
-            session.event("deployment_count_read", **reading)
+        record_count_reads(frame)
         check()
         _battle_frame(frame)
         return frame
@@ -614,12 +1126,15 @@ def _deploy_line_cards(session: GameSession, current: SceneSnapshot, receipt: di
         slot = step.card
         check()
         old = _remaining(current, slot, recognizer=getattr(session, "recognizer", None))
+        record_count_reads(current)
         check()
         if old != slot["count"]:
             raise FlowError("Troop quantity changed before line deployment")
         session.tap(current, slot["point"], reason=f"Select troop stack for line: {old}")
         current = observe("line-selected", slot=slot)
-        if _remaining(current, slot, recognizer=getattr(session, "recognizer", None)) != old:
+        selected_count = _remaining(current, slot, recognizer=getattr(session, "recognizer", None))
+        record_count_reads(current)
+        if selected_count != old:
             raise FlowError("Troop quantity changed before line placement")
         planned = [list(point) for point in step.points]
         before = current
@@ -644,6 +1159,7 @@ def _deploy_line_cards(session: GameSession, current: SceneSnapshot, receipt: di
                 time.sleep(min(session.config.runtime.poll_interval_sec, 1))
             current = observe("line-consumption", slot=slot)
             after = _remaining(current, slot, recognizer=getattr(session, "recognizer", None))
+            record_count_reads(current)
             check()
             if after is None:
                 continue
@@ -663,6 +1179,20 @@ def _deploy_line_cards(session: GameSession, current: SceneSnapshot, receipt: di
         from .hero_state import recognize_hero_state
 
         slot = step.card
+        if current.observations.get("recognition_scope") != "full":
+            # Fast count and hero-state frames omit all battle slots. Refresh
+            # the full roster before each selection, binding that hero's
+            # identity to the same fresh frame used for the tap.
+            current = observe("line-hero-roster", purpose="full")
+        visible_heroes = [item for item in current.observations.get("battle", {}).get("slots", [])
+                          if item.get("kind") == "hero"
+                          and abs(item["point"][0] - slot["point"][0]) < 25]
+        if (session.client_version not in {"18.600.7", "18.647.2"}
+                or not isinstance(slot.get("unit_id"), str)
+                or not slot["unit_id"]
+                or len(visible_heroes) != 1
+                or visible_heroes[0].get("unit_id") != slot["unit_id"]):
+            raise FlowError("Hero identity is unverified; selection will not be attempted")
         check()
         attempt = {"kind": "hero", "point": slot["point"], "status": "attempted", "verified": False,
                    "ability_clicks": 0, "selection_frame": str(current.screenshot_path),
@@ -672,7 +1202,8 @@ def _deploy_line_cards(session: GameSession, current: SceneSnapshot, receipt: di
         for _ in range(3):
             current = observe("line-hero-selected", purpose="hero")
             selected = recognize_hero_state(current.screenshot_path, slot["bbox"],
-                                           baseline_resolution=session.config.game.baseline_resolution)
+                                           baseline_resolution=session.config.game.baseline_resolution,
+                                           unit_id=slot.get("unit_id"), client_version=session.client_version)
             check()
             attempt["states"].append(selected)
             if selected["selected"] is True or selected["deployed"] is True:
@@ -684,7 +1215,8 @@ def _deploy_line_cards(session: GameSession, current: SceneSnapshot, receipt: di
         for _ in range(3):
             current = observe("line-hero-deployed", purpose="hero")
             state = recognize_hero_state(current.screenshot_path, slot["bbox"],
-                                        baseline_resolution=session.config.game.baseline_resolution)
+                                        baseline_resolution=session.config.game.baseline_resolution,
+                                        unit_id=slot.get("unit_id"), client_version=session.client_version)
             check()
             attempt["states"].append(state)
             session.event("hero_state", **state)

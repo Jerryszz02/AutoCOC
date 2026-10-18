@@ -208,8 +208,16 @@ class CaptureTests(unittest.TestCase):
         png = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + struct.pack(">II", 3, 2)
         with TemporaryDirectory() as temp:
             adb = Mock()
-            adb.run_bytes.return_value = png
-            artifact = CaptureClient(adb, "target").capture_screenshot_artifact(Path(temp) / "screen.png")
+            with patch("autococ.capture.datetime") as wall_clock:
+                wall_clock.now.return_value.isoformat.return_value = "2026-10-15T18:00:00+00:00"
+
+                def transport(*args, **kwargs):
+                    wall_clock.now.assert_called_once()
+                    return png
+
+                adb.run_bytes.side_effect = transport
+                artifact = CaptureClient(adb, "target").capture_screenshot_artifact(Path(temp) / "screen.png")
+            self.assertEqual(artifact.requested_at_utc, "2026-10-15T18:00:00+00:00")
             self.assertEqual(artifact.capture_method, "png")
             self.assertIsNone(artifact.pixels_ready_at_monotonic)
             self.assertIsNone(artifact.encode_elapsed_sec)

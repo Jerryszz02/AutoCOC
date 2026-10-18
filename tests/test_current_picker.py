@@ -1,6 +1,8 @@
 """The current-army picker must not be confused with a saved-plan editor."""
 
 from pathlib import Path
+import hashlib
+import json
 from tempfile import TemporaryDirectory
 from unittest import TestCase, skipIf
 from unittest.mock import patch
@@ -13,6 +15,7 @@ from autococ.army_editor import _picker_count, recognize_army_editor
 from autococ.ocr import OCRText
 from autococ.ocr import RapidOCRProvider
 from autococ.vision import ScreenshotRecognizer
+from autococ.unit_catalog import recognize_card_identity, template_manifest
 
 
 class CurrentPickerTests(TestCase):
@@ -90,6 +93,228 @@ class CurrentPickerTests(TestCase):
                          ["close_picker", "decrement", "decrement"])
         self.assertEqual(editor["controls"][0]["point"], [1050, 240])
 
+    def test_current_gray_lightning_info_requires_its_own_portrait_icon_and_border(self):
+        root = Path(__file__).resolve().parent / "fixtures"
+        provider = RapidOCRProvider()
+        for name in ("spell_picker_pages", "spell_picker_before_info"):
+            source = root / f"lightning_info_{name}_18_647_2.png"
+            texts = provider.recognize(source)
+            editor = recognize_army_editor(source, provider, texts,
+                                           client_version="18.647.2")
+            info = [item for item in editor["controls"] if item["action"] == "open_info"]
+            self.assertEqual((editor["surface"], editor["editing_kind"]),
+                             ("current_picker", "spell"))
+            by_id = {item["unit_id"]: item for item in info}
+            self.assertEqual(set(by_id), {"lightning_spell", "totem_spell"})
+            self.assertEqual(by_id["lightning_spell"]["point"], [138, 450])
+            self.assertEqual(by_id["totem_spell"]["point"], [659, 587])
+            self.assertTrue(all(item["identity_verified"] for item in info))
+            self.assertTrue(all(item["confidence"] >= .94 for item in info))
+            self.assertFalse(any(item["action"] in {"upgrade", "buy"}
+                                 for item in editor["controls"]))
+            wrong = recognize_army_editor(source, provider, texts,
+                                          client_version="18.647.3")
+            self.assertFalse(any(item["action"] == "open_info"
+                                 for item in wrong["controls"]))
+
+            image = cv2.imdecode(np.fromfile(source, dtype=np.uint8), cv2.IMREAD_COLOR)
+            for label, roi in (("portrait", (40, 454, 80, 494)),
+                               ("blue_info", (123, 436, 151, 464)),
+                               ("border", (33, 459, 40, 525))):
+                with self.subTest(frame=name, missing=label):
+                    altered = image.copy()
+                    l, t, r, b = roi
+                    altered[t:b, l:r] = 0
+                    path = Path(self.directory.name) / f"{name}-{label}.png"
+                    cv2.imencode(".png", altered)[1].tofile(path)
+                    observed = recognize_army_editor(path, provider, texts,
+                                                     client_version="18.647.2")
+                    self.assertFalse(any(item["action"] == "open_info"
+                                         and item["unit_id"] == "lightning_spell"
+                                         for item in observed["controls"]))
+
+    def test_real_current_totem_gray_info_is_read_only_and_version_bound(self):
+        source = Path(__file__).parent / "fixtures/totem_spell_picker_gray_18_647_2.png"
+        provider = RapidOCRProvider()
+        texts = provider.recognize(source)
+        editor = recognize_army_editor(source, provider, texts, client_version="18.647.2")
+        self.assertEqual((editor["surface"], editor["editing_kind"]),
+                         ("current_picker", "spell"))
+        self.assertEqual(editor["capacities"]["spell"], {"used": 11, "total": 11})
+        self.assertEqual([(card["unit_id"], card["count"]) for card in editor["cards"]],
+                         [("lightning_spell", 6), ("totem_spell", 5)])
+        controls = [item for item in editor["controls"]
+                    if item.get("unit_id") == "totem_spell"]
+        self.assertEqual([(item["action"], item["enabled"]) for item in controls],
+                         [("decrement", True), ("increment", False), ("open_info", True)])
+        info = controls[-1]
+        self.assertEqual(info["point"], [659, 587])
+        self.assertTrue(info["identity_verified"])
+        self.assertGreaterEqual(info["confidence"], .94)
+        self.assertEqual(info["evidence"]["identity"]["template_client_version"],
+                         "18.647.2")
+        image = cv2.imdecode(np.fromfile(source, dtype=np.uint8), cv2.IMREAD_COLOR)
+        identity = recognize_card_identity(image, (554, 568, 678, 692), "spell",
+                                           surface="current_picker", client_version="18.647.2")
+        self.assertEqual(identity["unit_id"], "totem_spell")
+        self.assertIsNone(recognize_card_identity(
+            image, (424, 568, 548, 692), "spell", surface="current_picker",
+            client_version="18.647.2")["unit_id"])
+        self.assertIsNone(recognize_card_identity(
+            image, (554, 568, 678, 692), "spell", surface="current_picker",
+            client_version="18.647.3")["unit_id"])
+        wrong = recognize_army_editor(source, provider, texts, client_version="18.647.3")
+        self.assertFalse(any(item["action"] == "open_info" for item in wrong["controls"]))
+
+    def test_current_totem_info_rejects_missing_portrait_icon_border_and_capacity(self):
+        source = Path(__file__).parent / "fixtures/totem_spell_picker_gray_18_647_2.png"
+        provider = RapidOCRProvider()
+        texts = provider.recognize(source)
+        image = cv2.imdecode(np.fromfile(source, dtype=np.uint8), cv2.IMREAD_COLOR)
+        for label, roi in (("wrong_card", (570, 591, 610, 631)),
+                           ("missing_blue_i", (645, 571, 673, 599)),
+                           ("missing_top_edge", (586, 569, 637, 575)),
+                           ("missing_left_edge", (556, 596, 560, 662)),
+                           ("missing_right_edge", (674, 602, 678, 662))):
+            with self.subTest(case=label):
+                altered = image.copy()
+                left, top, right, bottom = roi
+                altered[top:bottom, left:right] = 0
+                path = Path(self.directory.name) / f"{label}.png"
+                cv2.imencode(".png", altered)[1].tofile(path)
+                observed = recognize_army_editor(path, provider, texts,
+                                                 client_version="18.647.2")
+                self.assertFalse(any(item["action"] == "open_info"
+                                     and item.get("unit_id") == "totem_spell"
+                                     for item in observed["controls"]))
+                self.assertFalse(any(item["action"] == "increment"
+                                     and item.get("unit_id") == "totem_spell"
+                                     and item["enabled"] for item in observed["controls"]))
+        colored = image.copy()
+        colored[591:631, 570:610] = image[309:349, 667:707]
+        colored_path = Path(self.directory.name) / "unsampled-active-card.png"
+        cv2.imencode(".png", colored)[1].tofile(colored_path)
+        unsampled = recognize_army_editor(colored_path, provider, texts,
+                                          client_version="18.647.2")
+        self.assertFalse(any(item.get("unit_id") == "totem_spell"
+                             and item["action"] in {"increment", "open_info"}
+                             for item in unsampled["controls"]))
+        partial_texts = [OCRText("10/11", .99, item.bbox)
+                         if item.text.strip() == "11/11" else item for item in texts]
+        partial = recognize_army_editor(source, provider, partial_texts,
+                                        client_version="18.647.2")
+        self.assertEqual(partial["capacities"]["spell"], {"used": 10, "total": 11})
+        self.assertFalse(any(item["action"] == "open_info"
+                             and item.get("unit_id") == "totem_spell"
+                             for item in partial["controls"]))
+
+    def test_totem_detail_and_templates_have_exact_source_provenance(self):
+        root = Path(__file__).resolve().parents[1]
+        metadata = json.loads((root / "tests/fixtures/totem_spell_identity_18_647_2.json")
+                              .read_text(encoding="utf-8"))
+        sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+        for entry in metadata["templates"] + metadata["fixtures"]:
+            with self.subTest(path=entry["path"]):
+                self.assertEqual(sha(root / entry["path"]), entry["sha256"])
+        detail = root / "tests/fixtures/totem_spell_detail_identity_18_647_2.png"
+        words = {item.text for item in RapidOCRProvider().recognize(detail)
+                 if item.confidence >= .9}
+        self.assertIn("2级图腾法术", words)
+        self.assertIn("击晕/瘫痪时间（秒）：", words)
+        self.assertIn("所需空间：", words)
+        current = template_manifest(client_version="18.647.2")["templates"]
+        self.assertFalse(any(item["unit_id"] == "earthquake_spell" for item in current))
+        for surface in ("army", "current_picker", "battle"):
+            entry, = [item for item in current if item["unit_id"] == "totem_spell"
+                      and item["surface"] == surface]
+            self.assertEqual(entry["identity_evidence_title"], "2级图腾法术")
+            self.assertEqual(entry["identity_evidence_sha256"],
+                             metadata["detail_source"]["sha256"])
+            self.assertEqual(sha(root / "assets/catalogs" / entry["path"]),
+                             entry["template_sha256"])
+        # External raw captures are available on the development host; CI only
+        # requires distributable fixture/template hashes and detail OCR above.
+        for item in (metadata["picker_source"], metadata["detail_source"]):
+            source = Path(item["path"])
+            if source.is_file():
+                self.assertEqual(sha(source), item["sha256"])
+        picker_source = Path(metadata["picker_source"]["path"])
+        if picker_source.is_file():
+            original = cv2.resize(cv2.imdecode(np.fromfile(picker_source, dtype=np.uint8),
+                                               cv2.IMREAD_COLOR), (1280, 720),
+                                  interpolation=cv2.INTER_AREA)
+            picker_template = root / "assets/catalogs/units/totem_spell_picker_capacity_gray_18_647_2.png"
+            self.assertTrue(np.array_equal(
+                cv2.imdecode(np.fromfile(picker_template, dtype=np.uint8), cv2.IMREAD_COLOR),
+                original[591:631, 570:610]))
+            masked = original.copy()
+            for left, top, right, bottom in ((16, 91, 440, 326),
+                                             (445, 101, 1258, 188),
+                                             (800, 195, 1260, 320)):
+                masked[top:bottom, left:right] = (45, 45, 45)
+            self.assertTrue(np.array_equal(
+                cv2.imdecode(np.fromfile(root / "tests/fixtures/totem_spell_picker_gray_18_647_2.png",
+                                         dtype=np.uint8), cv2.IMREAD_COLOR), masked))
+        detail_source = Path(metadata["detail_source"]["path"])
+        if detail_source.is_file():
+            original = cv2.resize(cv2.imdecode(np.fromfile(detail_source, dtype=np.uint8),
+                                               cv2.IMREAD_COLOR), (1280, 720),
+                                  interpolation=cv2.INTER_AREA)
+            masked = np.full_like(original, 45)
+            for left, top, right, bottom in ((480, 25, 770, 85),
+                                             (595, 120, 1125, 270),
+                                             (135, 115, 205, 195)):
+                masked[top:bottom, left:right] = original[top:bottom, left:right]
+            self.assertTrue(np.array_equal(
+                cv2.imdecode(np.fromfile(detail, dtype=np.uint8), cv2.IMREAD_COLOR), masked))
+
+    def test_live_spell_capacity_local_roi_recovers_info_but_never_overrides_conflict(self):
+        source = (Path(__file__).parent / "fixtures" /
+                  "lightning_info_spell_picker_failed_capacity_18_647_2.png")
+        provider = RapidOCRProvider()
+        texts = provider.recognize(source)
+        self.assertFalse(any(item.text.strip() == "11/11" and item.confidence >= .88
+                             for item in texts))  # Real full OCR saw LL/LL.
+        recognizer = ScreenshotRecognizer(provider=provider)
+        recognizer.client_version = "18.647.2"
+        observed = recognizer.recognize(source)
+        editor = observed.observations["army_editor"]
+        self.assertEqual((observed.scene, editor["surface"], editor["editing_kind"]),
+                         ("training", "current_picker", "spell"))
+        self.assertEqual(editor["capacities"]["spell"], {"used": 11, "total": 11})
+        self.assertEqual([item["unit_id"] for item in editor["controls"]
+                          if item["action"] == "open_info"],
+                         ["lightning_spell", "totem_spell"])
+        self.assertFalse(any(item["action"] == "increment" and item["enabled"]
+                             for item in editor["controls"]))
+
+        image = cv2.imdecode(np.fromfile(source, dtype=np.uint8), cv2.IMREAD_COLOR)
+        image[488:548, 1176:1296] = 0
+        blank = Path(self.directory.name) / "capacity-blank.png"
+        cv2.imencode(".png", image)[1].tofile(blank)
+        unreadable = recognizer.recognize(blank).observations["army_editor"]
+        self.assertFalse(any(item["action"] == "open_info"
+                             for item in unreadable["controls"]))
+
+        read_line = provider.recognize_line
+        def wrong_capacity(path, roi):
+            if tuple(roi) == (1120, 470, 1360, 550):
+                return [OCRText("10/11", .99, tuple(roi))]
+            return read_line(path, roi)
+        with patch.object(provider, "recognize_line", side_effect=wrong_capacity):
+            partial = recognizer.recognize(source).observations["army_editor"]
+        self.assertEqual(partial["capacities"]["spell"], {"used": 10, "total": 11})
+        self.assertFalse(any(item["action"] == "open_info" for item in partial["controls"]))
+
+        conflict = texts + [OCRText("11/11", .99, (1170, 490, 1250, 540)),
+                            OCRText("10/11", .99, (1170, 490, 1250, 540))]
+        with patch.object(provider, "recognize", return_value=conflict):
+            contradictory = recognizer.recognize(source).observations["army_editor"]
+        self.assertIn("picker_spell_capacity_conflict", contradictory["unknowns"])
+        self.assertNotIn("spell", contradictory["capacities"])
+        self.assertFalse(any(item["action"] == "open_info"
+                             for item in contradictory["controls"]))
+
     def test_conflicting_ocr_counts_cannot_be_overridden_by_x1_sample(self):
         sample = cv2.imread(str(Path(__file__).resolve().parents[1] /
                                "assets/catalogs/current_picker_x1_full_18_600_7.png"),
@@ -156,6 +381,89 @@ class CurrentPickerTests(TestCase):
                                          (558, 287, 656, 385), (1280, 720),
                                          self.image, "18.600.7", "lightning_spell")
         self.assertIsNone(count)
+
+    def test_native_balloon_count_replays_frame13_crop_with_recorded_ocr(self):
+        # The crop is pixel-exact from live frame 13 (SHA recorded alongside
+        # the fixture). OCR responses below are cached from that same frame;
+        # this test does not run OCR or borrow the army manifest's quantity.
+        fixture = Path(__file__).resolve().parent / "fixtures/picker_balloon_x1_native_18_647_2.png"
+        self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(),
+                         "651255b1742df86403a40187c3923385b44ed24114072dcbc93140b9544e706e")
+        crop = cv2.imread(str(fixture))
+        self.assertEqual(crop.shape, (52, 80, 3))
+        expected_gray = "e256c89c1e37bad3ef1685401e04451733d1ebc5349044b73db926f814f81738"
+        frame = np.zeros((1440, 2560, 3), dtype=np.uint8)
+        frame[390:442, 1740:1820] = crop
+        self.assertTrue(cv2.imwrite(str(self.path), frame))
+        canonical = cv2.resize(frame, (1280, 720), interpolation=cv2.INTER_AREA)
+
+        class RecordedProvider:
+            def __init__(self, native_reads):
+                self.native_reads = native_reads
+                self.calls = 0
+                self.original_pixels = True
+
+            def recognize_line(self, _path, _roi):
+                return []
+
+            def recognize_line_image(self, image):
+                self.calls += 1
+                if image.shape == (30, 52):
+                    return []
+                assert image.shape == (52, 80)
+                # Only the original number pixels may receive cached OCR.
+                if self.calls == 4:
+                    self.original_pixels = (hashlib.sha256(image.tobytes()).hexdigest()
+                                            == expected_gray)
+                if not self.original_pixels:
+                    return []
+                return [self.native_reads[self.calls - 4]]
+
+        reads = (OCRText("x1", .88943), OCRText("x1", .80139), OCRText("x1", .66021))
+        provider = RecordedProvider(reads)
+        count, evidence = _picker_count(provider, self.path, [], (870, 194, 968, 292),
+                                         (2560, 1440), canonical, "18.647.2", "balloon")
+        self.assertEqual(provider.calls, 6)
+        self.assertTrue(provider.original_pixels)
+        self.assertEqual((count, evidence["source"]), (1, "contrast_consensus"))
+        self.assertEqual([item["variant"] for item in evidence["contrast_reads"]],
+                         ["native_gray", "native_inverted", "native_threshold"])
+
+        # A strong, conflicting local number cannot be voted away.
+        conflict = RecordedProvider((OCRText("x1", .88943), OCRText("x2", .80139),
+                                     OCRText("x1", .66021)))
+        count, _ = _picker_count(conflict, self.path, [], (870, 194, 968, 292),
+                                 (2560, 1440), canonical, "18.647.2", "balloon")
+        self.assertIsNone(count)
+
+        # This local route is bound to the observed client, card and scale.
+        for version, unit_id, resolution in (("18.600.7", "balloon", (2560, 1440)),
+                                             ("18.647.2", "dragon", (2560, 1440)),
+                                             ("18.647.2", "balloon", (1280, 720))):
+            provider = RecordedProvider(reads)
+            count, _ = _picker_count(provider, self.path, [], (870, 194, 968, 292),
+                                     resolution, canonical, version, unit_id)
+            self.assertIsNone(count)
+            self.assertEqual(provider.calls, 3)
+
+        # Full OCR disagreement takes precedence over the native fallback.
+        provider = RecordedProvider(reads)
+        count, _ = _picker_count(provider, self.path,
+                                 [OCRText("x1", .99, (872, 197, 890, 219)),
+                                  OCRText("x2", .99, (872, 197, 890, 219))],
+                                 (870, 194, 968, 292), (2560, 1440), canonical,
+                                 "18.647.2", "balloon")
+        self.assertIsNone(count)
+        self.assertEqual(provider.calls, 0)
+
+        # Changed pixels cannot be paired with the cached original-frame OCR.
+        frame[390:442, 1740:1820] = 0
+        self.assertTrue(cv2.imwrite(str(self.path), frame))
+        provider = RecordedProvider(reads)
+        count, _ = _picker_count(provider, self.path, [], (870, 194, 968, 292),
+                                 (2560, 1440), canonical, "18.647.2", "balloon")
+        self.assertIsNone(count)
+        self.assertFalse(provider.original_pixels)
 
     def test_conflicting_contrast_votes_block_version_sample_fallback(self):
         class Provider:

@@ -1,0 +1,39 @@
+{
+  "client_version": "18.647.2",
+  "unit_id": "dragon_duke",
+  "surface": "army_hero",
+  "role": "face",
+  "review_status": "agent_visual_same_character_animation_not_human_ground_truth",
+  "source_frame": "reports/completion-20261015/live/20261017-005103-132498-d5d5879a/frames/00016-army-current-return-2.png",
+  "source_sha256": "9cf1bebd2dc0d43ea796dcbd52867017cbd17b2d2d5f3523eedb0a899bf9f650",
+  "source_native_resolution": [
+    2560,
+    1440
+  ],
+  "resize": {
+    "resolution": [
+      1280,
+      720
+    ],
+    "interpolation": "cv2.INTER_AREA"
+  },
+  "source_bbox_1280": [
+    177,
+    270,
+    212,
+    300
+  ],
+  "template_path": "assets/catalogs/units/dragon_duke_army_face_pose2_18_647_2.png",
+  "template_sha256": "3fd17274971b8a447bbfcf26d91f0e3a7c6a88cc26532f9f023f2c7fd5e41ddb",
+  "identity_evidence_frames": [
+    {
+      "source_frame": "reports/completion-20261015/live/20261017-005103-132498-d5d5879a/frames/00011-mixed-army-preparation.png",
+      "source_sha256": "ea98a5024b638169eb6510eeb57216f5709947aefcae6687ea971d165b621ddc"
+    },
+    {
+      "source_frame": "reports/completion-20261015/live/20261017-005103-132498-d5d5879a/frames/00015-army-current-return-1.png",
+      "source_sha256": "bb2cf6bc5a62563f2ddfbac6afa7057a935b1d0b8db60944bc7481317e1d1b67"
+    }
+  ],
+  "notes": "Second sampled face pose. Existing face/color templates, thresholds and margins remain unchanged."
+}

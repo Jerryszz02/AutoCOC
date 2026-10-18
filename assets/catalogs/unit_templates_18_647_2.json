@@ -1,0 +1,877 @@
+{
+  "client": "18.647.2",
+  "coordinate_resolution": [
+    1280,
+    720
+  ],
+  "templates": [
+    {
+      "unit_id": "furnace",
+      "surface": "battle",
+      "path": "units/furnace_battle_active_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261016-160800-observe/frames/00001-before.png",
+      "source_bbox_1280": [
+        301,
+        624,
+        363,
+        680
+      ],
+      "source_card_bbox_1280": [
+        287,
+        595,
+        375,
+        711
+      ],
+      "state": "active",
+      "client_version": "18.647.2",
+      "source_sha256": "ab7fe70376acc3a63051e793ef73d1b4dae18187303e7932ec6679d0cc701a01",
+      "template_sha256": "256959bd4d3964ae198c136c9528561dcd4f14c2942049f84967e2269edcf686",
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261016-154621-tap/frames/00002-after.png",
+      "identity_evidence_sha256": "3752e78a3af402e1351f9847111a54fd8fabcd8646bef722bb2433e49e636a69",
+      "identity_evidence_title": "4级烈焰熔炉",
+      "identity_evidence_status": "agent_visual_detail_and_army_to_battle_not_human_ground_truth"
+    },
+    {
+      "unit_id": "electro_dragon",
+      "surface": "army",
+      "path": "units/electro_dragon_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        580,
+        226,
+        625,
+        268
+      ],
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "dragon",
+      "surface": "army",
+      "path": "units/dragon_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        683,
+        226,
+        728,
+        268
+      ],
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "baby_dragon",
+      "surface": "army",
+      "path": "units/baby_dragon_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        785,
+        226,
+        830,
+        268
+      ],
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "balloon",
+      "surface": "army",
+      "path": "units/balloon_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        888,
+        226,
+        933,
+        268
+      ],
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "archer",
+      "surface": "army",
+      "path": "units/archer_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-231921-tap/frames/00002-after.png",
+      "source_bbox_1280": [991, 226, 1036, 268],
+      "state": "active",
+      "client_version": "18.647.2",
+      "source_sha256": "be3bb04f148ede71e7bda4c6b4ca0058c1f7f60a2decdfff3e7e19aba41d9580",
+      "template_sha256": "bc332e92c4fb98091bda4e5b9d0d730d974be6e839a7b91e53cd7cb17400a358"
+    },
+    {
+      "unit_id": "furnace",
+      "surface": "army",
+      "path": "units/furnace_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261016-154525-troop-next/frames/00002-after.png",
+      "source_bbox_1280": [785, 226, 830, 268],
+      "state": "active",
+      "client_version": "18.647.2",
+      "source_sha256": "b1bda256233d3319c94942ec2b286af15e155a9ebad99253c08e17e0d05b5c3c",
+      "template_sha256": "ecbefab3f68698b0b3bba67d50e1735b452a367d5fffcc2b2bb0e9b0758f43a7",
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261016-154621-tap/frames/00002-after.png",
+      "identity_evidence_sha256": "3752e78a3af402e1351f9847111a54fd8fabcd8646bef722bb2433e49e636a69",
+      "identity_evidence_title": "4级烈焰熔炉",
+      "identity_evidence_status": "agent_visual_detail_title_not_human_ground_truth"
+    },
+    {
+      "unit_id": "lightning_spell",
+      "surface": "army",
+      "path": "units/lightning_spell_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        580,
+        405,
+        625,
+        447
+      ],
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "totem_spell",
+      "surface": "army",
+      "path": "units/totem_spell_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        683,
+        405,
+        728,
+        447
+      ],
+      "state": "active",
+      "client_version": "18.647.2",
+      "source_sha256": "4b5e1f39a49851cbc25eaabec68f6a0831dd6a95d3697a27d9b1a031f4fd072e",
+      "template_sha256": "a4eb0e6209087892b904ea1043321c93fcb05b4e4af8479bdf592a65e57fe2b8",
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261016-earthquake-info-v2/frames/00004-earthquake-info-after-3.png",
+      "identity_evidence_sha256": "ddddb41892feab0904ab9c289f97d2c2e2633cb6f5d4c2c3a3779c035ee522aa",
+      "identity_evidence_title": "2级图腾法术",
+      "identity_evidence_status": "agent_visual_detail_title_not_human_ground_truth"
+    },
+    {
+      "unit_id": "siege_barracks",
+      "surface": "army",
+      "path": "units/siege_barracks_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        1030,
+        400,
+        1080,
+        445
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-181637-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "sky_wagon",
+      "surface": "army",
+      "path": "units/sky_wagon_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        1097,
+        400,
+        1147,
+        445
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-182536-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "troop_launcher",
+      "surface": "army",
+      "path": "units/troop_launcher_army_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        1164,
+        400,
+        1214,
+        445
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-182709-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "dragon_duke",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/dragon_duke_army_face_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        177,
+        270,
+        212,
+        300
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-175700-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "dragon_duke",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/dragon_duke_army_face_pose2_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261017-005103-132498-d5d5879a/frames/00016-army-current-return-2.png",
+      "source_bbox_1280": [177, 270, 212, 300],
+      "source_sha256": "9cf1bebd2dc0d43ea796dcbd52867017cbd17b2d2d5f3523eedb0a899bf9f650",
+      "template_sha256": "3fd17274971b8a447bbfcf26d91f0e3a7c6a88cc26532f9f023f2c7fd5e41ddb",
+      "identity_evidence_frame": "reports/completion-20261015/live/20261017-005103-132498-d5d5879a/frames/00011-mixed-army-preparation.png",
+      "identity_evidence_sha256": "ea98a5024b638169eb6510eeb57216f5709947aefcae6687ea971d165b621ddc",
+      "identity_evidence_status": "agent_visual_same_character_pose_not_human_ground_truth",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "dragon_duke",
+      "surface": "army_hero",
+      "role": "color_profile",
+      "path": "units/dragon_duke_army_color_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        158,
+        220,
+        272,
+        540
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-175700-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "lightning_spell",
+      "surface": "current_picker",
+      "path": "units/lightning_spell_picker_capacity_gray_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261016-032115-readonly-picker-pages/frames/00008-spell-picker-first-page.png",
+      "source_bbox_1280": [40, 454, 80, 494],
+      "state": "capacity_gray",
+      "client_version": "18.647.2",
+      "source_sha256": "4b913255bbfccac2b15d6aea610d9b43778ad66630270a3efb74470ace6d73a4",
+      "template_sha256": "7463b553e68e4cfb4583a10bec3866ba58ef40695ef78c1b699857f90e37b76a"
+    },
+    {
+      "unit_id": "totem_spell",
+      "surface": "current_picker",
+      "path": "units/totem_spell_picker_capacity_gray_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261016-earthquake-info-v2/frames/00001-earthquake-info-picker-before.png",
+      "source_bbox_1280": [570, 591, 610, 631],
+      "state": "capacity_gray",
+      "client_version": "18.647.2",
+      "source_sha256": "22823d99e548993c50e2d158fd524eef511e0d44d7b4712584c1796cd60f0173",
+      "template_sha256": "4890b5657845ca0a8660870b276831293533e4752b13a1ea8958957711f2d083",
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261016-earthquake-info-v2/frames/00004-earthquake-info-after-3.png",
+      "identity_evidence_sha256": "ddddb41892feab0904ab9c289f97d2c2e2633cb6f5d4c2c3a3779c035ee522aa",
+      "identity_evidence_title": "2级图腾法术",
+      "identity_evidence_status": "agent_visual_detail_title_not_human_ground_truth"
+    },
+    {
+      "unit_id": "furnace",
+      "surface": "current_picker",
+      "path": "units/furnace_picker_capacity_gray_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261016-154525-troop-next/frames/00002-after.png",
+      "source_bbox_1280": [1015, 591, 1055, 631],
+      "state": "capacity_gray",
+      "client_version": "18.647.2",
+      "source_sha256": "b1bda256233d3319c94942ec2b286af15e155a9ebad99253c08e17e0d05b5c3c",
+      "template_sha256": "876a78c9e3dea1754f22ddb2359a2528247e14659f928dad4b0efc238ba7a942",
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261016-154621-tap/frames/00002-after.png",
+      "identity_evidence_sha256": "3752e78a3af402e1351f9847111a54fd8fabcd8646bef722bb2433e49e636a69",
+      "identity_evidence_title": "4级烈焰熔炉",
+      "identity_evidence_status": "agent_visual_detail_title_not_human_ground_truth"
+    },
+    {
+      "unit_id": "grand_warden",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/grand_warden_army_face_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        60,
+        330,
+        95,
+        360
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-180859-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "grand_warden",
+      "surface": "army_hero",
+      "role": "color_profile",
+      "path": "units/grand_warden_army_color_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [28, 220, 142, 540],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-180859-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "grand_warden",
+      "surface": "army_hero",
+      "role": "color_profile",
+      "path": "units/grand_warden_army_color_roster_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261015-223012-576315-88e25bff/frames/00006-battle-army-confirmation.png",
+      "source_bbox_1280": [
+        28,
+        220,
+        142,
+        540
+      ],
+      "source_sha256": "cb95dc2245d4fd9be2d42d4f0380bc35ccfe294395a9fc1eabca04a9c3db7ea9",
+      "template_sha256": "082a36d0c4032526f2fd4d9272502792dd7b5e951c09d3d2e8ebfbac4dd269c0",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/minion_prince_army_face_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        325,
+        290,
+        360,
+        320
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-181106-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/minion_prince_army_face_2_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-180741-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        325,
+        290,
+        360,
+        320
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-181106-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "army_hero",
+      "role": "color_profile",
+      "path": "units/minion_prince_army_color_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        288,
+        220,
+        402,
+        540
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-181106-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/archer_queen_army_face_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        445,
+        255,
+        480,
+        285
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-181358-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "army_hero",
+      "role": "color_profile",
+      "path": "units/archer_queen_army_color_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-175448-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        418,
+        220,
+        532,
+        540
+      ],
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261015-181358-tap/frames/00002-after.png",
+      "state": "active",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "electro_dragon",
+      "surface": "battle",
+      "path": "units/electro_dragon_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        120,
+        634,
+        155,
+        674
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "dragon",
+      "surface": "battle",
+      "path": "units/dragon_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        214,
+        633,
+        253,
+        674
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "baby_dragon",
+      "surface": "battle",
+      "path": "units/baby_dragon_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        307,
+        634,
+        350,
+        675
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "balloon",
+      "surface": "battle",
+      "path": "units/balloon_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        403,
+        632,
+        448,
+        675
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "archer",
+      "surface": "battle",
+      "path": "units/archer_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/collections/20261015-234304-archer-preview-session/frames/00013-scout-camera-ready.png",
+      "source_bbox_1280": [457, 634, 497, 674],
+      "state": "initial_scout",
+      "client_version": "18.647.2",
+      "source_sha256": "659813c3c684ebd4ffd48e095503b68bc529024e7faadf1137c29a78a3d11f5a",
+      "template_sha256": "2de11c7f6b43cd4fbbab5ae7da43f5dc3e87865e66263d88cf919200afb8a07d"
+    },
+    {
+      "unit_id": "sky_wagon",
+      "surface": "battle",
+      "path": "units/sky_wagon_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        514,
+        635,
+        548,
+        668
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "grand_warden",
+      "surface": "battle",
+      "path": "units/grand_warden_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        628,
+        632,
+        665,
+        673
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "dragon_duke",
+      "surface": "battle",
+      "path": "units/dragon_duke_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        721,
+        632,
+        760,
+        674
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "battle",
+      "path": "units/minion_prince_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        816,
+        632,
+        855,
+        675
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "battle",
+      "path": "units/archer_queen_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        916,
+        632,
+        953,
+        674
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "lightning_spell",
+      "surface": "battle",
+      "path": "units/lightning_spell_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        1013,
+        632,
+        1063,
+        677
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2"
+    },
+    {
+      "unit_id": "totem_spell",
+      "surface": "battle",
+      "path": "units/totem_spell_battle_18_647_2.png",
+      "source_frame": "reports/completion-20261015/vision-collect-001-session/frames/00008-scout-camera-ready.png",
+      "source_bbox_1280": [
+        1113,
+        632,
+        1161,
+        676
+      ],
+      "state": "initial_scout",
+      "client_version": "18.647.2",
+      "source_sha256": "843f92ff6d8e56fafc897ef1e5c7725bcb0378777825829147987b27bf6cf131",
+      "template_sha256": "e606848d0b62ff752d0100d616107c3c079e6d8f053d47f7f5e3a94ac78e4f49",
+      "identity_evidence_frame": "reports/completion-20261015/probes/20261016-earthquake-info-v2/frames/00004-earthquake-info-after-3.png",
+      "identity_evidence_sha256": "ddddb41892feab0904ab9c289f97d2c2e2633cb6f5d4c2c3a3779c035ee522aa",
+      "identity_evidence_title": "2级图腾法术",
+      "identity_evidence_status": "army_and_battle_lineup_correspondence_agent_visual_not_direct_battle_detail"
+    },
+    {
+      "unit_id": "grand_warden",
+      "surface": "battle",
+      "path": "units/grand_warden_battle_deployed_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261015-215245-013077-d6fb30ed/frames/00016-battle-settlement.png",
+      "source_bbox_1280": [
+        628,
+        632,
+        665,
+        673
+      ],
+      "source_card_bbox_1280": [
+        599,
+        595,
+        688,
+        711
+      ],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "da3e4e498182ebf3fdef6b381d526c81f683261bb51e59e6fcbad9324230b76c",
+      "template_sha256": "674cbc20cff8186dc8b547774640fcefb8fdfe61714f64f246a8660f0bed52a6"
+    },
+    {
+      "unit_id": "dragon_duke",
+      "surface": "battle",
+      "path": "units/dragon_duke_battle_deployed_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261015-215245-013077-d6fb30ed/frames/00016-battle-settlement.png",
+      "source_bbox_1280": [
+        721,
+        632,
+        760,
+        674
+      ],
+      "source_card_bbox_1280": [
+        696,
+        595,
+        784,
+        711
+      ],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "da3e4e498182ebf3fdef6b381d526c81f683261bb51e59e6fcbad9324230b76c",
+      "template_sha256": "8f55b818a85aae3cfae9d45acbed70ff5dd55ee580f278656d111dc64821d025"
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "battle",
+      "path": "units/minion_prince_battle_deployed_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261015-215245-013077-d6fb30ed/frames/00016-battle-settlement.png",
+      "source_bbox_1280": [
+        816,
+        632,
+        855,
+        675
+      ],
+      "source_card_bbox_1280": [
+        792,
+        595,
+        881,
+        711
+      ],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "da3e4e498182ebf3fdef6b381d526c81f683261bb51e59e6fcbad9324230b76c",
+      "template_sha256": "d91f68fd8ccdbdd8e735f48a9006ca2cbfcdde811df312facaed7494d7dfd303"
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "battle",
+      "path": "units/archer_queen_battle_deployed_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261015-215245-013077-d6fb30ed/frames/00016-battle-settlement.png",
+      "source_bbox_1280": [
+        916,
+        632,
+        953,
+        674
+      ],
+      "source_card_bbox_1280": [
+        889,
+        595,
+        978,
+        711
+      ],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "da3e4e498182ebf3fdef6b381d526c81f683261bb51e59e6fcbad9324230b76c",
+      "template_sha256": "e32b9c740d882e7e366181a60af4fbca4e958d5728d29d1d2cdee4759b60455c"
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "battle",
+      "path": "units/archer_queen_battle_deployed_001038_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261016-001038-401680-d5107440/frames/00022-battle-settlement.png",
+      "source_bbox_1280": [965, 632, 1002, 674],
+      "source_card_bbox_1280": [938, 595, 1027, 711],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "0a210e5210468d59769f92bc756d9f4a1f46f185b90d4d9d46f9172474e2f5e0",
+      "template_sha256": "b438a2e901c05578130e3acd586414053916809629481b7eeafcd3ce8154f915"
+    },
+    {
+      "unit_id": "archer",
+      "surface": "current_picker",
+      "path": "units/archer_picker_active_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-230638-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        313,
+        595,
+        360,
+        637
+      ],
+      "state": "active",
+      "client_version": "18.647.2",
+      "observed_housing_space": 1,
+      "housing_label_bbox_1280": [337, 653, 363, 688],
+      "source_sha256": "8dfddbce496f2c38df972d639d7b61dedcc6aa55dda5d483724b7361409c5ceb",
+      "template_sha256": "2e5ea901058ff447e19ce073915956eb4b8d202a3d19c2d7a55b865da2670abd",
+      "information_panel": "reports/completion-20261015/probes/20261015-230720-tap/frames/00002-after.png",
+      "information_panel_sha256": "e039142c119a81c3511136b88d399957bb5d3fe83e41a3d229702540fc966c3d"
+    },
+    {
+      "unit_id": "archer",
+      "surface": "current_picker",
+      "path": "units/archer_picker_capacity_gray_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-233539-archer-fill/frames/00021-army-current-picker-edit-1.png",
+      "source_bbox_1280": [313, 595, 360, 637],
+      "state": "capacity_gray",
+      "client_version": "18.647.2",
+      "observed_housing_space": 1,
+      "housing_label_bbox_1280": [337, 653, 363, 688],
+      "source_sha256": "9bfdc4f0ccfb7fdd411df391210692c27f55da05338dde36d2f2da2fcee29986",
+      "template_sha256": "84ecf9c0be25b257394bbee9ffbc4af26f50eae1f6f35199dc87714e8f9f581f"
+    },
+    {
+      "unit_id": "balloon",
+      "surface": "current_picker",
+      "path": "units/balloon_picker_capacity_gray_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-230638-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        704,
+        458,
+        746,
+        500
+      ],
+      "state": "capacity_gray",
+      "client_version": "18.647.2",
+      "observed_housing_space": 5,
+      "housing_label_bbox_1280": [716, 514, 750, 550],
+      "source_sha256": "8dfddbce496f2c38df972d639d7b61dedcc6aa55dda5d483724b7361409c5ceb",
+      "template_sha256": "9bd91aa339f2b70d5b6bcd2fdb5657bfcc515ab81de19b36b271903fb9d26484"
+    },
+    {
+      "unit_id": "dragon",
+      "surface": "current_picker",
+      "path": "units/dragon_picker_capacity_gray_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-230638-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        838,
+        595,
+        880,
+        637
+      ],
+      "state": "capacity_gray",
+      "client_version": "18.647.2",
+      "observed_housing_space": 20,
+      "housing_label_bbox_1280": [843, 653, 889, 688],
+      "source_sha256": "8dfddbce496f2c38df972d639d7b61dedcc6aa55dda5d483724b7361409c5ceb",
+      "template_sha256": "409852788364dea446efac9905cca21cfd3e138bc53bfe4193b7a990c89fc996"
+    },
+    {
+      "unit_id": "baby_dragon",
+      "surface": "current_picker",
+      "path": "units/baby_dragon_picker_capacity_gray_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-230638-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        967,
+        595,
+        1009,
+        637
+      ],
+      "state": "capacity_gray",
+      "client_version": "18.647.2",
+      "observed_housing_space": 10,
+      "housing_label_bbox_1280": [974, 653, 1019, 688],
+      "source_sha256": "8dfddbce496f2c38df972d639d7b61dedcc6aa55dda5d483724b7361409c5ceb",
+      "template_sha256": "cdc8f65b8edd5824eae8f339b43178cf09245b7c9893f8b561a3d9ea5db481ae"
+    },
+    {
+      "unit_id": "electro_dragon",
+      "surface": "current_picker",
+      "path": "units/electro_dragon_picker_capacity_gray_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261015-230638-tap/frames/00002-after.png",
+      "source_bbox_1280": [
+        1110,
+        605,
+        1135,
+        630
+      ],
+      "state": "capacity_gray",
+      "client_version": "18.647.2",
+      "observed_housing_space": 30,
+      "housing_label_bbox_1280": [1103, 653, 1148, 688],
+      "source_sha256": "8dfddbce496f2c38df972d639d7b61dedcc6aa55dda5d483724b7361409c5ceb",
+      "template_sha256": "acb985d6855c12015208a86e5d306927574fe4f902fa9fd38ada3bdf9446dd3e"
+    },
+    {
+      "unit_id": "grand_warden",
+      "surface": "battle",
+      "path": "units/grand_warden_battle_deployed_005304_18_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261016-005304-767109-058a9bfa/frames/00018-battle-settlement.png",
+      "source_bbox_1280": [676, 632, 713, 673],
+      "source_card_bbox_1280": [647, 595, 736, 711],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "dcb374d3c1d15d7d312d1322c606f20dd5f76cd7fafb24cb7cf0082f4e21ca66",
+      "template_sha256": "df6ff633b6be323cedb9542417badf9e86dc84afb5d8edc2b714d953d3078853"
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "battle",
+      "path": "units/minion_prince_battle_deployed_005304_18_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261016-005304-767109-058a9bfa/frames/00018-battle-settlement.png",
+      "source_bbox_1280": [864, 632, 903, 675],
+      "source_card_bbox_1280": [840, 595, 929, 711],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "dcb374d3c1d15d7d312d1322c606f20dd5f76cd7fafb24cb7cf0082f4e21ca66",
+      "template_sha256": "50f804214b65a1f0a1e51e0d84321c2f9cb0fe631f607c06fc687ffe9e9c09f6"
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "battle",
+      "path": "units/archer_queen_battle_deployed_005304_20_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261016-005304-767109-058a9bfa/frames/00020-battle-settlement.png",
+      "source_bbox_1280": [964, 632, 1001, 674],
+      "source_card_bbox_1280": [937, 595, 1026, 711],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "65d611e23b0151a72ef8b6b3711d81b0f41325697c749ec9d4e4b68c783df68b",
+      "template_sha256": "2821147b3d5b0354af98cedf6cf4c0282e4ea03610981de4a56ad048c61f3e98"
+    },
+    {
+      "unit_id": "grand_warden",
+      "surface": "battle",
+      "path": "units/grand_warden_battle_used_035742_18_647_2.png",
+      "source_frame": "reports/completion-20261015/probes/20261016-035742-manual-probed-skill/frames/00027-manual-skill-after-2.png",
+      "source_bbox_1280": [676, 632, 713, 673],
+      "source_card_bbox_1280": [647, 595, 736, 711],
+      "state": "deployed",
+      "ability_phase_asset": "used_portrait_only_not_ability_proof",
+      "client_version": "18.647.2",
+      "source_sha256": "07b28a38a067d27d9e5ab90a08cca182ff71a600062a9daea84f7bf0e0ea3979",
+      "template_sha256": "a795790cf761cacef62e5d38661f097efdede804a05b1479bed8309caafabbba"
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "battle",
+      "path": "units/archer_queen_battle_deployed_113248_156_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261017-113248-916295-c8ee9009/frames/00156-frozen-line-post-recheck.png",
+      "source_bbox_1280": [
+        964,
+        632,
+        1001,
+        674
+      ],
+      "source_card_bbox_1280": [
+        937,
+        595,
+        1026,
+        711
+      ],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "c5c131996da8fe87eee74a8f7a03c9f435b97290166e204dd8132fa59a404fb8",
+      "template_sha256": "fcf46cdbbe684fb42e4c34d7ff8daefe323263709dd66896683a9f36338a5961"
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "battle",
+      "path": "units/minion_prince_battle_deployed_113248_157_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261017-113248-916295-c8ee9009/frames/00157-frozen-line-post-recheck.png",
+      "source_bbox_1280": [
+        864,
+        632,
+        903,
+        675
+      ],
+      "source_card_bbox_1280": [
+        840,
+        595,
+        929,
+        711
+      ],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "a048b0c4518fd54641833833a85044c7d7e3789fcc5ef6a81b65c069af842ffa",
+      "template_sha256": "e935c70893b803d66cdaa93675237d5a3f70f377ed369be218f230dba279d123"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "scene_classes": ["starting", "village", "training", "search", "enemy_village", "battle", "settlement", "popup", "disconnected", "maintenance", "clan_chat", "donation", "request"],
+  "unknown_scene": "unknown",
+  "building_classes": [
+    {"id": 1, "name": "town_hall"},
+    {"id": 2, "name": "clan_castle"},
+    {"id": 3, "name": "air_defense"},
+    {"id": 4, "name": "air_sweeper"},
+    {"id": 5, "name": "inferno_tower"},
+    {"id": 6, "name": "x_bow"},
+    {"id": 7, "name": "scattershot"},
+    {"id": 8, "name": "monolith"},
+    {"id": 9, "name": "spell_tower"},
+    {"id": 10, "name": "cannon"},
+    {"id": 11, "name": "archer_tower"},
+    {"id": 12, "name": "mortar"},
+    {"id": 13, "name": "wizard_tower"},
+    {"id": 14, "name": "bomb_tower"},
+    {"id": 15, "name": "hidden_tesla"},
+    {"id": 16, "name": "eagle_artillery"},
+    {"id": 17, "name": "resource_storage"},
+    {"id": 18, "name": "resource_collector"},
+    {"id": 19, "name": "other_building"}
+  ]
+}

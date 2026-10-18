@@ -1,0 +1,30 @@
+{
+  "client_version": "18.647.2",
+  "unit_id": "totem_spell",
+  "purpose": "agent_visual_popup_close_regression_not_training_ground_truth",
+  "source": {
+    "path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-earthquake-info-v2\\frames\\00004-earthquake-info-after-3.png",
+    "sha256": "ddddb41892feab0904ab9c289f97d2c2e2633cb6f5d4c2c3a3779c035ee522aa",
+    "resolution": [2560, 1440],
+    "observed_title": "2级图腾法术",
+    "observed_stun_seconds": "0.2",
+    "observed_hitpoints": "11 000",
+    "observed_space_label": "所需空间：",
+    "space_number_ocr_verified": false
+  },
+  "fixture": {
+    "path": "tests/fixtures/totem_spell_detail_close_18_647_2.png",
+    "sha256": "862d2308676a9e65b94d616e582a0e2c07a8008e28e83a50b2a0c75de5dc2022",
+    "resolution": [1280, 720],
+    "derivation": {
+      "resize": "cv2.resize(source, (1280, 720), interpolation=cv2.INTER_AREA)",
+      "background_bgr": [45, 45, 45],
+      "retained_baseline_rectangles_xyxy": [
+        [530, 15, 750, 95],
+        [1095, 15, 1165, 95],
+        [595, 105, 1080, 250]
+      ]
+    }
+  },
+  "evidence_limits": "Only the sampled level-2 detail title, stat text and same-frame close glyph authorize the close button; upgrade controls and an unrecognized housing numeral are excluded."
+}

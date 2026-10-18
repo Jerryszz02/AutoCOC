@@ -1,0 +1,30 @@
+{
+  "client_version": "18.647.2",
+  "source_events": "reports/completion-20261015/live/20261016-190802-997301-7e18f772/events.jsonl",
+  "source_events_sha256": "7d9198e029d6a8eb5d704588de65133a2759e431acb2e354d6f35e8c0d2c20f7",
+  "filter": "Keep only OCR items with bbox fully within x=500..750, y=0..100 and text matching the countdown label or a seconds timer. No other screen text is retained.",
+  "frames": [
+    {
+      "source_frame": "reports/completion-20261015/live/20261016-190802-997301-7e18f772/frames/00022-line-zoom-verified.png",
+      "source_sha256": "b020dc297b2b903932460f5812141ed4a08941f35098b91c747e2c2ea844265b",
+      "scene": "enemy_village",
+      "observed_at_monotonic": 1215937.9948269,
+      "cached_ocr": [
+        {"text": "开战倒计时", "confidence": 0.99982, "bbox": [583, 14, 680, 39]},
+        {"text": "21秒", "confidence": 0.87578, "bbox": [603, 35, 678, 78]}
+      ],
+      "strict_countdown_seconds": null
+    },
+    {
+      "source_frame": "reports/completion-20261015/live/20261016-190802-997301-7e18f772/frames/00023-continuous-line-failure-check.png",
+      "source_sha256": "929d4413ebee653664a32fb0c54ff936a7516a1e13ace2597aadb4292cc8cd36",
+      "scene": "enemy_village",
+      "observed_at_monotonic": 1215940.5394365,
+      "cached_ocr": [
+        {"text": "开战倒计时", "confidence": 0.99981, "bbox": [582, 14, 680, 40]},
+        {"text": "18秒", "confidence": 0.99987, "bbox": [602, 36, 680, 78]}
+      ],
+      "strict_countdown_seconds": 18
+    }
+  ]
+}

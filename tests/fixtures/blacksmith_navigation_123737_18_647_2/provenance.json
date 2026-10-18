@@ -1,0 +1,93 @@
+{
+  "schema": "blacksmith_navigation_123737_18_647_2_fixture_v1",
+  "client_version": "18.647.2",
+  "split": "TRAIN",
+  "review_method": "agent_visual_selected_title_and_equipment_plus_ore_read",
+  "formal_acceptance": false,
+  "account_verified": false,
+  "reward_inventory_verified": false,
+  "source_review": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\diagnostics\\blacksmith-calibration-1237-root-v1.json",
+  "source_review_sha256": "8a9f5c47ff189054248320ecfcdf02798c1c6a84b82c4842c51b018e71632c0a",
+  "template": {
+    "path": "assets/templates/ore_navigation_blacksmith_front_verified_123737_18_647_2.png",
+    "sha256": "4c9d56cd3fd1077a40825cae5ca5d75722a66e65e2ccf36cf73af66eaa924030",
+    "source_frame_sha256": "37b8a3053b68a30a41713886d1bd7079cf8524eb57461399670969f7b9e55c84",
+    "source_roi_xyxy": [
+      758,
+      197,
+      776,
+      219
+    ],
+    "source_pixel_sha256": "c6835d07fe78364923ae5fc3b4905c917bcf3df34d202daf22f1609b6a1d1746",
+    "verified_tap_point_baseline": [
+      753,
+      200
+    ],
+    "tap_offset_xy": [
+      -5,
+      3
+    ]
+  },
+  "transformation": {
+    "baseline_resolution": [
+      1280,
+      720
+    ],
+    "resize": "cv2.INTER_AREA",
+    "retained_roi_xyxy": [
+      730,
+      165,
+      815,
+      240
+    ],
+    "outside_bgr": [
+      24,
+      24,
+      24
+    ]
+  },
+  "fixtures": {
+    "home_calibrated": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261017-123737-observe\\frames\\00001-before.png",
+      "source_sha256": "37b8a3053b68a30a41713886d1bd7079cf8524eb57461399670969f7b9e55c84",
+      "derived_path": "tests/fixtures/blacksmith_navigation_123737_18_647_2/home_calibrated.png",
+      "derived_sha256": "9d690461690e531c23e17bb4118366bf88055dfc93dbfc09894fbf9b212bb11a",
+      "context_path": "tests/fixtures/blacksmith_navigation_123737_18_647_2/home_calibrated.json",
+      "context_sha256": "41d484d71a8663ec2a076c5a68e22ba2091893bca1799fab33aa0a4580b72381",
+      "retained_roi_pixel_sha256": "0da87c360810d2f577bcec955240afaa1369667a2689df44ded46329428ca45c"
+    },
+    "home_obscured": {
+      "source_path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261017-123758-tap\\frames\\00001-before.png",
+      "source_sha256": "d2bd5e67e08cbb2e566c8968a5ba31836f1a3487ccf96d66e9b98e3c7ede1bb1",
+      "derived_path": "tests/fixtures/blacksmith_navigation_123737_18_647_2/home_obscured.png",
+      "derived_sha256": "4830baec35e31a63b038e7247ed4f6030e628a2563281934f04e5913bc1e9943",
+      "context_path": "tests/fixtures/blacksmith_navigation_123737_18_647_2/home_obscured.json",
+      "context_sha256": "41d484d71a8663ec2a076c5a68e22ba2091893bca1799fab33aa0a4580b72381",
+      "retained_roi_pixel_sha256": "6a4ca8f5fd9307e0dd6e256f735ae1fc668c4a2dcbb1320f973c5d7bbd5a260b"
+    }
+  },
+  "selection_receipt": {
+    "source_frame": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261017-123758-tap\\frames\\00002-after.png",
+    "source_frame_sha256": "083897097095dc7797e95ca125a2e64b128d7a64aef6d4f9a67f7bcba11d4fef",
+    "verified_title": "铁匠铺（10级）",
+    "verified_controls": [
+      "信息",
+      "装备"
+    ],
+    "ore_read_result": "17908/1332/83, two stable reads and HOME return; not a reward claim"
+  },
+  "root_two_scale_review": {
+    "path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\diagnostics\\blacksmith-two-scale-root-review-v1.json",
+    "sha256": "344a04d570d2798514f515c75968ddc6386b04ea317497a262a4c2eabc6c4ee4"
+  },
+  "prospective_train_declarations": [
+    {
+      "path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\external\\staging\\prospective-free-ore-train-d06a359-v1.json",
+      "sha256": "d747a51b7e219ca0b8baeb96bd5db0173480200a30e3e6824cf3439ac9cc459b"
+    },
+    {
+      "path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\external\\staging\\prospective-blacksmith-calibration-train-a438774-v1.json",
+      "sha256": "5971b3f5488e479b518c39eb5e250e9b5c670967b60cdd892e9b5c89a668af07"
+    }
+  ]
+}

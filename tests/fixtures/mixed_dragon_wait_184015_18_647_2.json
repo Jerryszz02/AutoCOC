@@ -1,0 +1,930 @@
+{
+  "client_version": "18.647.2",
+  "purpose": "development_mixed_selection_wait_184015_regression_not_training_ground_truth",
+  "human_reviewed": false,
+  "formal_success": false,
+  "counts_toward_acceptance": false,
+  "anonymization": "Native timer, end-battle control, and toolbar rectangles only; elsewhere BGR45. Cached OCR includes only text boxes wholly inside corresponding baseline rectangles. No new OCR for this fixture.",
+  "source_events": "reports/completion-20261015/live/20261016-184015-288331-175c52c4/events.jsonl",
+  "source_events_sha256": "cca2100a5f8e49e87c6aba8b61bee394e3432ad2ce18b22bc60e54d657aa5ee7",
+  "frames": [
+    {
+      "path": "tests/fixtures/mixed_dragon_wait_184015_00012_18_647_2.png",
+      "sha256": "7644b4680833e056ca8f96668e6ad5c5a55ab6b2a60ec92c4b2435a438c68fee",
+      "source_frame": "reports/completion-20261015/live/20261016-184015-288331-175c52c4/frames/00012-line-zoom-verified.png",
+      "source_sha256": "615e325bba3ac266cf7882f40be922cb4a74de5929713357431894e374e370c8",
+      "scene": "enemy_village",
+      "retained_native_rectangles_xyxy": [
+        [
+          0,
+          1160,
+          2560,
+          1440
+        ],
+        [
+          1060,
+          0,
+          1500,
+          190
+        ],
+        [
+          80,
+          1000,
+          300,
+          1150
+        ]
+      ],
+      "retained_baseline_rectangles_xyxy": [
+        [
+          0,
+          580,
+          1280,
+          720
+        ],
+        [
+          530,
+          0,
+          750,
+          95
+        ],
+        [
+          40,
+          500,
+          150,
+          575
+        ]
+      ],
+      "cached_ocr": [
+        {
+          "text": "开战倒计时：",
+          "confidence": 0.99968,
+          "bbox": [
+            584,
+            14,
+            690,
+            38
+          ]
+        },
+        {
+          "text": "15秒",
+          "confidence": 0.99949,
+          "bbox": [
+            604,
+            35,
+            677,
+            80
+          ]
+        },
+        {
+          "text": "结束战斗",
+          "confidence": 0.99945,
+          "bbox": [
+            60,
+            528,
+            126,
+            550
+          ]
+        },
+        {
+          "text": "x10",
+          "confidence": 0.99767,
+          "bbox": [
+            130,
+            592,
+            179,
+            621
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99579,
+          "bbox": [
+            245,
+            595,
+            276,
+            620
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99591,
+          "bbox": [
+            342,
+            595,
+            372,
+            620
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99141,
+          "bbox": [
+            437,
+            593,
+            470,
+            621
+          ]
+        },
+        {
+          "text": "x6",
+          "confidence": 0.99073,
+          "bbox": [
+            1044,
+            592,
+            1086,
+            622
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.99722,
+          "bbox": [
+            1142,
+            592,
+            1183,
+            622
+          ]
+        },
+        {
+          "text": "12",
+          "confidence": 0.99999,
+          "bbox": [
+            200,
+            680,
+            217,
+            697
+          ]
+        },
+        {
+          "text": "29",
+          "confidence": 1.0,
+          "bbox": [
+            604,
+            680,
+            630,
+            698
+          ]
+        },
+        {
+          "text": "16",
+          "confidence": 0.99239,
+          "bbox": [
+            706,
+            678,
+            724,
+            697
+          ]
+        },
+        {
+          "text": "80",
+          "confidence": 0.99999,
+          "bbox": [
+            894,
+            680,
+            920,
+            698
+          ]
+        },
+        {
+          "text": "12",
+          "confidence": 1.0,
+          "bbox": [
+            1007,
+            678,
+            1026,
+            700
+          ]
+        }
+      ],
+      "cached_end_battle_buttons": [
+        {
+          "name": "end_battle",
+          "text": "结束战斗",
+          "confidence": 0.99945,
+          "bbox": [
+            60,
+            528,
+            126,
+            550
+          ],
+          "point": [
+            93,
+            539
+          ]
+        }
+      ],
+      "cached_dragon_slots": [
+        {
+          "index": 1,
+          "kind": "troop",
+          "bbox": [
+            190,
+            595,
+            278,
+            711
+          ],
+          "unit_id": "dragon",
+          "confidence": 1.0,
+          "source": "army",
+          "point": [
+            234,
+            653
+          ],
+          "count": 1,
+          "level": null,
+          "available": null,
+          "evidence": {
+            "method": "independent_card_border",
+            "header_hue": 105.0,
+            "hero_pet_icon": null,
+            "clan_badge": null,
+            "event_portrait": null,
+            "count": {
+              "text": "x1",
+              "confidence": 0.99579,
+              "bbox": [
+                245,
+                595,
+                276,
+                620
+              ]
+            },
+            "identity": {
+              "unit_id": "dragon",
+              "confidence": 1.0,
+              "reason": "portrait_template",
+              "evidence": [
+                {
+                  "score": 1.0,
+                  "unit_id": "dragon",
+                  "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\dragon_battle_18_647_2.png"
+                },
+                {
+                  "score": 0.38849,
+                  "unit_id": "electro_dragon",
+                  "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\electro_dragon_battle_18_647_2.png"
+                },
+                {
+                  "score": 0.31555,
+                  "unit_id": "baby_dragon",
+                  "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\baby_dragon_battle_18_647_2.png"
+                }
+              ],
+              "template_client_version": "18.647.2",
+              "version_verified": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "path": "tests/fixtures/mixed_dragon_wait_184015_00018_18_647_2.png",
+      "sha256": "4ca65f03a7d90e486059183385c8ba5b691dfae21a1ee016c1f77718450092f4",
+      "source_frame": "reports/completion-20261015/live/20261016-184015-288331-175c52c4/frames/00018-mixed-balloon-post-1.png",
+      "source_sha256": "1df4b574427665be2c3d3b7a28806ff7ec169506ef50a9c03b5eaa515c422cc4",
+      "scene": "battle",
+      "retained_native_rectangles_xyxy": [
+        [
+          0,
+          1160,
+          2560,
+          1440
+        ],
+        [
+          1060,
+          0,
+          1500,
+          190
+        ],
+        [
+          80,
+          1000,
+          300,
+          1150
+        ]
+      ],
+      "retained_baseline_rectangles_xyxy": [
+        [
+          0,
+          580,
+          1280,
+          720
+        ],
+        [
+          530,
+          0,
+          750,
+          95
+        ],
+        [
+          40,
+          500,
+          150,
+          575
+        ]
+      ],
+      "cached_ocr": [
+        {
+          "text": "离战斗结束还有：",
+          "confidence": 0.94224,
+          "bbox": [
+            566,
+            14,
+            704,
+            38
+          ]
+        },
+        {
+          "text": "3分钟0秒",
+          "confidence": 0.98365,
+          "bbox": [
+            565,
+            35,
+            715,
+            80
+          ]
+        },
+        {
+          "text": "放弃",
+          "confidence": 0.99939,
+          "bbox": [
+            72,
+            526,
+            112,
+            553
+          ]
+        },
+        {
+          "text": "x10",
+          "confidence": 0.99767,
+          "bbox": [
+            130,
+            592,
+            179,
+            621
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99568,
+          "bbox": [
+            245,
+            595,
+            275,
+            620
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99591,
+          "bbox": [
+            342,
+            595,
+            372,
+            620
+          ]
+        },
+        {
+          "text": "x6",
+          "confidence": 0.9879,
+          "bbox": [
+            1044,
+            592,
+            1086,
+            622
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.99697,
+          "bbox": [
+            1142,
+            592,
+            1183,
+            622
+          ]
+        },
+        {
+          "text": "12",
+          "confidence": 0.99999,
+          "bbox": [
+            200,
+            680,
+            217,
+            697
+          ]
+        },
+        {
+          "text": "29",
+          "confidence": 1.0,
+          "bbox": [
+            604,
+            680,
+            630,
+            698
+          ]
+        },
+        {
+          "text": "16",
+          "confidence": 0.83878,
+          "bbox": [
+            708,
+            680,
+            723,
+            696
+          ]
+        },
+        {
+          "text": "80",
+          "confidence": 0.99999,
+          "bbox": [
+            894,
+            680,
+            920,
+            698
+          ]
+        },
+        {
+          "text": "12",
+          "confidence": 1.0,
+          "bbox": [
+            1007,
+            678,
+            1026,
+            700
+          ]
+        }
+      ],
+      "cached_end_battle_buttons": [
+        {
+          "name": "end_battle",
+          "text": "放弃",
+          "confidence": 0.99939,
+          "bbox": [
+            72,
+            526,
+            112,
+            553
+          ],
+          "point": [
+            92,
+            539
+          ]
+        }
+      ],
+      "cached_dragon_slots": [
+        {
+          "index": 1,
+          "kind": "troop",
+          "bbox": [
+            190,
+            595,
+            278,
+            711
+          ],
+          "unit_id": "dragon",
+          "confidence": 1.0,
+          "source": "army",
+          "point": [
+            234,
+            653
+          ],
+          "count": 1,
+          "level": null,
+          "available": null,
+          "evidence": {
+            "method": "independent_card_border",
+            "header_hue": 105.0,
+            "hero_pet_icon": null,
+            "clan_badge": null,
+            "event_portrait": null,
+            "count": {
+              "text": "x1",
+              "confidence": 0.99568,
+              "bbox": [
+                245,
+                595,
+                275,
+                620
+              ]
+            },
+            "identity": {
+              "unit_id": "dragon",
+              "confidence": 1.0,
+              "reason": "portrait_template",
+              "evidence": [
+                {
+                  "score": 1.0,
+                  "unit_id": "dragon",
+                  "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\dragon_battle_18_647_2.png"
+                },
+                {
+                  "score": 0.38849,
+                  "unit_id": "electro_dragon",
+                  "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\electro_dragon_battle_18_647_2.png"
+                },
+                {
+                  "score": 0.31555,
+                  "unit_id": "baby_dragon",
+                  "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\baby_dragon_battle_18_647_2.png"
+                }
+              ],
+              "template_client_version": "18.647.2",
+              "version_verified": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "path": "tests/fixtures/mixed_dragon_wait_184015_00019_18_647_2.png",
+      "sha256": "f2b39d851afa067b23a1f6b83d7e03a96e5d2ab2dd91360635846862b57be67c",
+      "source_frame": "reports/completion-20261015/live/20261016-184015-288331-175c52c4/frames/00019-mixed-dragon-selected-0.png",
+      "source_sha256": "3586d0b0f63d80ba9ff089629ad34dad880c2e80a33fdf476f983d913cbf5c0b",
+      "scene": "battle",
+      "retained_native_rectangles_xyxy": [
+        [
+          0,
+          1160,
+          2560,
+          1440
+        ],
+        [
+          1060,
+          0,
+          1500,
+          190
+        ],
+        [
+          80,
+          1000,
+          300,
+          1150
+        ]
+      ],
+      "retained_baseline_rectangles_xyxy": [
+        [
+          0,
+          580,
+          1280,
+          720
+        ],
+        [
+          530,
+          0,
+          750,
+          95
+        ],
+        [
+          40,
+          500,
+          150,
+          575
+        ]
+      ],
+      "cached_ocr": [
+        {
+          "text": "离战斗结束还有",
+          "confidence": 0.99983,
+          "bbox": [
+            566,
+            14,
+            697,
+            38
+          ]
+        },
+        {
+          "text": "2分钟57秒",
+          "confidence": 0.99935,
+          "bbox": [
+            558,
+            37,
+            722,
+            80
+          ]
+        },
+        {
+          "text": "放弃",
+          "confidence": 0.99939,
+          "bbox": [
+            72,
+            526,
+            112,
+            553
+          ]
+        },
+        {
+          "text": "x10",
+          "confidence": 0.99765,
+          "bbox": [
+            130,
+            592,
+            179,
+            621
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99568,
+          "bbox": [
+            245,
+            595,
+            275,
+            620
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.99591,
+          "bbox": [
+            342,
+            595,
+            372,
+            620
+          ]
+        },
+        {
+          "text": "x6",
+          "confidence": 0.99458,
+          "bbox": [
+            1044,
+            592,
+            1086,
+            622
+          ]
+        },
+        {
+          "text": "x5",
+          "confidence": 0.99697,
+          "bbox": [
+            1142,
+            592,
+            1183,
+            622
+          ]
+        },
+        {
+          "text": "12",
+          "confidence": 0.99999,
+          "bbox": [
+            200,
+            680,
+            217,
+            697
+          ]
+        },
+        {
+          "text": "29",
+          "confidence": 1.0,
+          "bbox": [
+            604,
+            680,
+            630,
+            698
+          ]
+        },
+        {
+          "text": "16",
+          "confidence": 0.96906,
+          "bbox": [
+            705,
+            678,
+            724,
+            698
+          ]
+        },
+        {
+          "text": "80",
+          "confidence": 0.99999,
+          "bbox": [
+            894,
+            680,
+            920,
+            698
+          ]
+        },
+        {
+          "text": "12",
+          "confidence": 1.0,
+          "bbox": [
+            1007,
+            678,
+            1026,
+            700
+          ]
+        }
+      ],
+      "cached_end_battle_buttons": [
+        {
+          "name": "end_battle",
+          "text": "放弃",
+          "confidence": 0.99939,
+          "bbox": [
+            72,
+            526,
+            112,
+            553
+          ],
+          "point": [
+            92,
+            539
+          ]
+        }
+      ],
+      "cached_dragon_slots": [
+        {
+          "index": 1,
+          "kind": "troop",
+          "bbox": [
+            190,
+            595,
+            278,
+            711
+          ],
+          "unit_id": "dragon",
+          "confidence": 1.0,
+          "source": "army",
+          "point": [
+            234,
+            653
+          ],
+          "count": 1,
+          "level": null,
+          "available": null,
+          "evidence": {
+            "method": "independent_card_border",
+            "header_hue": 105.0,
+            "hero_pet_icon": null,
+            "clan_badge": null,
+            "event_portrait": null,
+            "count": {
+              "text": "x1",
+              "confidence": 0.99568,
+              "bbox": [
+                245,
+                595,
+                275,
+                620
+              ]
+            },
+            "identity": {
+              "unit_id": "dragon",
+              "confidence": 1.0,
+              "reason": "portrait_template",
+              "evidence": [
+                {
+                  "score": 1.0,
+                  "unit_id": "dragon",
+                  "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\dragon_battle_18_647_2.png"
+                },
+                {
+                  "score": 0.38849,
+                  "unit_id": "electro_dragon",
+                  "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\electro_dragon_battle_18_647_2.png"
+                },
+                {
+                  "score": 0.31555,
+                  "unit_id": "baby_dragon",
+                  "template": "C:\\Users\\沈致中\\.codex\\worktrees\\complete-daily-vision\\AutoCOC\\assets\\catalogs\\units\\baby_dragon_battle_18_647_2.png"
+                }
+              ],
+              "template_client_version": "18.647.2",
+              "version_verified": true
+            }
+          }
+        }
+      ],
+      "cached_remembered_count_line_ocr": [
+        {
+          "shape": [
+            70,
+            166,
+            3
+          ],
+          "pixel_sha256": "2ee512d72e18dfe291fd5fd56043a8f60d23b73629be9945aa4c84f42ba8e1af",
+          "elapsed_sec": 0.01190009992569685,
+          "results": [
+            {
+              "text": "x1",
+              "confidence": 0.89508,
+              "bbox": [
+                0,
+                0,
+                166,
+                70
+              ]
+            }
+          ]
+        },
+        {
+          "shape": [
+            70,
+            166
+          ],
+          "pixel_sha256": "94c3c56e8142460bd2ee8f408c22ca9f92804657feb3cf212a40ec81da438a89",
+          "elapsed_sec": 0.010939199943095446,
+          "results": [
+            {
+              "text": "x",
+              "confidence": 0.82059,
+              "bbox": [
+                0,
+                0,
+                166,
+                70
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "tests/fixtures/mixed_dragon_wait_184015_00020_18_647_2.png",
+      "sha256": "7946900a7fff26070c5c157dc2e5676d540f311514a4cf881bf3a069ae75c372",
+      "source_frame": "reports/completion-20261015/live/20261016-184015-288331-175c52c4/frames/00020-mixed-dragon-selected-1.png",
+      "source_sha256": "f87866434279109a730510af5dd984e7c29b58277a6caf6ed84a522196f68adb",
+      "scene": "battle",
+      "retained_native_rectangles_xyxy": [
+        [
+          0,
+          1160,
+          2560,
+          1440
+        ],
+        [
+          1060,
+          0,
+          1500,
+          190
+        ],
+        [
+          80,
+          1000,
+          300,
+          1150
+        ]
+      ],
+      "retained_baseline_rectangles_xyxy": [
+        [
+          0,
+          580,
+          1280,
+          720
+        ],
+        [
+          530,
+          0,
+          750,
+          95
+        ],
+        [
+          40,
+          500,
+          150,
+          575
+        ]
+      ],
+      "cached_ocr": [
+        {
+          "text": "x1",
+          "confidence": 0.98997,
+          "bbox": [
+            189,
+            585,
+            281,
+            620
+          ],
+          "source": "fast_header_line"
+        }
+      ],
+      "cached_end_battle_buttons": [],
+      "cached_dragon_slots": [],
+      "cached_remembered_count_line_ocr": [
+        {
+          "shape": [
+            70,
+            184,
+            3
+          ],
+          "pixel_sha256": "3a1819640c641baee1c8d1321b6517fc54a25178c5f0f2628cfe0f4fab8d0bb8",
+          "elapsed_sec": 0.009956300025805831,
+          "results": [
+            {
+              "text": "x1",
+              "confidence": 0.98997,
+              "bbox": [
+                0,
+                0,
+                184,
+                70
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "local_cpu_ocr_replay_report": "reports/completion-20261015/diagnostics/mixed-dragon-selection-local-cpu-ocr-replay-20261016.json",
+  "local_cpu_ocr_replay_report_sha256": "96c6e20e5a8fffb62d96b45f7bf1e1bf13470652b3a8f30ebce34a11f91542dc",
+  "local_cpu_ocr_scope": "New offline development replay on original frames 19/20 only, not original runtime trace; fixture contains remembered portrait count line calls and results, no full OCR."
+}

@@ -1,0 +1,128 @@
+{
+  "client_version": "18.647.2",
+  "source_frame": "00133-battle-settlement.png",
+  "source_frame_sha256": "4a33bf4987db73e92a0d3a722c87f5301849364c942f67a5140fd64ebb6b3d3c",
+  "source_events_sha256": "4dc8ee44cf670b4bdac629d6f146a6dc073d49dfa85046ef7c25a73de53059f7",
+  "fixture": "settlement-hero-level-background-18_647_2.png",
+  "fixture_sha256": "7de8c06f1bc5aabb6346abe97573627318c862b7d6c7c2acf84c20efde1b1a06",
+  "fixture_resolution": [
+    2560,
+    1440
+  ],
+  "retained_regions_xyxy_at_1280x720": [
+    [
+      570,
+      95,
+      715,
+      145
+    ],
+    [
+      545,
+      170,
+      745,
+      260
+    ],
+    [
+      340,
+      290,
+      940,
+      457
+    ],
+    [
+      550,
+      450,
+      735,
+      510
+    ],
+    [
+      520,
+      570,
+      760,
+      675
+    ]
+  ],
+  "method": "Copy only the listed baseline rectangles at native 2x size onto a black canvas; no names, HUD or unlisted map pixels retained.",
+  "recorded_ocr": [
+    {
+      "text": "4%",
+      "confidence": 0.99548,
+      "bbox": [
+        618,
+        102,
+        664,
+        132
+      ]
+    },
+    {
+      "text": "失败",
+      "confidence": 0.99862,
+      "bbox": [
+        608,
+        196,
+        671,
+        236
+      ]
+    },
+    {
+      "text": "您得到了",
+      "confidence": 0.99982,
+      "bbox": [
+        600,
+        304,
+        668,
+        327
+      ]
+    },
+    {
+      "text": "80",
+      "confidence": 0.99998,
+      "bbox": [
+        520,
+        394,
+        530,
+        402
+      ]
+    },
+    {
+      "text": "556",
+      "confidence": 0.99977,
+      "bbox": [
+        606,
+        390,
+        670,
+        426
+      ]
+    },
+    {
+      "text": "损耗的部队",
+      "confidence": 0.99981,
+      "bbox": [
+        590,
+        464,
+        678,
+        486
+      ]
+    },
+    {
+      "text": "回营",
+      "confidence": 0.99635,
+      "bbox": [
+        623,
+        608,
+        660,
+        631
+      ]
+    }
+  ],
+  "recorded_gold_glyph_reread": {
+    "text": "0",
+    "confidence": 0.99532,
+    "bbox": [
+      642,
+      341,
+      665,
+      365
+    ]
+  },
+  "formal_training_data": false
+}

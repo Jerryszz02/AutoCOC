@@ -1,0 +1,20 @@
+{
+  "client_version": "18.647.2",
+  "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-084232-715988-c9c08d5e\\frames\\00011-line-zoom-verified.png",
+  "source_sha256": "01a6b477bd25425122c54ddd730b8c07fc1c84f5f5807257920dfe36e471c8fe",
+  "fixture_sha256": "bd33f42a6323622288a20c918e579bdc9803528bcbea0a7e8188f3fffe44a507",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "retained_native_xyxy": [
+    0,
+    1090,
+    2560,
+    1440
+  ],
+  "transform": "Decode BGR with OpenCV IMREAD_COLOR; overwrite native rows y=0..1089 inclusive with BGR (50,115,77); retain x=0..2559,y=1090..1439; encode PNG with cv2.imwrite.",
+  "purpose": "Current-version lower battle toolbar only; upper game/player scene anonymized, not a full-scene fixture.",
+  "card_state": "before",
+  "source_group": "20261016-084232-715988-c9c08d5e"
+}

@@ -1,10 +1,12 @@
+import hashlib
+import json
 import unittest
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock
 
-from autococ.ocr import OCRText
+from autococ.ocr import OCRText, RapidOCRProvider
 from autococ.scene import SCENE_SETTLEMENT, SCENE_UNKNOWN, SCENE_VILLAGE, classify_scene_text, detect_scene_from_xml
 from autococ.vision import ScreenshotRecognizer, detect_collectibles, parse_capacity, parse_countdown, parse_resource_number
 
@@ -32,6 +34,47 @@ class SceneTests(unittest.TestCase):
             with self.subTest(message=message):
                 scene, _, _ = classify_scene_text(f"进攻！ 商店 还在吗？ {message}")
                 self.assertEqual(scene, "disconnected")
+
+    def test_current_account_in_use_dialog_replays_anonymized_live_pixels(self) -> None:
+        import hashlib
+        import json
+
+        fixture = Path(__file__).parent / "fixtures/account_in_use_dialog_18_647_2_20261015.png"
+        provenance = json.loads(fixture.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+        self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(), provenance["fixture_sha256"])
+        snapshot = ScreenshotRecognizer().recognize(fixture)
+        self.assertEqual(snapshot.scene, "account_in_use")
+        self.assertEqual(set(snapshot.observations["account_in_use"]), {"title", "message", "reload"})
+        self.assertEqual(snapshot.observations["buttons"], [])
+        self.assertIsNone(snapshot.observations["resource_source"])
+        self.assertEqual(snapshot.observations["resources"],
+                         {"gold": None, "elixir": None, "dark_elixir": None, "gems": None})
+
+    def test_account_in_use_requires_exact_unique_dialog_anchors(self) -> None:
+        fixture = Path(__file__).parent / "fixtures/account_in_use_dialog_18_647_2_20261015.png"
+        anchors = [OCRText("连接断开", .999, (660, 588, 852, 646)),
+                   OCRText("另一个设备正在连接这个村庄。", .999, (660, 668, 1152, 716)),
+                   OCRText("重新载入", .999, (660, 816, 798, 860))]
+        cases = {
+            "missing_title": anchors[1:],
+            "missing_message": [anchors[0], anchors[2]],
+            "missing_reload": anchors[:2],
+            "wrong_message": [anchors[0], OCRText("连接已经断开。", .999, anchors[1].bbox), anchors[2]],
+            "reload_in_other_place": [*anchors[:2], OCRText("重新载入", .999, (50, 816, 188, 860))],
+            "weak_title": [OCRText("连接断开", .94, anchors[0].bbox), *anchors[1:]],
+            "duplicate_message": [*anchors, anchors[1]],
+            "generic_reload_with_account_claim": [*anchors[:2], OCRText("重新载入游戏", .999, anchors[2].bbox)],
+        }
+        provider = Mock()
+        recognizer = ScreenshotRecognizer(provider=provider)
+        for name, readings in cases.items():
+            with self.subTest(name=name):
+                provider.recognize.return_value = readings
+                snapshot = recognizer.recognize(fixture)
+                self.assertNotEqual(snapshot.scene, "account_in_use")
+                self.assertIsNone(snapshot.observations["account_in_use"])
+                self.assertEqual(snapshot.observations["buttons"], [])
+                self.assertIsNone(snapshot.observations["resource_source"])
 
     def test_reload_button_requires_confident_text_in_central_dialog(self) -> None:
         import cv2
@@ -295,6 +338,631 @@ class SceneTests(unittest.TestCase):
         })
         self.assertEqual(snapshot.observations["resource_source"], "village_inventory")
 
+    def test_new_home_hud_requires_icon_and_anchored_controls(self) -> None:
+        import cv2
+        import numpy as np
+
+        template = cv2.imread(str(Path(__file__).resolve().parents[1] / "assets/catalogs/village_home_battle_18_647_2.png"))
+        image = np.zeros((720, 1280, 3), dtype=np.uint8)
+        image[590:665, 45:120] = template
+        provider = Mock()
+        provider.recognize.return_value = [
+            OCRText("商店", .99, (2380, 752, 2466, 808)),
+            OCRText("建造", .99, (2348, 1348, 2434, 1400)),
+            OCRText("27", .99, (2176, 54, 2240, 100)),
+            OCRText("280000", .99, (2220, 48, 2440, 104)),
+            OCRText("19780430", .99, (2184, 148, 2438, 200)),
+            OCRText("286817", .99, (2260, 246, 2434, 296)),
+            OCRText("216", .99, (2352, 348, 2440, 400)),
+        ]
+        provider.recognize_line.return_value = [OCRText("27280000", .95, (2016, 38, 2480, 120))]
+        recognizer = ScreenshotRecognizer(provider=provider)
+        recognizer.client_version = "18.647.2"
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "new-home.png"
+            cv2.imwrite(str(path), cv2.resize(image, (2560, 1440), interpolation=cv2.INTER_NEAREST))
+            snapshot = recognizer.recognize(path)
+            self.assertEqual(snapshot.scene, SCENE_VILLAGE)
+            self.assertEqual(snapshot.observations["village_type"], "home")
+            self.assertEqual({item["name"] for item in snapshot.observations["buttons"]}, {"attack", "shop"})
+            self.assertEqual(next(item for item in snapshot.observations["buttons"] if item["name"] == "attack")["point"], [82, 627])
+            self.assertEqual(snapshot.observations["resources"], {
+                "gold": 27280000, "elixir": 19780430, "dark_elixir": 286817, "gems": 216,
+            })
+            self.assertEqual(snapshot.observations["resource_evidence"]["gold"]["source"], "line_roi")
+
+            provider.recognize_line.return_value = [OCRText("27280001", .99, (2016, 38, 2480, 120))]
+            conflicting_gold = recognizer.recognize(path)
+            self.assertIsNone(conflicting_gold.observations["resources"]["gold"])
+            provider.recognize_line.return_value = [OCRText("27280000", .95, (2016, 38, 2480, 120))]
+
+            original_texts = provider.recognize.return_value
+            provider.recognize.return_value = original_texts[:2] + [
+                OCRText("27280000/29000000", .99, (2016, 48, 2440, 104)),
+                OCRText("19780430/29000000", .99, (2016, 148, 2440, 184)),
+                OCRText("286817/400000", .99, (2128, 246, 2440, 296)),
+                original_texts[-1],
+            ]
+            ratios = recognizer.recognize(path)
+            self.assertEqual(ratios.scene, SCENE_VILLAGE)
+            self.assertEqual(ratios.observations["resource_capacities"], {
+                "gold": 29000000, "elixir": 29000000, "dark_elixir": 400000,
+            })
+            provider.recognize.return_value = original_texts
+
+            image[590:665, 45:120] = 0
+            cv2.imwrite(str(path), cv2.resize(image, (2560, 1440), interpolation=cv2.INTER_NEAREST))
+            missing_icon = recognizer.recognize(path)
+            self.assertEqual(missing_icon.scene, SCENE_UNKNOWN)
+            self.assertEqual(missing_icon.observations["buttons"], [])
+
+            image[590:665, 45:120] = template
+            cv2.imwrite(str(path), cv2.resize(image, (2560, 1440), interpolation=cv2.INTER_NEAREST))
+            provider.recognize.return_value = [item for item in provider.recognize.return_value if item.text != "建造"]
+            missing_build = recognizer.recognize(path)
+            self.assertEqual(missing_build.scene, SCENE_UNKNOWN)
+            self.assertEqual(missing_build.observations["buttons"], [])
+
+    def test_current_split_inventory_requires_independent_line_agreement(self) -> None:
+        provider = Mock()
+        recognizer = ScreenshotRecognizer(provider=provider)
+        for name, y, fragments, total in (
+            ("gold", 38, ("9", "269566"), 9269566),
+            ("elixir", 87, ("9001", "667"), 9001667),
+            ("dark_elixir", 136, ("314", "453"), 314453),
+            ("gems", 185, ("2", "17"), 217),
+        ):
+            readings = [OCRText(fragments[0], .9999, (1106, y - 12, 1173, y + 12)),
+                        OCRText(fragments[1], .9998, (1169, y - 12, 1220, y + 12))]
+            for line, expected in ((str(total), total), (str(total + 1), None),
+                                   (fragments[0], None), ("", None)):
+                with self.subTest(resource=name, line=line):
+                    provider.recognize_line.return_value = [OCRText(line, .9935, (1008, y - 12, 1240, y + 12))]
+                    values, evidence = recognizer._village_resources(Path("current.png"), readings,
+                                                                    (1280, 720), new_home_hud=True)
+                    self.assertEqual(values[name], expected)
+                    if expected is not None:
+                        self.assertEqual(evidence[name]["source"], "line_roi")
+            provider.recognize_line.return_value = [OCRText(str(total), .89, None)]
+            self.assertIsNone(recognizer._village_resources(Path("current.png"), readings,
+                                                           (1280, 720), new_home_hud=True)[0][name])
+
+    def test_current_split_elixir_replays_anonymized_live_hud(self) -> None:
+        import hashlib
+        import json
+
+        fixture = Path(__file__).parent / "fixtures/home_inventory_split_elixir_18_647_2.png"
+        provenance = json.loads(fixture.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+        self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(), provenance["fixture_sha256"])
+        readings = [OCRText("9001", .99988, (1106, 74, 1173, 99)),
+                    OCRText("667", .99979, (1169, 74, 1220, 100))]
+        values, evidence = ScreenshotRecognizer()._village_resources(fixture, readings, (2560, 1440),
+                                                                     new_home_hud=True)
+        self.assertEqual(values["elixir"], 9001667)
+        self.assertEqual(evidence["elixir"]["source"], "line_roi")
+        self.assertGreaterEqual(evidence["elixir"]["confidence"], .9)
+
+    def test_current_split_elixir_050523_uses_independent_tight_line_read(self) -> None:
+        fixture = Path(__file__).parent / "fixtures/home_inventory_split_elixir_050523_18_647_2.png"
+        provenance = json.loads(fixture.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+        self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(), provenance["fixture_sha256"])
+        import cv2
+        image = cv2.imread(str(fixture))
+        self.assertEqual(image.shape, (1440, 2560, 3))
+        left, top, right, bottom = provenance["preserved_roi_at_native_2560x1440"]
+        self.assertFalse(image[:top].any() or image[bottom:].any()
+                         or image[top:bottom, :left].any() or image[top:bottom, right:].any())
+        readings = [OCRText("13", .99996, (1098, 75, 1130, 98)),
+                    OCRText("945328", .99993, (1123, 74, 1218, 99))]
+        values, evidence = ScreenshotRecognizer()._village_resources(
+            fixture, readings, (2560, 1440), new_home_hud=True,
+        )
+        self.assertEqual(values["elixir"], 13945328)
+        self.assertEqual(evidence["elixir"]["source"], "tight_line_roi")
+        self.assertGreaterEqual(evidence["elixir"]["confidence"], .9)
+        self.assertEqual(evidence["elixir"]["roi"], [1094, 71, 1222, 102])
+        self.assertEqual([item["text"] for item in evidence["elixir"]["full_fragments"]],
+                         ["13", "945328"])
+        self.assertEqual(evidence["elixir"]["frame"], str(fixture))
+        self.assertEqual([item["text"] for item in evidence["elixir"]["fixed_line_readings"]],
+                         ["人13945328"])
+
+    def test_current_split_tight_line_rejects_weak_or_conflicting_fragment_evidence(self) -> None:
+        fixed_roi = (1008, 69, 1240, 111)
+        tight_roi = (1094, 71, 1222, 102)
+        good = [OCRText("13", .99996, (1098, 75, 1130, 98)),
+                OCRText("945328", .99993, (1123, 74, 1218, 99))]
+        for changed, fixed_text, tight_text in (
+            (good, "13945329", "13945328"),  # Conflicting fixed line cannot be overridden.
+            ([OCRText("13", .89, good[0].bbox), good[1]], "人13945328", "13945328"),
+            ([good[0], OCRText("945328", .99993, (1123, 95, 1218, 110))],
+             "人13945328", "13945328"),
+            ([OCRText("13", .99996, (1098, 75, 1120, 98)),
+              OCRText("945328", .99993, (1150, 74, 1218, 99))], "人13945328", "13945328"),
+            ([OCRText("13", .99996, (1098, 75, 1170, 98)),
+              OCRText("945328", .99993, (1140, 74, 1218, 99))], "人13945328", "13945328"),
+            ([OCRText("I3", .99996, good[0].bbox), good[1]], "人13945328", "13945328"),
+            (good, "人13945328", "13945329"),
+            (good, "人13945328", "13945328弱"),
+        ):
+            with self.subTest(changed=changed, fixed=fixed_text, tight=tight_text):
+                provider = Mock()
+                def line_read(_path, roi):
+                    if roi == fixed_roi:
+                        return [OCRText(fixed_text, .99, roi)]
+                    if roi == tight_roi:
+                        return [OCRText(tight_text, .99, roi)]
+                    return []
+                provider.recognize_line.side_effect = line_read
+                values, _ = ScreenshotRecognizer(provider=provider)._village_resources(
+                    Path("current.png"), changed, (1280, 720), new_home_hud=True,
+                )
+                self.assertIsNone(values["elixir"])
+
+    def test_current_split_tight_line_requires_unique_high_confidence_number(self) -> None:
+        readings = [OCRText("13", .99996, (1098, 75, 1130, 98)),
+                    OCRText("945328", .99993, (1123, 74, 1218, 99))]
+        for tight_reads in (
+            [OCRText("13945328", .89, None)],
+            [OCRText("13945328", .99, None), OCRText("13945329", .99, None)],
+            [],
+        ):
+            with self.subTest(tight_reads=tight_reads):
+                provider = Mock()
+                provider.recognize_line.side_effect = lambda _path, roi: (
+                    [OCRText("人13945328", .99, None)] if roi == (1008, 69, 1240, 111)
+                    else tight_reads if roi == (1094, 71, 1222, 102) else []
+                )
+                values, _ = ScreenshotRecognizer(provider=provider)._village_resources(
+                    Path("current.png"), readings, (1280, 720), new_home_hud=True,
+                )
+                self.assertIsNone(values["elixir"])
+
+    def test_current_three_fragments_keep_existing_fixed_line_verification(self) -> None:
+        readings = [OCRText("13", .99, (1098, 75, 1126, 99)),
+                    OCRText("945", .99, (1123, 75, 1170, 99)),
+                    OCRText("328", .99, (1168, 75, 1218, 99))]
+        provider = Mock()
+        provider.recognize_line.side_effect = lambda _path, roi: (
+            [OCRText("13945328", .99, roi)] if roi == (1008, 69, 1240, 111) else []
+        )
+        values, evidence = ScreenshotRecognizer(provider=provider)._village_resources(
+            Path("current.png"), readings, (1280, 720), new_home_hud=True,
+        )
+        self.assertEqual(values["elixir"], 13945328)
+        self.assertEqual(evidence["elixir"]["source"], "line_roi")
+        self.assertNotIn("roi", evidence["elixir"])
+
+    def test_checklist_home_icon_requires_current_version_and_other_hud_anchors(self) -> None:
+        import cv2
+        import numpy as np
+
+        icon = cv2.imread(str(Path(__file__).parent / "fixtures/home_battle_checklist_heldout_18_647_2.png"))
+        image = np.zeros((720, 1280, 3), dtype=np.uint8)
+        image[570:700, 25:145] = icon
+        provider = Mock()
+        provider.recognize.return_value = [
+            OCRText("商店", .99, (1190, 376, 1233, 404)),
+            OCRText("建造", .99, (1174, 674, 1217, 700)),
+        ]
+        provider.recognize_line.return_value = []
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "checklist-home.png"
+            cv2.imwrite(str(path), image)
+            current = ScreenshotRecognizer(provider=provider)
+            current.client_version = "18.647.2"
+            snapshot = current.recognize(path)
+            self.assertEqual(snapshot.scene, SCENE_VILLAGE)
+            self.assertEqual({item["name"] for item in snapshot.observations["buttons"]}, {"attack", "shop"})
+            self.assertEqual(snapshot.observations["village_type_evidence"]["point"], [82, 627])
+
+            unknown = ScreenshotRecognizer(provider=provider)
+            unknown.client_version = "unknown"
+            self.assertEqual(unknown.recognize(path).scene, SCENE_UNKNOWN)
+            provider.recognize.return_value = provider.recognize.return_value[:1]
+            self.assertEqual(current.recognize(path).scene, SCENE_UNKNOWN)
+
+    def test_current_event_panel_blocks_background_village_and_resource_reads(self) -> None:
+        import cv2
+        import numpy as np
+
+        icon = cv2.imread(str(Path(__file__).parent / "fixtures/home_battle_checklist_heldout_18_647_2.png"))
+        image = np.zeros((720, 1280, 3), dtype=np.uint8)
+        image[570:700, 25:145] = icon
+        provider = Mock()
+        provider.recognize.return_value = [
+            OCRText("活动", .999, (609, 36, 672, 76)),
+            OCRText("X", .983, (1032, 30, 1078, 76)),
+            OCRText("今日活动", .999, (214, 100, 281, 124)),
+            OCRText("商店", 1.0, (1190, 375, 1234, 404)),
+            OCRText("建造", .998, (1176, 674, 1216, 700)),
+            OCRText("建筑工人", .999, (225, 573, 297, 594)),
+            OCRText("948398", .999, (1118, 75, 1219, 99)),
+            OCRText("216", .999, (1176, 174, 1220, 200)),
+        ]
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "event-panel.png"
+            cv2.imwrite(str(path), image)
+            recognizer = ScreenshotRecognizer(provider=provider)
+            recognizer.client_version = "18.647.2"
+            snapshot = recognizer.recognize(path)
+        self.assertEqual(snapshot.scene, "popup")
+        self.assertEqual(set(snapshot.observations["event_panel"]), {"title", "close", "section"})
+        self.assertEqual(snapshot.observations["buttons"], [])
+        self.assertEqual(snapshot.observations["resources"],
+                         {"gold": None, "elixir": None, "dark_elixir": None, "gems": None})
+        self.assertIsNone(snapshot.observations["resource_source"])
+
+    def test_idle_disconnect_over_event_panel_keeps_only_current_retry(self) -> None:
+        import cv2
+        import numpy as np
+
+        provider = Mock()
+        recognizer = ScreenshotRecognizer(provider=provider)
+        recognizer.client_version = "18.647.2"
+        background = [
+            OCRText("活动", .9997, (609, 36, 672, 75)),
+            OCRText("X", .99448, (1030, 30, 1078, 75)),
+            OCRText("今日活动", .99968, (214, 100, 281, 124)),
+            OCRText("商店", .99996, (1190, 376, 1234, 404)),
+            OCRText("建造", .99829, (1176, 674, 1216, 700)),
+        ]
+        message = OCRText("因为太久没有进行操作，您已断开连接。", .99975,
+                          (330, 334, 648, 358))
+        retry = OCRText("重新载入游戏", .99995, (332, 408, 431, 429))
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "anonymized-idle-dialog.png"
+            cv2.imwrite(str(path), np.zeros((720, 1280, 3), dtype=np.uint8))
+            for label, button, expected in (
+                ("current", retry, ["retry"]),
+                ("missing", None, []),
+                ("weak", OCRText(retry.text, .7, retry.bbox), []),
+                ("outside_dialog", OCRText(retry.text, .99995, (20, 408, 119, 429)), []),
+            ):
+                with self.subTest(label=label):
+                    provider.recognize.return_value = background + [message] + ([button] if button else [])
+                    snapshot = recognizer.recognize(path)
+                    self.assertEqual(snapshot.scene, "disconnected")
+                    self.assertIsNone(snapshot.observations["event_panel"])
+                    self.assertEqual([item["name"] for item in snapshot.observations["buttons"]], expected)
+                    self.assertIsNone(snapshot.observations["resource_source"])
+
+    def test_current_event_panel_cannot_override_account_ownership_dialog(self) -> None:
+        directory = Path(__file__).parent / "fixtures/event_rewards_18_647_2"
+        path = directory / "entry_panel.png"
+        background = [OCRText(item["text"], item["confidence"], tuple(item["bbox"]))
+                      for item in json.loads((directory / "entry_panel.ocr.json").read_text(encoding="utf-8"))]
+        message = OCRText("另一个设备正在连接这个村庄。", .999, (330, 334, 576, 358))
+        dialog = [OCRText("连接断开", .999, (330, 294, 426, 323)), message,
+                  OCRText("重新载入", .999, (330, 408, 399, 430))]
+        provider = Mock()
+        recognizer = ScreenshotRecognizer(provider=provider)
+        recognizer.client_version = "18.647.2"
+        for name, foreground, scene in (("complete", dialog, "account_in_use"),
+                                         ("partial", [message], "unknown")):
+            with self.subTest(name=name):
+                provider.recognize.return_value = [*background, *foreground]
+                snapshot = recognizer.recognize(path)
+                self.assertEqual(snapshot.scene, scene)
+                self.assertIsNone(snapshot.observations["event_panel"])
+                self.assertIsNone(snapshot.observations["event_reward_track"])
+                self.assertEqual(snapshot.observations["buttons"], [])
+                self.assertIsNone(snapshot.observations["resource_source"])
+
+    def test_current_event_panel_accepts_real_weak_close_only_with_both_headings(self) -> None:
+        path = Path(__file__).parent / "fixtures/event_panel_weak_close_18_647_2_20261015.png"
+        recognizer = ScreenshotRecognizer()
+        recognizer.client_version = "18.647.2"
+        snapshot = recognizer.recognize(path)
+        self.assertEqual(snapshot.scene, "popup")
+        self.assertEqual(set(snapshot.observations["event_panel"]), {"title", "close", "section"})
+        self.assertGreaterEqual(snapshot.observations["event_panel"]["close"]["confidence"], .9)
+        self.assertLess(snapshot.observations["event_panel"]["close"]["confidence"], .95)
+        self.assertEqual(snapshot.observations["buttons"], [])
+        self.assertIsNone(snapshot.observations["resource_source"])
+
+        provider = Mock()
+        provider.recognize.return_value = [
+            OCRText("活动", 1.0, (1218, 72, 1344, 152)),
+            OCRText("X", .899, (2068, 64, 2152, 148)),
+            OCRText("今日活动", 1.0, (428, 200, 562, 248)),
+            OCRText("商店", 1.0, (2380, 750, 2468, 808)),
+        ]
+        weak = ScreenshotRecognizer(provider=provider)
+        weak.client_version = "18.647.2"
+        self.assertIsNone(weak.recognize(path).observations["event_panel"])
+        provider.recognize.return_value[1] = OCRText("X", .922, (2068, 64, 2152, 148))
+        provider.recognize.return_value = [item for item in provider.recognize.return_value
+                                            if item.text != "今日活动"]
+        self.assertIsNone(weak.recognize(path).observations["event_panel"])
+        recognizer.client_version = "unknown"
+        self.assertIsNone(recognizer.recognize(path).observations["event_panel"])
+
+    def test_battle_word_and_background_hud_during_popup_do_not_enable_village(self) -> None:
+        import cv2
+        import numpy as np
+
+        template = cv2.imread(str(Path(__file__).resolve().parents[1] / "assets/catalogs/village_home_battle_18_647_2.png"))
+        image = np.zeros((720, 1280, 3), dtype=np.uint8)
+        image[590:665, 45:120] = template
+        provider = Mock()
+        provider.recognize.return_value = [
+            OCRText("战斗", .99, (1300, 400, 1390, 450)),
+            OCRText("商店", .99, (2380, 752, 2466, 808)),
+            OCRText("建造", .99, (2348, 1348, 2434, 1400)),
+            OCRText("取消", .99, (1000, 950, 1090, 1000)),
+        ]
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "popup.png"
+            cv2.imwrite(str(path), cv2.resize(image, (2560, 1440), interpolation=cv2.INTER_NEAREST))
+            snapshot = ScreenshotRecognizer(provider=provider).recognize(path)
+        self.assertEqual(snapshot.scene, "popup")
+        self.assertNotIn("attack", {item["name"] for item in snapshot.observations["buttons"]})
+
+    def test_current_hero_detail_exposes_only_verified_close(self) -> None:
+        import cv2
+        import numpy as np
+
+        path = Path(__file__).parent / "fixtures/hero_detail_dragon_duke_18_647_2_20261015.png"
+        provider = RapidOCRProvider()
+        recognizer = ScreenshotRecognizer(provider=provider)
+        recognizer.client_version = "18.647.2"
+        snapshot = recognizer.recognize(path)
+        self.assertEqual(snapshot.scene, "popup")
+        self.assertEqual(snapshot.observations["hero_detail"]["title"]["text"], "16级飞龙公爵")
+        self.assertEqual([(button["name"], button["point"]) for button in snapshot.observations["buttons"]],
+                         [("close_hero_details", [1130, 53])])
+
+        wrong_version = ScreenshotRecognizer(provider=provider)
+        wrong_version.client_version = "18.647.3"
+        self.assertIsNone(wrong_version.recognize(path).observations["hero_detail"])
+
+        mocked = Mock()
+        mocked.recognize.return_value = provider.recognize(path)
+        with TemporaryDirectory() as tmp:
+            hidden_close = Path(tmp) / "detail-no-close.png"
+            image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            image[24:82, 1104:1156] = 0
+            cv2.imencode(".png", image)[1].tofile(hidden_close)
+            no_icon = ScreenshotRecognizer(provider=mocked)
+            no_icon.client_version = "18.647.2"
+            self.assertIsNone(no_icon.recognize(hidden_close).observations["hero_detail"])
+            self.assertEqual(no_icon.recognize(hidden_close).observations["buttons"], [])
+
+        mocked.recognize.return_value = [item for item in mocked.recognize.return_value
+                                         if item.text != "16级飞龙公爵"]
+        no_title = ScreenshotRecognizer(provider=mocked)
+        no_title.client_version = "18.647.2"
+        self.assertIsNone(no_title.recognize(path).observations["hero_detail"])
+
+    def test_current_lightning_detail_exposes_only_verified_close(self) -> None:
+        import cv2
+        import numpy as np
+
+        root = Path(__file__).parent / "fixtures"
+        provider = RapidOCRProvider()
+        for name in ("lightning_detail_opened", "lightning_detail_before_close"):
+            path = root / f"lightning_info_{name}_18_647_2.png"
+            texts = provider.recognize(path)
+            recognizer = ScreenshotRecognizer(provider=provider)
+            recognizer.client_version = "18.647.2"
+            snapshot = recognizer.recognize(path)
+            self.assertEqual(snapshot.scene, "popup")
+            detail = snapshot.observations["spell_detail"]
+            self.assertEqual(detail["unit_id"], "lightning_spell")
+            self.assertEqual((detail["title"]["text"], detail["damage"]["text"],
+                              detail["stun_seconds"]["text"]),
+                             ("12级雷电法术", "680", "0.1"))
+            self.assertNotIn("housing_space", detail)  # The one-unit glyph was not OCR-confirmed.
+            self.assertEqual([item["name"] for item in snapshot.observations["buttons"]],
+                             ["close_spell_details"])
+            self.assertTrue(1104 <= snapshot.observations["buttons"][0]["point"][0] <= 1156)
+
+            wrong_version = ScreenshotRecognizer(provider=provider)
+            wrong_version.client_version = "18.647.3"
+            self.assertIsNone(wrong_version.recognize(path).observations["spell_detail"])
+
+            for missing in ("12级雷电法术", "总伤害：", "680", "击晕/瘫痪时间（秒）：", "0.1"):
+                with self.subTest(frame=name, missing=missing):
+                    mocked = Mock()
+                    mocked.recognize.return_value = [item for item in texts if item.text != missing]
+                    negative = ScreenshotRecognizer(provider=mocked)
+                    negative.client_version = "18.647.2"
+                    observed = negative.recognize(path)
+                    self.assertIsNone(observed.observations["spell_detail"])
+                    self.assertNotIn("close_spell_details",
+                                     {item["name"] for item in observed.observations["buttons"]})
+
+            for replacement in (OCRText("12级雷电法术", .99, (30, 30, 190, 75)),
+                                OCRText("13级雷电法术", .99, (562, 32, 718, 74))):
+                with self.subTest(frame=name, title=replacement):
+                    mocked = Mock()
+                    mocked.recognize.return_value = [replacement if item.text == "12级雷电法术"
+                                                     else item for item in texts]
+                    negative = ScreenshotRecognizer(provider=mocked)
+                    negative.client_version = "18.647.2"
+                    self.assertIsNone(negative.recognize(path).observations["spell_detail"])
+
+            for original, misread in (("0.1", "01"), ("680", "6.80")):
+                with self.subTest(frame=name, misread=misread):
+                    mocked = Mock()
+                    mocked.recognize.return_value = [OCRText(misread, item.confidence, item.bbox)
+                                                     if item.text == original else item for item in texts]
+                    negative = ScreenshotRecognizer(provider=mocked)
+                    negative.client_version = "18.647.2"
+                    self.assertIsNone(negative.recognize(path).observations["spell_detail"])
+
+            image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            image[25:83, 1104:1156] = 0
+            with TemporaryDirectory() as tmp:
+                hidden = Path(tmp) / "lightning-no-X.png"
+                cv2.imencode(".png", image)[1].tofile(hidden)
+                mocked = Mock()
+                mocked.recognize.return_value = texts
+                negative = ScreenshotRecognizer(provider=mocked)
+                negative.client_version = "18.647.2"
+                self.assertIsNone(negative.recognize(hidden).observations["spell_detail"])
+
+        # OCR from a prior detail cannot authorize a close on the current picker frame.
+        stale = Mock()
+        stale.recognize.return_value = texts
+        picker = root / "lightning_info_spell_picker_before_info_18_647_2.png"
+        negative = ScreenshotRecognizer(provider=stale)
+        negative.client_version = "18.647.2"
+        self.assertIsNone(negative.recognize(picker).observations["spell_detail"])
+
+    def test_current_totem_detail_exposes_only_verified_close(self) -> None:
+        import cv2
+        import numpy as np
+
+        fixture = Path(__file__).parent / "fixtures/totem_spell_detail_close_18_647_2.png"
+        metadata = json.loads(fixture.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+        self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(),
+                         metadata["fixture"]["sha256"])
+        source = Path(metadata["source"]["path"])
+        if source.is_file():
+            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(),
+                             metadata["source"]["sha256"])
+            original = cv2.imdecode(np.fromfile(source, dtype=np.uint8), cv2.IMREAD_COLOR)
+            base = cv2.resize(original, (1280, 720), interpolation=cv2.INTER_AREA)
+            reconstructed = np.full_like(base, 45)
+            for left, top, right, bottom in metadata["fixture"]["derivation"][
+                    "retained_baseline_rectangles_xyxy"]:
+                reconstructed[top:bottom, left:right] = base[top:bottom, left:right]
+            self.assertTrue(np.array_equal(
+                reconstructed, cv2.imdecode(np.fromfile(fixture, dtype=np.uint8), cv2.IMREAD_COLOR)))
+        provider = RapidOCRProvider()
+        texts = provider.recognize(fixture)
+        recognizer = ScreenshotRecognizer(provider=provider)
+        recognizer.client_version = "18.647.2"
+        snapshot = recognizer.recognize(fixture)
+        self.assertEqual(snapshot.scene, "popup")
+        detail = snapshot.observations["spell_detail"]
+        self.assertEqual(detail["unit_id"], "totem_spell")
+        self.assertEqual((detail["title"]["text"], detail["stun_seconds"]["text"],
+                          parse_resource_number(detail["hitpoints"]["text"])),
+                         ("2级图腾法术", "0.2", 11000))
+        self.assertNotIn("housing_space", detail)  # The detail's numeric space was not read.
+        self.assertEqual([item["name"] for item in snapshot.observations["buttons"]],
+                         ["close_spell_details"])
+        self.assertTrue(1104 <= snapshot.observations["buttons"][0]["point"][0] <= 1156)
+        with_upgrade = Mock()
+        with_upgrade.recognize.return_value = texts + [
+            OCRText("升级", .999, (674, 590, 712, 615))]
+        observed_upgrade = ScreenshotRecognizer(provider=with_upgrade)
+        observed_upgrade.client_version = "18.647.2"
+        self.assertEqual([item["name"] for item in observed_upgrade.recognize(fixture).observations["buttons"]],
+                         ["close_spell_details"])
+
+        wrong_version = ScreenshotRecognizer(provider=provider)
+        wrong_version.client_version = "18.647.3"
+        self.assertIsNone(wrong_version.recognize(fixture).observations["spell_detail"])
+
+        for missing in ("2级图腾法术", "击晕/瘫痪时间（秒）：", "0.2",
+                        "生命值：", "11000", "所需空间："):
+            with self.subTest(missing=missing):
+                mocked = Mock()
+                mocked.recognize.return_value = [item for item in texts if item.text != missing]
+                observed = ScreenshotRecognizer(provider=mocked)
+                observed.client_version = "18.647.2"
+                result = observed.recognize(fixture)
+                self.assertIsNone(result.observations["spell_detail"])
+                self.assertNotIn("close_spell_details",
+                                 {item["name"] for item in result.observations["buttons"]})
+
+        for original, replacement in (("2级图腾法术", "3级图腾法术"),
+                                      ("0.2", "0.3"), ("11000", "12000"),
+                                      ("11000", "11.000"), ("11000", "1 1000")):
+            with self.subTest(replacement=replacement):
+                mocked = Mock()
+                mocked.recognize.return_value = [
+                    OCRText(replacement, item.confidence, item.bbox)
+                    if item.text == original else item for item in texts]
+                observed = ScreenshotRecognizer(provider=mocked)
+                observed.client_version = "18.647.2"
+                self.assertIsNone(observed.recognize(fixture).observations["spell_detail"])
+
+        title = next(item for item in texts if item.text == "2级图腾法术")
+        mocked = Mock()
+        mocked.recognize.return_value = [OCRText(title.text, title.confidence, (30, 30, 190, 75))
+                                         if item is title else item for item in texts]
+        moved = ScreenshotRecognizer(provider=mocked)
+        moved.client_version = "18.647.2"
+        self.assertIsNone(moved.recognize(fixture).observations["spell_detail"])
+
+        image = cv2.imdecode(np.fromfile(fixture, dtype=np.uint8), cv2.IMREAD_COLOR)
+        image[15:95, 1095:1165] = 45
+        with TemporaryDirectory() as tmp:
+            hidden = Path(tmp) / "totem-no-X.png"
+            cv2.imencode(".png", image)[1].tofile(hidden)
+            mocked = Mock()
+            mocked.recognize.return_value = texts
+            observed = ScreenshotRecognizer(provider=mocked)
+            observed.client_version = "18.647.2"
+            self.assertIsNone(observed.recognize(hidden).observations["spell_detail"])
+
+        # Stale title/stat OCR cannot authorize X on a picker or another surface.
+        picker = Path(__file__).parent / "fixtures/totem_spell_picker_gray_18_647_2.png"
+        stale = ScreenshotRecognizer(provider=mocked)
+        stale.client_version = "18.647.2"
+        self.assertIsNone(stale.recognize(picker).observations["spell_detail"])
+
+    def test_current_siege_barracks_detail_exposes_only_verified_close(self) -> None:
+        import cv2
+        import numpy as np
+
+        path = Path(__file__).parent / "fixtures/unit_detail_siege_barracks_18_647_2_20261015.png"
+        provider = RapidOCRProvider()
+        recognizer = ScreenshotRecognizer(provider=provider)
+        recognizer.client_version = "18.647.2"
+        snapshot = recognizer.recognize(path)
+        self.assertEqual(snapshot.scene, "popup")
+        self.assertEqual(snapshot.observations["unit_detail"]["title"]["text"], "4级攻城训练营")
+        self.assertEqual([(button["name"], button["point"]) for button in snapshot.observations["buttons"]],
+                         [("close_unit_details", [1130, 53])])
+
+        wrong_version = ScreenshotRecognizer(provider=provider)
+        wrong_version.client_version = "18.647.3"
+        self.assertIsNone(wrong_version.recognize(path).observations["unit_detail"])
+
+        mocked = Mock()
+        mocked.recognize.return_value = provider.recognize(path)
+        with TemporaryDirectory() as tmp:
+            hidden_close = Path(tmp) / "detail-no-close.png"
+            image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            image[24:82, 1104:1156] = 0
+            cv2.imencode(".png", image)[1].tofile(hidden_close)
+            no_icon = ScreenshotRecognizer(provider=mocked)
+            no_icon.client_version = "18.647.2"
+            self.assertIsNone(no_icon.recognize(hidden_close).observations["unit_detail"])
+            self.assertEqual(no_icon.recognize(hidden_close).observations["buttons"], [])
+
+        mocked.recognize.return_value = [item for item in mocked.recognize.return_value
+                                         if item.text != "持续时间（秒）："]
+        no_stat = ScreenshotRecognizer(provider=mocked)
+        no_stat.client_version = "18.647.2"
+        self.assertIsNone(no_stat.recognize(path).observations["unit_detail"])
+
+    def test_current_sky_wagon_detail_exposes_only_verified_close(self) -> None:
+        path = Path(__file__).parent / "fixtures/unit_detail_sky_wagon_18_647_2_20261015.png"
+        recognizer = ScreenshotRecognizer(provider=RapidOCRProvider())
+        recognizer.client_version = "18.647.2"
+        snapshot = recognizer.recognize(path)
+        self.assertEqual(snapshot.scene, "popup")
+        self.assertEqual(snapshot.observations["unit_detail"]["title"]["text"], "2级空中战车")
+        self.assertEqual([(button["name"], button["point"]) for button in snapshot.observations["buttons"]],
+                         [("close_unit_details", [1130, 53])])
+
+    def test_current_troop_launcher_detail_exposes_only_verified_close(self) -> None:
+        path = Path(__file__).parent / "fixtures/unit_detail_troop_launcher_18_647_2_20261015.png"
+        recognizer = ScreenshotRecognizer(provider=RapidOCRProvider())
+        recognizer.client_version = "18.647.2"
+        snapshot = recognizer.recognize(path)
+        self.assertEqual(snapshot.scene, "popup")
+        self.assertEqual(snapshot.observations["unit_detail"]["title"]["text"], "1级部队发射器")
+        self.assertEqual([(button["name"], button["point"]) for button in snapshot.observations["buttons"]],
+                         [("close_unit_details", [1130, 53])])
+
     def test_timers_and_counters_are_not_resource_amounts(self) -> None:
         for text in ("0/5", "4小时41分", "-100", "100 gold"):
             self.assertIsNone(parse_resource_number(text))
@@ -469,6 +1137,32 @@ class SceneTests(unittest.TestCase):
         self.assertEqual([button["name"] for button in snapshot.observations["buttons"]], ["find_match_regular"])
         self.assertEqual(snapshot.observations["buttons"][0]["point"], [218, 518])
 
+    def test_new_search_menu_exposes_only_anchored_edit_army_control(self) -> None:
+        import cv2
+        import numpy as np
+
+        provider = Mock()
+        provider.recognize.return_value = [
+            OCRText("联机模式", .99, (268, 92, 420, 144)),
+            OCRText("常规战", .99, (348, 892, 516, 966)),
+            OCRText("搜索对手", .99, (350, 1004, 522, 1068)),
+            OCRText("1700", .99, (320, 1064, 470, 1136)),
+            OCRText("编辑军队", .99, (274, 1336, 420, 1392)),
+        ]
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "search.png"
+            cv2.imwrite(str(path), np.zeros((1440, 2560, 3), dtype=np.uint8))
+            snapshot = ScreenshotRecognizer(provider=provider).recognize(path)
+            self.assertEqual(snapshot.scene, "search")
+            self.assertEqual(snapshot.observations["search_cost_gold"], 1700)
+            self.assertEqual({item["name"] for item in snapshot.observations["buttons"]},
+                             {"find_match_regular", "edit_army"})
+            self.assertEqual(next(item for item in snapshot.observations["buttons"]
+                                  if item["name"] == "edit_army")["point"], [173, 682])
+            provider.recognize.return_value[-1] = OCRText("编辑军队", .99, (800, 700, 946, 756))
+            wrong_position = ScreenshotRecognizer(provider=provider).recognize(path)
+            self.assertNotIn("edit_army", {item["name"] for item in wrong_position.observations["buttons"]})
+
     def test_scout_resources_and_card_counts_are_separate_from_inventory_and_levels(self) -> None:
         path = Path(__file__).resolve().parents[1] / "reports/live-20260922/scout-from-army-235605/frames/00007-scout-from-army.png"
         if not path.is_file():
@@ -494,6 +1188,29 @@ class SceneTests(unittest.TestCase):
         self.assertEqual([slot["count"] for slot in battle["slots"] if slot["kind"] == "troop"], [10, 1, 2, 1])
         self.assertEqual([slot["count"] for slot in battle["slots"] if slot["kind"] == "spell"], [6, 5])
         self.assertEqual([slot["count"] for slot in battle["slots"] if slot["kind"] == "hero"], [None] * 4)
+
+    def test_current_baby_dragon_edge_and_count_keep_all_four_troop_slots(self) -> None:
+        import cv2
+        import numpy as np
+
+        bar = cv2.imread(str(Path(__file__).parent / "fixtures/battle_bar_baby_edge_18_647_2_20261015.png"))
+        image = np.zeros((1440, 2560, 3), dtype=np.uint8)
+        image[1170:1440, 170:2380] = bar
+        texts = [OCRText(value, .995, bbox) for value, bbox in (
+            ("x10", (130, 592, 179, 621)), ("x1", (244, 594, 276, 621)),
+            ("x1", (342, 595, 372, 620)), ("x2", (434, 594, 470, 620)),
+            ("x6", (1044, 592, 1086, 622)), ("x5", (1142, 592, 1183, 622)),
+        )]
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "battle-bar.png"
+            cv2.imwrite(str(path), image)
+            recognizer = ScreenshotRecognizer(provider=Mock())
+            recognizer.client_version = "18.647.2"
+            battle = recognizer._battle_observation(path, texts, "enemy_village")
+        troops = [(slot["unit_id"], slot["count"]) for slot in battle["slots"]
+                  if slot["kind"] == "troop"]
+        self.assertEqual(troops, [("electro_dragon", 10), ("dragon", 1),
+                                  ("baby_dragon", 1), ("balloon", 2)])
 
     def test_countdown_parsing_rejects_inventory_and_capacity(self) -> None:
         self.assertEqual(parse_countdown("2分59秒"), 179)
@@ -708,6 +1425,30 @@ class SceneTests(unittest.TestCase):
         self.assertIsNone(incomplete["loot"]["dark_elixir"])
         self.assertIsNone(incomplete["evidence"]["layout"])
 
+    def test_current_two_row_defeat_requires_both_real_dividers(self) -> None:
+        import cv2
+
+        path = Path(__file__).parent / "fixtures/settlement_defeat_two_rows_18_647_2_20261015.png"
+        recognizer = ScreenshotRecognizer()
+        recognizer.client_version = "18.647.2"
+        snapshot = recognizer.recognize(path)
+        self.assertEqual(snapshot.scene, "settlement")
+        result = snapshot.observations["settlement"]
+        self.assertEqual(result["loot"], {"gold": 42703, "elixir": 0, "dark_elixir": 0})
+        self.assertEqual(result["bonus"], {"gold": 0, "elixir": 0, "dark_elixir": 0})
+        self.assertEqual(result["evidence"]["layout"], "regular_defeat_gold_elixir_only_v1")
+        self.assertTrue(result["evidence"]["loot"]["dark_elixir"]["requires_inventory_reconciliation"])
+        self.assertTrue(result["evidence"]["bonus"]["requires_inventory_reconciliation"])
+        with TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing-gold-divider.png"
+            image = cv2.imread(str(path))
+            image[748:765, 680:1880] = 0
+            cv2.imwrite(str(missing), image)
+            incomplete = recognizer.recognize(missing).observations["settlement"]
+        self.assertIsNone(incomplete["evidence"]["layout"])
+        self.assertIsNone(incomplete["loot"]["dark_elixir"])
+        self.assertTrue(all(value is None for value in incomplete["bonus"].values()))
+
     def test_missing_icon_does_not_relabel_a_number_from_its_vertical_position(self) -> None:
         import cv2
 
@@ -735,6 +1476,56 @@ class SceneTests(unittest.TestCase):
 
 
 class CollectionVisionTests(unittest.TestCase):
+    def test_current_client_real_bubbles_need_observed_scale(self) -> None:
+        root = Path(__file__).parent / "fixtures"
+        provenance = json.loads((root / "collect_bubbles_current_18_647_2_044553.provenance.json")
+                                .read_text(encoding="utf-8"))
+        self.assertEqual(provenance["source_sha256"],
+                         "cc902516728a4038e7d5953ed2b68ccce8280e51b96dbe0bb5cc11536a3654ec")
+        fixture = provenance["fixtures"][0]
+        path = root / fixture["file"]
+        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), fixture["sha256"])
+        matches = detect_collectibles(path)
+        self.assertEqual(sorted((item["resource"], tuple(item["point"])) for item in matches),
+                         sorted([
+                             ("gold", (748, 379)), ("gold", (779, 357)),
+                             ("gold", (935, 240)), ("gold", (810, 334)),
+                             ("gold", (873, 287)), ("gold", (904, 264)),
+                             ("elixir", (685, 321)), ("elixir", (779, 251)),
+                             ("elixir", (841, 204)), ("elixir", (748, 274)),
+                             ("dark_elixir", (904, 306)),
+                             ("dark_elixir", (873, 329)),
+                             ("dark_elixir", (935, 282)),
+                         ]))
+        self.assertTrue(all(item["scale"] == .82 and item["confidence"] >= .88
+                            for item in matches))
+
+    def test_current_client_actual_hud_and_bottom_fragments_are_excluded(self) -> None:
+        root = Path(__file__).parent / "fixtures"
+        provenance = json.loads((root / "collect_bubbles_current_18_647_2_044553.provenance.json")
+                                .read_text(encoding="utf-8"))
+        fixture = provenance["fixtures"][1]
+        path = root / fixture["file"]
+        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), fixture["sha256"])
+        self.assertEqual(detect_collectibles(path), [])
+
+    def test_current_client_real_empty_village_keeps_decorations_without_bubble_matches(self) -> None:
+        import cv2
+
+        path = Path(__file__).parent / "fixtures/home_collect_empty_current_18_647_2_052135.png"
+        provenance = json.loads(path.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), provenance["fixture_sha256"])
+        image = cv2.imread(str(path))
+        self.assertEqual(image.shape, (1440, 2560, 3))
+        for mask in provenance["masks_at_native_2560x1440"]:
+            left, top, right, bottom = mask["xyxy"]
+            self.assertFalse(image[top:bottom, left:right].any())
+        # The event droplet, decorative objects and generic collect label remain
+        # visible in the original map; none is a resource bubble.
+        self.assertTrue(image[50:210, 990:1080].any())
+        self.assertTrue(image[480:590, 390:520].any())
+        self.assertEqual(detect_collectibles(path), [])
+
     def test_collectibles_scale_and_exclude_hud_and_building_menu(self) -> None:
         import cv2
         import numpy as np

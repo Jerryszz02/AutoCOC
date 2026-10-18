@@ -1,0 +1,9 @@
+# Reproduced on Windows / CPython 3.13.12, 2026-10-15.
+# Install matching torch==2.13.0+cu126 and torchvision==0.28.0+cu126
+# from the official PyTorch CUDA 12.6 wheel index in an isolated environment first.
+# Training code never installs or downloads dependencies or pretrained weights.
+numpy==2.5.2
+opencv-python==4.14.0.94
+ultralytics==8.4.177
+onnx==1.23.2
+onnxruntime==1.31.0

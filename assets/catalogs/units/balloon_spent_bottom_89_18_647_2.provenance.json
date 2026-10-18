@@ -1,0 +1,24 @@
+{
+  "client_version": "18.647.2",
+  "source": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-173539-614225-f37bc7ce\\frames\\00018-mixed-balloon-post-1.png",
+  "source_sha256": "1d140181061226a6099413d825dda0ab5092829de7f4edb9148b815fb1747243",
+  "source_events": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\live\\20261016-173539-614225-f37bc7ce\\events.jsonl",
+  "source_events_sha256": "1a9c21eb839e56d71153345ce67e596d7aff890d77f0697e1a6edeec37bd8d44",
+  "template_sha256": "82a82f970d61d1a5e0971103cb6a3ca6025110bb6ad704db65ffadd3c489f797",
+  "source_resolution": [
+    2560,
+    1440
+  ],
+  "template_shape": [
+    7,
+    73
+  ],
+  "baseline_roi_xyxy": [
+    391,
+    706,
+    464,
+    713
+  ],
+  "transform": "Decode source BGR, resize to 1280x720 with cv2.INTER_AREA, convert to grayscale, crop rows y=706..712 and columns x=391..463, encode as grayscale PNG.",
+  "purpose": "Exact current-version 89px spent balloon bottom outline; no portrait, quantity, human ground truth, or success proof."
+}

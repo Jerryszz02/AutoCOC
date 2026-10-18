@@ -1,0 +1,76 @@
+{
+  "client_version": "18.647.2",
+  "surface": "my_army_large_heroes_v1",
+  "review_status": "agent_visual_pose_and_production_cached_observation_not_human_ground_truth",
+  "derivation": "cv2.INTER_AREA resize to 1280x720; retain only actual hero cards [23,185,537,668], without changing card pixels",
+  "source_crop_bbox_1280": [
+    23,
+    185,
+    537,
+    668
+  ],
+  "frames": [
+    {
+      "fixture": "hero_roster_dragon_pose_11_18_647_2_20261017.png",
+      "fixture_sha256": "b71179246b7dce5ffa460249065f6d0c8bf8024607691a3f41ca8600f04c8b72",
+      "source_frame": "reports/completion-20261015/live/20261017-005103-132498-d5d5879a/frames/00011-mixed-army-preparation.png",
+      "source_sha256": "ea98a5024b638169eb6510eeb57216f5709947aefcae6687ea971d165b621ddc",
+      "cached_hero_count_ocr": {
+        "text": "4/4",
+        "confidence": 0.99958,
+        "bbox": [
+          50,
+          150,
+          98,
+          176
+        ]
+      },
+      "cached_hero_slots": {
+        "used": 4,
+        "capacity": 4
+      }
+    },
+    {
+      "fixture": "hero_roster_dragon_pose_15_18_647_2_20261017.png",
+      "fixture_sha256": "2317f7febe411b2974022ed0e29ed14b13189387b3558a709802882e2fe91226",
+      "source_frame": "reports/completion-20261015/live/20261017-005103-132498-d5d5879a/frames/00015-army-current-return-1.png",
+      "source_sha256": "bb2cf6bc5a62563f2ddfbac6afa7057a935b1d0b8db60944bc7481317e1d1b67",
+      "cached_hero_count_ocr": {
+        "text": "4/4",
+        "confidence": 0.99958,
+        "bbox": [
+          50,
+          150,
+          98,
+          176
+        ]
+      },
+      "cached_hero_slots": {
+        "used": 4,
+        "capacity": 4
+      }
+    },
+    {
+      "fixture": "hero_roster_dragon_pose_16_18_647_2_20261017.png",
+      "fixture_sha256": "c2c9de672e886445be7c738706fab099d243c22d1ab68300cec45573d93c9866",
+      "source_frame": "reports/completion-20261015/live/20261017-005103-132498-d5d5879a/frames/00016-army-current-return-2.png",
+      "source_sha256": "9cf1bebd2dc0d43ea796dcbd52867017cbd17b2d2d5f3523eedb0a899bf9f650",
+      "cached_hero_count_ocr": {
+        "text": "4/4",
+        "confidence": 0.99958,
+        "bbox": [
+          50,
+          150,
+          98,
+          176
+        ]
+      },
+      "cached_hero_slots": {
+        "used": 4,
+        "capacity": 4
+      }
+    }
+  ],
+  "source_events": "reports/completion-20261015/live/20261017-005103-132498-d5d5879a/events.jsonl",
+  "source_events_sha256": "25a875ba7a54c5d3b5f6681db523ac6fb11110efe30b61b6a8a2076a1cae8ab2"
+}

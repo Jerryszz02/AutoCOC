@@ -1,0 +1,72 @@
+{
+  "client_version": "18.647.2",
+  "identity": "totem_spell",
+  "identity_status": "actual_detail_title_agent_visual_not_human_gt",
+  "original_mislabel": "earthquake_spell",
+  "formal_training_label": false,
+  "picker_source": {
+    "path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-earthquake-info-v2\\frames\\00001-earthquake-info-picker-before.png",
+    "sha256": "22823d99e548993c50e2d158fd524eef511e0d44d7b4712584c1796cd60f0173"
+  },
+  "detail_source": {
+    "path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-earthquake-info-v2\\frames\\00004-earthquake-info-after-3.png",
+    "sha256": "ddddb41892feab0904ab9c289f97d2c2e2633cb6f5d4c2c3a3779c035ee522aa",
+    "observed_title": "2级图腾法术",
+    "observed_title_ocr_confidence": 0.99991,
+    "observed_stats": [
+      "击晕/瘫痪时间（秒）：",
+      "所需空间："
+    ],
+    "identity_binding": "one blue-info tap from source-bound picker frame; no card mutation"
+  },
+  "previous_sources": {
+    "army": {
+      "path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261015-175448-tap\\frames\\00002-after.png",
+      "sha256": "4b5e1f39a49851cbc25eaabec68f6a0831dd6a95d3697a27d9b1a031f4fd072e"
+    },
+    "battle": {
+      "path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\vision-collect-001-session\\frames\\00008-scout-camera-ready.png",
+      "sha256": "843f92ff6d8e56fafc897ef1e5c7725bcb0378777825829147987b27bf6cf131"
+    }
+  },
+  "templates": [
+    {
+      "path": "assets/catalogs/units/totem_spell_army_18_647_2.png",
+      "sha256": "a4eb0e6209087892b904ea1043321c93fcb05b4e4af8479bdf592a65e57fe2b8",
+      "derivation": "exact bytes renamed from former earthquake_spell_army_18_647_2.png; original crop x683:728 y405:447 at baseline"
+    },
+    {
+      "path": "assets/catalogs/units/totem_spell_battle_18_647_2.png",
+      "sha256": "e606848d0b62ff752d0100d616107c3c079e6d8f053d47f7f5e3a94ac78e4f49",
+      "derivation": "exact bytes renamed from former earthquake_spell_battle_18_647_2.png; original crop x1113:1161 y632:676 at baseline"
+    },
+    {
+      "path": "assets/catalogs/units/totem_spell_picker_capacity_gray_18_647_2.png",
+      "sha256": "4890b5657845ca0a8660870b276831293533e4752b13a1ea8958957711f2d083",
+      "derivation": "picker source cv2.resize INTER_AREA 1280x720, crop x570:610 y591:631"
+    },
+    {
+      "path": "assets/catalogs/current_picker_totem_blue_info_18_647_2.png",
+      "sha256": "43aa45126e2c7c12490e1a6774f54542fb6c57f28cbee08a9eea7c1d0c83678e",
+      "derivation": "picker source cv2.resize INTER_AREA 1280x720, crop x645:673 y571:599; blue info glyph only, not identity"
+    }
+  ],
+  "fixtures": [
+    {
+      "path": "tests/fixtures/totem_spell_picker_gray_18_647_2.png",
+      "sha256": "a75d914cdf78dbabea0ea13cb9699bf3853ce0a4dbfd4a3286791c0bfeebaff7",
+      "derivation": "picker source cv2.resize INTER_AREA 1280x720; fill BGR(45,45,45) baseline rectangles x16:440 y91:326, x445:1258 y101:188, x800:1260 y195:320"
+    },
+    {
+      "path": "tests/fixtures/totem_spell_detail_identity_18_647_2.png",
+      "sha256": "1e3902c6a12e1e65ad7bbd031aa37d3f20a3d151a388361182e277371af3eee3",
+      "derivation": "detail source cv2.resize INTER_AREA 1280x720; retain rectangles x480:770 y25:85, x595:1125 y120:270, x135:205 y115:195; fill all other pixels BGR(45,45,45)"
+    }
+  ],
+  "notes": "Identity from live title applies to the sampled selected army bottle and independently observed second bottom picker card. Battle asset is mapped through the unchanged army recipe and battle card correspondence, not a directly opened battle detail. Legacy 18.600.7 totem assets stay intact.",
+  "same_session_second_frame_replay": {
+    "path": "E:\\projects\\AutoCOC\\reports\\completion-20261015\\probes\\20261016-earthquake-picker-open-v1\\frames\\00007-earthquake-picker-open-2.png",
+    "sha256": "cdf8bb3b560a75c286b9318fb0b384239b9a1ed1c783a1922a406018660207f2",
+    "evidence_limit": "same session and same picker state; not a different-battle/generalization holdout"
+  }
+}

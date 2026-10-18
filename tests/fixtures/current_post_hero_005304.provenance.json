@@ -1,0 +1,148 @@
+{
+  "client_version": "18.647.2",
+  "run": "20261016-005304-767109-058a9bfa",
+  "note": "Current deployed hero identity/HP only; no ability ready/used labels. Source frames 18/20 are distinct from holdout 14/15/16.",
+  "derivation": "Decode original PNG, resize to 1280x720 with cv2.INTER_AREA; asset crop uses source_bbox_1280. Fixture zeroes all pixels outside y=545..719 battle toolbar.",
+  "assets": [
+    {
+      "unit_id": "grand_warden",
+      "surface": "battle",
+      "path": "units/grand_warden_battle_deployed_005304_18_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261016-005304-767109-058a9bfa/frames/00018-battle-settlement.png",
+      "source_bbox_1280": [
+        676,
+        632,
+        713,
+        673
+      ],
+      "source_card_bbox_1280": [
+        647,
+        595,
+        736,
+        711
+      ],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "dcb374d3c1d15d7d312d1322c606f20dd5f76cd7fafb24cb7cf0082f4e21ca66",
+      "template_sha256": "df6ff633b6be323cedb9542417badf9e86dc84afb5d8edc2b714d953d3078853"
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "battle",
+      "path": "units/minion_prince_battle_deployed_005304_18_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261016-005304-767109-058a9bfa/frames/00018-battle-settlement.png",
+      "source_bbox_1280": [
+        864,
+        632,
+        903,
+        675
+      ],
+      "source_card_bbox_1280": [
+        840,
+        595,
+        929,
+        711
+      ],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "dcb374d3c1d15d7d312d1322c606f20dd5f76cd7fafb24cb7cf0082f4e21ca66",
+      "template_sha256": "50f804214b65a1f0a1e51e0d84321c2f9cb0fe631f607c06fc687ffe9e9c09f6"
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "battle",
+      "path": "units/archer_queen_battle_deployed_005304_20_18_647_2.png",
+      "source_frame": "reports/completion-20261015/live/20261016-005304-767109-058a9bfa/frames/00020-battle-settlement.png",
+      "source_bbox_1280": [
+        964,
+        632,
+        1001,
+        674
+      ],
+      "source_card_bbox_1280": [
+        937,
+        595,
+        1026,
+        711
+      ],
+      "state": "deployed",
+      "client_version": "18.647.2",
+      "source_sha256": "65d611e23b0151a72ef8b6b3711d81b0f41325697c749ec9d4e4b68c783df68b",
+      "template_sha256": "2821147b3d5b0354af98cedf6cf4c0282e4ea03610981de4a56ad048c61f3e98"
+    }
+  ],
+  "fixtures": {
+    "current_post_hero_005304_00014.png": {
+      "source_frame": "reports/completion-20261015/live/20261016-005304-767109-058a9bfa/frames/00014-frozen-line-post.png",
+      "source_sha256": "baf5ffa67bc7a9e4102610879bd7a6f42154dfff04b2664b45dd61233030c608",
+      "fixture_sha256": "6589c056d85e3583a17e31a3653bac4aa17abfd5180e62c5a5c7fd5f5706508c",
+      "retained_roi_1280": [
+        0,
+        545,
+        1280,
+        720
+      ],
+      "purpose": "holdout"
+    },
+    "current_post_hero_005304_00015.png": {
+      "source_frame": "reports/completion-20261015/live/20261016-005304-767109-058a9bfa/frames/00015-frozen-line-post-recheck.png",
+      "source_sha256": "13d422f8e5cab3c107b14b1c04fe5f14069db2e059334a0f2b0cfbaa67790134",
+      "fixture_sha256": "34396de5428bcd47cf3e531d605a4ecb63b626f64fac36d1534a8afbb8bb0d07",
+      "retained_roi_1280": [
+        0,
+        545,
+        1280,
+        720
+      ],
+      "purpose": "holdout"
+    },
+    "current_post_hero_005304_00016.png": {
+      "source_frame": "reports/completion-20261015/live/20261016-005304-767109-058a9bfa/frames/00016-frozen-line-post-recheck.png",
+      "source_sha256": "0d45be690669b61a9984c1634b13187fba750dc419395b21dc96353d8bb02826",
+      "fixture_sha256": "1ccb0e62a39ec30a657ff6a4a698180720100b3271a7e930b947401510533c4e",
+      "retained_roi_1280": [
+        0,
+        545,
+        1280,
+        720
+      ],
+      "purpose": "holdout"
+    },
+    "current_post_hero_005304_00018.png": {
+      "source_frame": "reports/completion-20261015/live/20261016-005304-767109-058a9bfa/frames/00018-battle-settlement.png",
+      "source_sha256": "dcb374d3c1d15d7d312d1322c606f20dd5f76cd7fafb24cb7cf0082f4e21ca66",
+      "fixture_sha256": "71fd60ebc4bac98b6ac36fc6f794bc4a3bb987714f4c37ed62006b39787e37fc",
+      "retained_roi_1280": [
+        0,
+        545,
+        1280,
+        720
+      ],
+      "purpose": "template_source"
+    },
+    "current_post_hero_005304_00019.png": {
+      "source_frame": "reports/completion-20261015/live/20261016-005304-767109-058a9bfa/frames/00019-battle-settlement.png",
+      "source_sha256": "779f4bf57c9154122214c7adc3e66392666b76dc47e500107d21356e8f83fd0d",
+      "fixture_sha256": "143f665e9a3a63f0563a145b3924163ffb77aff03a07766b4ff949025980d02d",
+      "retained_roi_1280": [
+        0,
+        545,
+        1280,
+        720
+      ],
+      "purpose": "negative_health_context"
+    },
+    "current_post_hero_005304_00020.png": {
+      "source_frame": "reports/completion-20261015/live/20261016-005304-767109-058a9bfa/frames/00020-battle-settlement.png",
+      "source_sha256": "65d611e23b0151a72ef8b6b3711d81b0f41325697c749ec9d4e4b68c783df68b",
+      "fixture_sha256": "f9bcb7a7eee95e45a8de8730007df7fd58421ffe800c4dc9828f2aee957b646b",
+      "retained_roi_1280": [
+        0,
+        545,
+        1280,
+        720
+      ],
+      "purpose": "template_source"
+    }
+  }
+}

@@ -1,0 +1,212 @@
+{
+  "client": "18.647.2",
+  "coordinate_resolution": [
+    1280,
+    720
+  ],
+  "frames": [
+    {
+      "fixture": "troop_picker_231847_18_647_2.png",
+      "fixture_sha256": "38ab066d9b16ea88463f5a9740630f802acbc3277a205684d93d6a64be2bb014",
+      "source_frame": "reports/completion-20261015/probes/20261015-231847-tap/frames/00002-after.png",
+      "source_sha256": "b7dafdcd3c6b1396f0c59c5081f21405d8d1897d6d16f11b9baf46696fd87b23",
+      "retained_rois_1280": [
+        [
+          200,
+          32,
+          710,
+          110
+        ],
+        [
+          545,
+          140,
+          1080,
+          305
+        ],
+        [
+          0,
+          430,
+          1280,
+          713
+        ]
+      ],
+      "ocr": [
+        {
+          "text": "我的军队",
+          "confidence": 0.99995,
+          "bbox": [
+            223,
+            64,
+            292,
+            88
+          ]
+        },
+        {
+          "text": "已保存的配置",
+          "confidence": 0.99845,
+          "bbox": [
+            592,
+            63,
+            686,
+            86
+          ]
+        },
+        {
+          "text": "精选库",
+          "confidence": 0.99966,
+          "bbox": [
+            974,
+            63,
+            1024,
+            86
+          ]
+        },
+        {
+          "text": "341/343",
+          "confidence": 0.99999,
+          "bbox": [
+            578,
+            156,
+            666,
+            180
+          ]
+        },
+        {
+          "text": "x10",
+          "confidence": 0.92639,
+          "bbox": [
+            556,
+            194,
+            598,
+            220
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.93654,
+          "bbox": [
+            762,
+            194,
+            793,
+            220
+          ]
+        },
+        {
+          "text": "x2",
+          "confidence": 0.99824,
+          "bbox": [
+            872,
+            197,
+            896,
+            217
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.9325,
+          "bbox": [
+            968,
+            195,
+            996,
+            220
+          ]
+        }
+      ],
+      "native_resolution": [
+        1280,
+        720
+      ]
+    },
+    {
+      "fixture": "army_archer_231921_18_647_2.png",
+      "fixture_sha256": "d2ffdcf258fb5ab09aaf74f9866788b885666148ba2a1cb239f521242283992a",
+      "source_frame": "reports/completion-20261015/probes/20261015-231921-tap/frames/00002-after.png",
+      "source_sha256": "be3bb04f148ede71e7bda4c6b4ca0058c1f7f60a2decdfff3e7e19aba41d9580",
+      "retained_rois_1280": [
+        [
+          545,
+          140,
+          1255,
+          305
+        ]
+      ],
+      "ocr": [
+        {
+          "text": "我的军队",
+          "confidence": 0.99998,
+          "bbox": [
+            222,
+            63,
+            293,
+            90
+          ]
+        },
+        {
+          "text": "已保存的配置",
+          "confidence": 0.99983,
+          "bbox": [
+            594,
+            64,
+            685,
+            85
+          ]
+        },
+        {
+          "text": "精选库",
+          "confidence": 0.99985,
+          "bbox": [
+            974,
+            64,
+            1024,
+            86
+          ]
+        },
+        {
+          "text": "341/343",
+          "confidence": 0.99999,
+          "bbox": [
+            577,
+            154,
+            666,
+            182
+          ]
+        },
+        {
+          "text": "x10",
+          "confidence": 0.97687,
+          "bbox": [
+            558,
+            194,
+            599,
+            220
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.96916,
+          "bbox": [
+            763,
+            196,
+            792,
+            220
+          ]
+        },
+        {
+          "text": "x1",
+          "confidence": 0.91704,
+          "bbox": [
+            970,
+            196,
+            995,
+            219
+          ]
+        }
+      ],
+      "native_resolution": [
+        2560,
+        1440
+      ]
+    }
+  ],
+  "anonymization": "Only the sampled selected troop row, navigation strip needed for the picker, and picker tray are retained. Other account and village pixels are zeroed."
+}

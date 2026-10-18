@@ -1,0 +1,83 @@
+{
+  "client_version": "18.647.2",
+  "source_kind": "agent_visual_prototype",
+  "human_ground_truth": false,
+  "formal_success": false,
+  "derivation": "Decode each native 2560x1440 PNG with cv2.IMREAD_COLOR; cv2.resize to 1280x720 using INTER_AREA; crop [430,20,845,220] exactly; PNG encode without altering pixels.",
+  "source_run": "20261016-054932-938805-6da48730",
+  "source_commit": "9651dd181cb40e229f3fcc7bf4cb6890362f31e2",
+  "fixtures": {
+    "settlement-three-stars-current-054932-00043.png": {
+      "source_frame": "reports/completion-20261015/live/20261016-054932-938805-6da48730/frames/00043-battle-settlement-reread.png",
+      "source_sha256": "d14f0b9fc68bac08c1eb34b093a09a3039c4ff95528cf42a3a134c6c6605b7b3",
+      "fixture_sha256": "24f0e67a7efa8eabefe70afbdcb88c214679fb3fa0ee5de849fdcd5f0ea06729",
+      "crop_xyxy_at_1280x720": [
+        430,
+        20,
+        845,
+        220
+      ],
+      "purpose": "agent_visual_readonly_star_silhouette_replay"
+    },
+    "settlement-three-stars-current-054932-00044.png": {
+      "source_frame": "reports/completion-20261015/live/20261016-054932-938805-6da48730/frames/00044-battle-settlement-reread.png",
+      "source_sha256": "9155ebb03319b33fdb1748e0f6621f2447ecdaf300280c8f97f1bc4a1bb3073e",
+      "fixture_sha256": "3a46cacd5e601d796125629efb78e60ba7360f0fa44bacc5c4800fadfbf4f7c4",
+      "crop_xyxy_at_1280x720": [
+        430,
+        20,
+        845,
+        220
+      ],
+      "purpose": "agent_visual_readonly_star_silhouette_replay"
+    },
+    "settlement-three-stars-current-054932-00045.png": {
+      "source_frame": "reports/completion-20261015/live/20261016-054932-938805-6da48730/frames/00045-battle-settlement-reread.png",
+      "source_sha256": "f73a70202b0342850f95756b8607726154884b07e40c3fa898d175746c326579",
+      "fixture_sha256": "a941d75246fabd2a160ad2914fc601390160a62068aa11c97b672253c19a6b28",
+      "crop_xyxy_at_1280x720": [
+        430,
+        20,
+        845,
+        220
+      ],
+      "purpose": "agent_visual_readonly_star_silhouette_replay"
+    },
+    "settlement-three-stars-current-054932-00046.png": {
+      "source_frame": "reports/completion-20261015/live/20261016-054932-938805-6da48730/frames/00046-battle-settlement-reread.png",
+      "source_sha256": "88be9a834eec44a5a75c0f8d5a7f5f04ec58fb6824305df82bc21731df8dfc0d",
+      "fixture_sha256": "3e93567bc044b49c394348fc4fe2848b966f0da7c0679862d7cfa47294dd789f",
+      "crop_xyxy_at_1280x720": [
+        430,
+        20,
+        845,
+        220
+      ],
+      "purpose": "agent_visual_readonly_star_silhouette_replay"
+    },
+    "settlement-three-stars-current-054932-00047.png": {
+      "source_frame": "reports/completion-20261015/live/20261016-054932-938805-6da48730/frames/00047-battle-settlement-reread.png",
+      "source_sha256": "28611dbc351c543ca89d69cd2925cee7c721791258dffbb2b3b0a1b0d4041b0b",
+      "fixture_sha256": "6adb728a3d4c0b92a5ca4c2888bf5e5993aff1a177e4c9dd05c9774de5e66c7e",
+      "crop_xyxy_at_1280x720": [
+        430,
+        20,
+        845,
+        220
+      ],
+      "purpose": "agent_visual_readonly_star_silhouette_replay"
+    },
+    "settlement-three-stars-current-054932-00048.png": {
+      "source_frame": "reports/completion-20261015/live/20261016-054932-938805-6da48730/frames/00048-battle-settlement-reread.png",
+      "source_sha256": "254a7e3b7318bf64379d937f76f4660ad925dd2e477daf104dd8e55839777363",
+      "fixture_sha256": "618927353be9160f178b13fb8b1b58836dfa655a8a2a3fca2776201c7846a489",
+      "crop_xyxy_at_1280x720": [
+        430,
+        20,
+        845,
+        220
+      ],
+      "purpose": "agent_visual_readonly_star_silhouette_replay"
+    }
+  }
+}

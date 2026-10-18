@@ -89,6 +89,26 @@ def recover(frames: list[SceneSnapshot], *, capture_seconds: float = 0, deadline
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_account_in_use_never_clicks_reload_or_waits_for_retry(self) -> None:
+        occupied = frame(0, "account_in_use")
+        result, session, clock = recover([occupied])
+        self.assertEqual(result.status, "failed")
+        self.assertIn("account_in_use", result.reason)
+        self.assertEqual(result.metrics["retry_actions"], 0)
+        self.assertEqual(result.evidence, [occupied.screenshot_path])
+        self.assertEqual(session.taps, [])
+        self.assertEqual(clock.now, 0)
+
+    def test_account_in_use_after_ordinary_retry_stops_without_second_click(self) -> None:
+        occupied = frame(1, "account_in_use")
+        result, session, clock = recover([frame(0, "disconnected"), occupied])
+        self.assertEqual(result.status, "failed")
+        self.assertIn("account_in_use", result.reason)
+        self.assertEqual(result.metrics["retry_actions"], 1)
+        self.assertEqual(result.metrics["last_scene"], "account_in_use")
+        self.assertEqual(len(session.taps), 1)
+        self.assertEqual(clock.now, 0)
+
     def test_real_welcome_ocr_is_confirmed_once_after_retry(self) -> None:
         popup = welcome()
         result, session, _ = recover([frame(0, "disconnected"), popup, popup,

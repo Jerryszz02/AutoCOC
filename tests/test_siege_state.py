@@ -1,6 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -12,6 +13,21 @@ class SiegeStateTests(unittest.TestCase):
     root = Path(__file__).resolve().parents[1]
     slot = [498, 595, 587, 711]
 
+    def test_current_client_does_not_use_legacy_deployment_template(self):
+        bar = cv2.imread(str(self.root / "tests/fixtures/battle_bar_heldout_18_647_2_20261015.png"))
+        image = np.zeros((720, 1280, 3), dtype=np.uint8)
+        image[590:720, 85:1190] = bar
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "current-scout-bar.png"
+            cv2.imwrite(str(path), image)
+            for version in ("18.647.2", None):
+                with self.subTest(version=version), patch("autococ.hero_state._match",
+                                                       side_effect=AssertionError("legacy template used")):
+                    state = recognize_siege_state(path, [491, 595, 580, 711], client_version=version)
+                    self.assertIsNone(state["deployed"])
+                    self.assertEqual(state["evidence"]["reason"],
+                                     "current_client_siege_deployment_templates_unavailable")
+
     def fixture(self, number):
         folder = self.root / "reports/20260923-021847-763016-3632dc81/frames"
         paths = list(folder.glob(f"{number:05d}-*.png"))
@@ -22,10 +38,11 @@ class SiegeStateTests(unittest.TestCase):
     def test_ready_and_selected_cards_are_not_deployment(self):
         for number in (12, 13):
             with self.subTest(frame=number):
-                self.assertIsNone(recognize_siege_state(self.fixture(number), self.slot)["deployed"])
+                self.assertIsNone(recognize_siege_state(self.fixture(number), self.slot,
+                                                        client_version="18.600.7")["deployed"])
 
     def test_release_control_and_card_health_confirm_deployment(self):
-        result = recognize_siege_state(self.fixture(15), self.slot)
+        result = recognize_siege_state(self.fixture(15), self.slot, client_version="18.600.7")
         self.assertTrue(result["deployed"])
         self.assertIn("health_bar", result["evidence"])
         self.assertGreaterEqual(result["evidence"]["release_control"]["confidence"], .9)
@@ -39,10 +56,12 @@ class SiegeStateTests(unittest.TestCase):
                 changed[top:bottom, left:right] = (25, 25, 25)
                 path = Path(directory) / "changed.png"
                 cv2.imencode(".png", changed)[1].tofile(path)
-                self.assertIsNone(recognize_siege_state(path, self.slot)["deployed"])
+                self.assertIsNone(recognize_siege_state(path, self.slot,
+                                                        client_version="18.600.7")["deployed"])
 
     def test_neighbor_selected_hero_cannot_supply_siege_proof(self):
-        self.assertIsNone(recognize_siege_state(self.fixture(15), [599, 595, 688, 711])["deployed"])
+        self.assertIsNone(recognize_siege_state(self.fixture(15), [599, 595, 688, 711],
+                                                client_version="18.600.7")["deployed"])
 
     def test_smaller_siege_hp_and_release_over_another_map_require_stable_frame(self):
         folder = self.root / "reports/20260924-003409-344711-0e4a3e7a/frames"
@@ -50,9 +69,10 @@ class SiegeStateTests(unittest.TestCase):
         if not stable.is_file():
             self.skipTest("Optional smaller siege fixture is absent")
         slot = [401, 595, 490, 711]
-        transition = recognize_siege_state(folder / "00021-deploy-siege-verify.png", slot)
+        transition = recognize_siege_state(folder / "00021-deploy-siege-verify.png", slot,
+                                           client_version="18.600.7")
         self.assertIsNone(transition["deployed"])
-        result = recognize_siege_state(stable, slot)
+        result = recognize_siege_state(stable, slot, client_version="18.600.7")
         self.assertTrue(result["deployed"])
         self.assertGreaterEqual(result["evidence"]["release_control"]["confidence"], .99)
         image = cv2.resize(cv2.imread(str(stable)), (1280, 720), interpolation=cv2.INTER_AREA)
@@ -63,12 +83,13 @@ class SiegeStateTests(unittest.TestCase):
                 changed[top:bottom, left:right] = (25, 25, 25)
                 path = Path(directory) / "changed.png"
                 cv2.imwrite(str(path), changed)
-                self.assertIsNone(recognize_siege_state(path, slot)["deployed"])
+                self.assertIsNone(recognize_siege_state(path, slot,
+                                                        client_version="18.600.7")["deployed"])
 
     def test_bobbing_release_control_may_extend_below_old_crop(self):
         path = self.root / "reports/20260924-004347-675110-2e2b80bd/frames/00023-deploy-siege-verify.png"
         if not path.is_file():
             self.skipTest("Optional low release-control fixture is absent")
-        result = recognize_siege_state(path, [401, 595, 490, 711])
+        result = recognize_siege_state(path, [401, 595, 490, 711], client_version="18.600.7")
         self.assertTrue(result["deployed"])
         self.assertGreater(result["evidence"]["release_control"]["bbox"][3], 710)

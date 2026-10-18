@@ -1,0 +1,30 @@
+{
+  "schema": "autococ.battle_chest_skip_confirm_template.v1",
+  "client_version": "18.647.2",
+  "source_frame_relative_to_external": "probes/20261017-084944-assisted-chest-skip-083520/frames/00002-after-assisted-chest-skip.png",
+  "source_sha256": "e7e2688c7764ecbebf9ebe6244d6ea083d274a394e69676c7776a1f59fcc568a",
+  "source_dimensions": [
+    2560,
+    1440
+  ],
+  "baseline_dimensions": [
+    1280,
+    720
+  ],
+  "baseline_interpolation": "cv2.INTER_AREA",
+  "crop_at_baseline": [
+    350,
+    185,
+    930,
+    530
+  ],
+  "crop_at_source": [
+    700,
+    370,
+    1860,
+    1060
+  ],
+  "template_sha256": "801eeeed02e126a6b978fda51cc9d80bdead7485c16c6d0a870b6abb2c950795",
+  "human_ground_truth": false,
+  "formal_acceptance": false
+}

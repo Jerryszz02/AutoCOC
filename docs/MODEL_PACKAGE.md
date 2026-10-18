@@ -60,6 +60,8 @@ model_dir/
 
 调用方必须传入**取帧开始时的单调时钟时间** `captured_at`，不可在推理时重置时间。`SceneModel(...).classify(image, captured_at=...)` 返回场景、置信度和拒识原因；`BuildingModel(...).detect(image, captured_at=...)` 返回可见建筑框。若要聚合核心区，向 `infer_core_geometry` 提供经审定 profile 的 `core_classes`（类别到最低置信度的映射）、`min_core_targets` 和可选的 `core_padding_pixels`；没有这些条件时核心区为未知。输出中心与范围位于调用方指定的基准坐标系。建筑漏检不会被解释为摧毁。
 
+可选的多核心分组属于布局档案的战前候选接口，不改变模型包格式或模型发布要求。档案显式启用 `multi_core` 后，`infer_multi_core_geometry` 只消费同帧同模型且达到 `core_classes` 阈值的有限检测，并拒绝桥接、间距歧义和超限组；字段、候选上限及冻结计划绑定见[战前连续投放运行契约](VISION_AGENT_RUNTIME.md)。未启用时沿用原单核接口。该路径目前只有合成离线验证，不代表已有模型或多核心实战准入。
+
 `ScreenshotRecognizer` 可选择注入两个模型，并在 `recognize(..., captured_at=...)` 中使用。场景 OCR 与模型给出两个互相冲突的已知类别时，结果为未知；建筑模型结果与现有模板跟踪结果分别保存，避免把可见目标混成已核验的摧毁状态。
 
 已有人工复核的 JSONL 可用以下命令离线评估；省略 `--reviewed-jsonl` 时只校验包和加载权重：
@@ -71,6 +73,12 @@ python scripts/evaluate_model_package.py C:\models\AutoCOC\building --kind build
 
 场景行格式为 `{"image":"frame.png","label":"enemy_village"}`；建筑行格式为 `{"image":"frame.png","boxes":[{"class":"town_hall","bbox":[100,120,180,200]}]}`。图片路径相对于 JSONL 文件目录。工具报告场景每类 precision/recall/F1、混淆矩阵、覆盖率、拒识率、未知误接受数；建筑每类 precision/recall、AP50、中心和框角平均定位误差，以及 mAP50。有效真值遇到读图或推理失败时，场景结果记 `inference_error`、建筑计入对应类别 FN 与 AP50 真值分母；无效标签只报告错误，不凭空增加类别。覆盖率以全部尝试为分母，并另报有效标注样本分母。
 
-**当前建筑 AP50/mAP50 是运行配置下的截断统计。**评估器复用 `BuildingModel.detect()`，预测已经过 manifest 置信度过滤、NMS 和候选/检测数量上限；改变这些运行参数会改变 AP，不能直接用于正式模型比较或独立 AP/mAP 验收。独立评估路径、mAP50–95、定位误差 P95、分组指标和发布准入仍待实现，规格见[训练计划的验收层次](planning/VISION_MODEL_TRAINING_PLAN.md#7-验收层次与建议首轮门槛)。脚本退出码 0 只表示评估过程无错误，不表示精度或样本量达标。
+**建筑报告分为运行点与独立 AP。**运行点使用 `BuildingModel.detect()` 的最终阈值/NMS；独立路径使用原始预测和单独冻结的 `--evaluation-config`，报告 AP50/mAP50–95、定位 P95、分组/子集及截断状态。图内已过滤或缺少原始输出证明时只给诊断结果，不能用于正式准入。以 `--dataset-dir`、`--split test` 绑定数据快照，核对完整哈希、标签、图片与组级拆分；散装 JSONL 仅为未验证评估范围。验证集可用 `--stability-check` 检查更低分数下限、更高数量上限的 AP 变化。门槛见[训练计划](planning/VISION_MODEL_TRAINING_PLAN.md#7-验收层次与建议首轮门槛)；退出码 0 不代表精度或样本量通过。
+
+## 发布与实机准入
+
+离线 loader 允许检查原型；模型驱动的游戏输入要求额外的发布绑定。`validate_vision_release.py` 校验正式人工复核快照、冻结验收协议、质量、parity、Windows 和核心/入口证据，输出 `PASS`、`FAIL` 或 `INSUFFICIENT_DATA`。使用 `--output` 保存报告时，会同时保存带 SHA 的输入报告副本。
+
+`release_vision_models.py` 在全新目录生成 scene/building 发布包：逐项验证输入文件和数据快照、重新计算准入结果、绑定权重及模型合同哈希。手写 PASS、原型标记、变更类别顺序/预处理/阈值、篡改证据均不能发布；源模型包不原地覆盖。运行时再核对发布报告及两包绑定，缺失或不一致时在搜敌/模型动作前拒绝。具体 CLI 参数通过对应脚本 `--help` 获取；当前未有真实正式模型通过该门。
 
 每条评估尝试还记录首张有效标注图片的 `cold` / 后续 `warm`、设备、执行提供器、模型输入尺寸、成功或失败及耗时；无效标签只有 `preflight`。汇总包含 P50/P95/最大值与失败次数。模型加载单独报告 `model_load_seconds`；`cold` 指模型已加载后的首张离线图片。`offline_elapsed_seconds` 从本地文件读取前开始，包含离线解码、模型推理和指标匹配；`inference_elapsed_seconds` 只覆盖模型调用。离线帧时效也从读取文件前计时，不在解码结束后重置。**这些数值不包含实时取帧、决策和游戏输入，不能作为战中 0.5 秒目标验收。**加载成功只报告 `package_loadable`，不会写成模型已验收。模型训练、标注整理、阈值定稿和真实权重验收仍待后续工作。

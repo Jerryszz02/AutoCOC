@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+from datetime import datetime
 import math
 import os
 from pathlib import Path
@@ -14,7 +15,7 @@ from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
 from .config import VisionAgentConfig, load_config
-from .desktop import (DesktopController, RunOptions, STATUS_LABELS, STRATEGY_LABELS, TASK_LABELS, desktop_config, display_reason,
+from .desktop import (DesktopController, RunOptions, STRATEGY_LABELS, TASK_LABELS, desktop_config, display_reason, display_status,
                       load_options, report_history, report_text, save_options, settings_path)
 from .errors import AutoCOCError
 from .routine_config import (BATTLE_KINDS, TASK_KINDS, GoalConfig, ResourceFilter,
@@ -30,6 +31,8 @@ class AutoCOCApp:
         self.controller = controller or DesktopController()
         self.closing = False
         self.active = False
+        self.picker_active = False
+        self.event_check_active = False
         self.progress_state = {}
         self.report_path: Path | None = None
         self.history: dict[str, tuple[Path, dict]] = {}
@@ -80,8 +83,35 @@ class AutoCOCApp:
         self.pages.pack(fill="both", expand=True, padx=16, pady=12)
         run_page = ttk.Frame(self.pages)
         settings_page = ttk.Frame(self.pages)
+        data_page = ttk.Frame(self.pages)
         self.pages.add(run_page, text="运行")
         self.pages.add(settings_page, text="配置")
+        self.pages.add(data_page, text="数据工具")
+        picker_card = ttk.Frame(data_page, style="Card.TFrame", padding=18)
+        picker_card.pack(fill="x", padx=12, pady=12)
+        ttk.Label(picker_card, text="当前军队分页采集", style="Title.TLabel").grid(row=0, column=0, columnspan=3, sticky="w")
+        ttk.Label(picker_card,
+                  text="实机动作：打开/关闭兵种与法术选择器，兵种最多滑动 4 次；不选单位、不更改军队。只生成原始证据，需另行导入及人工复核。",
+                  style="Muted.TLabel", wraplength=700, justify="left").grid(
+                      row=1, column=0, columnspan=3, sticky="w", pady=(6, 12))
+        self.picker_output = tk.StringVar()
+        self.picker_pages = tk.StringVar(value="3")
+        self.picker_limit = tk.StringVar(value="150")
+        self.picker_status = tk.StringVar(value="未采集。请选择新的外部输出目录。")
+        ttk.Label(picker_card, text="新输出目录").grid(row=2, column=0, sticky="w")
+        ttk.Entry(picker_card, textvariable=self.picker_output, width=58).grid(row=2, column=1, sticky="ew", padx=8)
+        ttk.Button(picker_card, text="选择位置", command=self._choose_picker_output).grid(row=2, column=2)
+        ttk.Label(picker_card, text="兵种页数上限（1–5）").grid(row=3, column=0, sticky="w", pady=9)
+        ttk.Entry(picker_card, textvariable=self.picker_pages, width=8).grid(row=3, column=1, sticky="w", padx=8)
+        ttk.Label(picker_card, text="运行时限（60–180 秒）").grid(row=4, column=0, sticky="w")
+        ttk.Entry(picker_card, textvariable=self.picker_limit, width=8).grid(row=4, column=1, sticky="w", padx=8)
+        self.picker_start_button = ttk.Button(picker_card, text="开始实机只读采集", command=self.start_picker)
+        self.picker_start_button.grid(row=5, column=0, pady=(12, 6), sticky="w")
+        self.picker_stop_button = ttk.Button(picker_card, text="停止采集", command=self.stop, state="disabled")
+        self.picker_stop_button.grid(row=5, column=1, pady=(12, 6), sticky="w")
+        ttk.Label(picker_card, textvariable=self.picker_status, style="Muted.TLabel",
+                  wraplength=700, justify="left").grid(row=6, column=0, columnspan=3, sticky="w")
+        picker_card.columnconfigure(1, weight=1)
         run_page.columnconfigure(1, weight=1)
         run_page.rowconfigure(0, weight=1)
         left = ttk.Frame(run_page, style="Card.TFrame", padding=16)
@@ -345,9 +375,32 @@ class AutoCOCApp:
         defaults = {"strategy": "two_edge", "strategy_file": "", "max_battles": "10", "minutes": "30",
                     "searches": "30", "filter": "1", "gold": "", "elixir": "", "dark_elixir": "", "total": "300000",
                     "target_gold": "", "target_elixir": "", "target_dark_elixir": "", "full_resources": "",
-                    "adapter_path": "", "target": "", "building_type": ""}
+                    "adapter_path": "", "target": "", "building_type": "", "free_reward_target": ""}
         for key, default in defaults.items():
             values.setdefault(key, tk.StringVar(value=default))
+        if kind == "event_reward":
+            reward_labels = {"": "请选择免费奖励", "shiny": "闪亮矿石 1250", "glowy": "璀璨矿石 115"}
+            selected_label = values.setdefault("free_reward_label", tk.StringVar())
+            selected_label.set(reward_labels.get(values["free_reward_target"].get(), reward_labels[""]))
+            ttk.Label(self.task_config, text="免费活动奖励").grid(row=0, column=0, sticky="w", padx=(0, 7))
+            choice = ttk.Combobox(self.task_config, textvariable=selected_label,
+                                  values=tuple(reward_labels.values()), state="readonly", width=22)
+            choice.grid(row=0, column=1, sticky="w")
+            choice.bind("<<ComboboxSelected>>", lambda _event: values["free_reward_target"].set(
+                next(key for key, label in reward_labels.items() if label == selected_label.get())))
+            ttk.Label(self.task_config, text="仅领取当前版本已识别的免费档位；到账仍需库存核验。",
+                      style="Muted.TLabel").grid(row=1, column=0, columnspan=3, sticky="w", pady=(8, 0))
+            if hasattr(self, "strategy_text"):
+                for widget in (self.strategy_text, self.load_strategy_button, self.save_strategy_button, self.strategy_presets):
+                    widget.grid_remove()
+            return
+        if kind == "ore_inventory":
+            ttk.Label(self.task_config, text="只读取当前矿石库存并确认回村；不会领取奖励或证明到账。",
+                      style="Muted.TLabel").grid(row=0, column=0, columnspan=3, sticky="w")
+            if hasattr(self, "strategy_text"):
+                for widget in (self.strategy_text, self.load_strategy_button, self.save_strategy_button, self.strategy_presets):
+                    widget.grid_remove()
+            return
         if kind not in BATTLE_KINDS:
             ttk.Label(self.task_config, text="此任务按本次清单执行一次。", style="Muted.TLabel").grid(row=0, column=0, sticky="w")
             if hasattr(self, "strategy_text"):
@@ -400,6 +453,15 @@ class AutoCOCApp:
         else:
             ttk.Label(goal_frame, text="进度适配 TOML").grid(row=1, column=0, sticky="w", pady=2)
             ttk.Entry(goal_frame, textvariable=values["adapter_path"], width=32).grid(row=1, column=1, sticky="w", padx=8, pady=2)
+            if kind == "event":
+                ttk.Button(goal_frame, text="选择当前版活动预设",
+                           command=lambda task=task_id: self._choose_current_event_adapter(task)).grid(
+                               row=1, column=2, sticky="w", padx=8)
+                self.event_check_button = ttk.Button(goal_frame, text="实机只读检查进度",
+                                                     command=self.start_event_check)
+                self.event_check_button.grid(row=1, column=3, sticky="w")
+                ttk.Label(goal_frame, text="仅打开并读取活动进度后回村；不会开战、领奖或配兵。",
+                          style="Muted.TLabel").grid(row=3, column=0, columnspan=4, sticky="w")
             ttk.Label(goal_frame, text="进度目标").grid(row=2, column=0, sticky="w", pady=2)
             ttk.Entry(goal_frame, textvariable=values["target"], width=22).grid(row=2, column=1, sticky="w", padx=8, pady=2)
             if kind == "clan_games":
@@ -417,6 +479,11 @@ class AutoCOCApp:
         flags = self.full_flags[task_id]
         self.task_fields[task_id]["full_resources"].set(
             ",".join(name for name in ("gold", "elixir", "dark_elixir") if flags[name].get()))
+
+    def _choose_current_event_adapter(self, task_id: str) -> None:
+        path = Path(__file__).resolve().parents[2] / "assets/catalogs/rift_event_18_647_2.adapter.toml"
+        self.task_fields[task_id]["adapter_path"].set(str(path))
+        self.status.set("已选择当前版活动适配文件；仍需显式启动只读检查或活动任务。")
 
     def _load_strategy_file(self) -> None:
         name = filedialog.askopenfilename(parent=self.root, title="选择打法 TOML", filetypes=[("TOML", "*.toml")])
@@ -491,11 +558,13 @@ class AutoCOCApp:
             transport = f"MuMu 原生通道 · 实例 {config.mumu.instance_index}" if config.mumu else "ADB 通道"
             self._log(f"已加载配置；{transport}。当前为离线预演。")
             self.start_button.state(["!disabled"])
+            self.picker_start_button.state(["!disabled"])
             self.refresh_history()
         except (AutoCOCError, OSError, ValueError) as exc:
             self.status.set(f"配置加载失败：{exc}")
             self._log(str(exc))
             self.start_button.state(["disabled"])
+            self.picker_start_button.state(["disabled"])
             if hasattr(self, "report_dir"):
                 del self.report_dir
 
@@ -532,7 +601,8 @@ class AutoCOCApp:
                        "target_elixir": goal.resource_targets.get("elixir"),
                        "target_dark_elixir": goal.resource_targets.get("dark_elixir"),
                        "full_resources": ",".join(goal.full_resources), "adapter_path": goal.adapter_path,
-                       "target": goal.target, "building_type": goal.building_type}
+                       "target": goal.target, "building_type": goal.building_type,
+                       "free_reward_target": task.free_reward_target}
             for key, value in entries.items():
                 fields[key].set("" if value is None else str(value))
         for task_id in self.task_order:
@@ -578,14 +648,15 @@ class AutoCOCApp:
                 strategy=values["strategy"].get(), strategy_file=values["strategy_file"].get().strip(),
                 max_battles=int(values["max_battles"].get()),
                 max_duration_sec=seconds(values["minutes"].get(), "任务时长"),
-                max_searches=int(values["searches"].get()), resource_filter=resource_filter, goal=goal))
+                max_searches=int(values["searches"].get()), resource_filter=resource_filter, goal=goal,
+                free_reward_target=values["free_reward_target"].get().strip()))
         routine = RoutineConfig(tuple(routine_tasks),
                                 maintenance_interval_sec=seconds(self.values["maintenance"].get(), "维护间隔", True))
         routine.validate()
         if not any(task.enabled for task in routine.tasks):
             raise ValueError("请至少勾选一项本次任务")
         tasks = ("launch",) + tuple(dict.fromkeys(self.task_kinds[task_id] for task_id in self.task_order
-                                                    if self.task_kinds[task_id] in ("collect", "request", "donate")
+                                                    if self.task_kinds[task_id] in ("collect", "request", "donate", "train")
                                                     and self.task_vars[task_id].get()))
         if any(self.task_vars[task_id].get() and self.task_kinds[task_id] in BATTLE_KINDS for task_id in self.task_order):
             tasks += ("battle",)
@@ -625,6 +696,8 @@ class AutoCOCApp:
             messagebox.showerror("无法开始任务", str(exc), parent=self.root)
             return
         self.active = True
+        self.picker_active = False
+        self.event_check_active = False
         self._running_controls(True)
         self.task_table.delete(*self.task_table.get_children())
         for task in (spec.id for spec in options.routine.tasks if spec.enabled):
@@ -637,9 +710,62 @@ class AutoCOCApp:
         self.badge.configure(text="离线预演中" if options.dry_run else "实机运行中")
         self.tabs.select(0)
 
+    def _choose_picker_output(self) -> None:
+        parent = filedialog.askdirectory(parent=self.root, title="选择采集证据的外部父目录")
+        if parent:
+            self.picker_output.set(str(Path(parent) / f"picker-{datetime.now():%Y%m%d-%H%M%S-%f}"))
+
+    def start_picker(self) -> None:
+        try:
+            raw = self.picker_output.get().strip()
+            if not raw:
+                raise ValueError("请先选择新的采集输出目录")
+            raw_output = Path(raw)
+            if raw_output.exists() or raw_output.is_symlink():
+                raise ValueError("采集输出目录必须是新的，不能覆盖已有目录")
+            output = raw_output.resolve()
+            pages = int(self.picker_pages.get())
+            limit = int(self.picker_limit.get())
+            self.controller.start_picker(self.config_path, output,
+                                         max_troop_pages=pages, limit_sec=limit)
+        except (OSError, ValueError, RuntimeError) as exc:
+            messagebox.showerror("无法开始军队分页采集", str(exc), parent=self.root)
+            return
+        self.active = True
+        self.picker_active = True
+        self.event_check_active = False
+        self._running_controls(True)
+        self.picker_status.set(f"实机采集中，原始证据目录：{output}")
+        self.status.set("正在实机只读采集；停止后仍需检查设备界面。")
+        self.badge.configure(text="军队采集中")
+
+    def start_event_check(self) -> None:
+        try:
+            adapter_path = self.task_fields["event"]["adapter_path"].get().strip()
+            if not adapter_path:
+                raise ValueError("请先选择当前活动适配文件")
+            # An explicit read-only check is independent of enabled daily
+            # tasks and unfinished battle settings in the editor.
+            options = replace(RunOptions.from_config(load_config(self.config_path)),
+                              serial=self.values["serial"].get(), routine=None, dry_run=False)
+            self.controller.start_event_check(self.config_path, options, adapter_path)
+        except (AutoCOCError, OSError, ValueError, RuntimeError) as exc:
+            messagebox.showerror("无法检查活动进度", str(exc), parent=self.root)
+            return
+        self.active = True
+        self.picker_active = False
+        self.event_check_active = True
+        self._running_controls(True)
+        self.pages.select(0)
+        self.status.set("正在实机只读检查活动进度；不会开战、领奖或配兵。")
+        self.badge.configure(text="活动进度检查中")
+
     def stop(self) -> None:
         self.controller.stop()
         self.stop_button.state(["disabled"])
+        self.picker_stop_button.state(["disabled"])
+        if hasattr(self, "event_check_button") and self.event_check_button.winfo_exists():
+            self.event_check_button.state(["disabled"])
         self.status.set("停止请求已发送，等待当前有时限的调用返回并保存报告。")
         self.badge.configure(text="正在停止")
 
@@ -649,6 +775,10 @@ class AutoCOCApp:
         self.pages.tab(1, state="disabled" if running else "normal")
         self.start_button.state(["disabled"] if running else ["!disabled"])
         self.stop_button.state(["!disabled"] if running else ["disabled"])
+        self.picker_start_button.state(["disabled"] if running else ["!disabled"])
+        self.picker_stop_button.state(["!disabled"] if running and self.picker_active else ["disabled"])
+        if hasattr(self, "event_check_button") and self.event_check_button.winfo_exists():
+            self.event_check_button.state(["disabled"] if running else ["!disabled"])
 
     def _poll(self) -> None:
         for _ in range(200):
@@ -659,6 +789,8 @@ class AutoCOCApp:
             self._event(event)
         if self.active and not self.controller.running:
             self.active = False
+            self.picker_active = False
+            self.event_check_active = False
             self._running_controls(False)
         if self.closing and not self.controller.running:
             self.root.destroy()
@@ -669,6 +801,29 @@ class AutoCOCApp:
         kind = event["kind"]
         if kind in {"log", "error"}:
             self._log(event["text"])
+        elif kind == "picker_started":
+            self.picker_status.set(f"采集中：{event['output']}")
+        elif kind == "picker_finished":
+            result = event["result"]
+            succeeded = result.get("status") == "completed"
+            detail = "原始证据已保存；尚未导入或人工复核。" if succeeded else (
+                f"采集未完成：{result.get('reason', '未知')}；选择器可能仍打开，请检查设备。")
+            self.picker_status.set(f"{detail} 目录：{event['output']}")
+            self.status.set(detail)
+            self.badge.configure(text="采集完成" if succeeded else "采集未完成")
+            self._log(detail)
+        elif kind == "event_check_finished":
+            result = event["result"]
+            if result.get("status") == "completed" and result.get("returned_home") is True:
+                progress = result.get("progress") or {}
+                detail = f"活动进度：{progress.get('current')} / {progress.get('target')}；已核验回村。"
+            elif result.get("status") == "skipped" and result.get("returned_home") is True:
+                detail = "当前活动无可用机会；已核验回村。"
+            else:
+                detail = f"活动只读检查未完成：{result.get('reason', '未知')}；请查看当前设备画面。"
+            self.status.set(detail + f" 证据：{event['output']}")
+            self.badge.configure(text="活动检查结束")
+            self._log(detail)
         elif kind == "run_started":
             self.progress_state = {}
             self.run_label.set("当前运行 · " + event["run_id"])
@@ -703,16 +858,17 @@ class AutoCOCApp:
             if "goals_completed" in event.get("metrics", {}):
                 self.counters["goals_completed"].set(str(event["metrics"]["goals_completed"]))
             state = "running" if kind == "task_started" else event["status"]
+            status_text = display_status(state, event.get("reason", ""))
             if self.task_table.exists(task):
-                self.task_table.item(task, values=(self._task_label(task), STATUS_LABELS.get(state, state), display_reason(event.get("reason", ""))))
-            self._log(f"{self._task_label(task)} · {STATUS_LABELS.get(state, state)}  {display_reason(event.get('reason', ''))}")
+                self.task_table.item(task, values=(self._task_label(task), status_text, display_reason(event.get("reason", ""))))
+            self._log(f"{self._task_label(task)} · {status_text}  {display_reason(event.get('reason', ''))}")
         elif kind == "finished":
             payload = event["summary"]
             self._show_counts(payload)
             final_tasks = {result["task"]: result for result in payload.get("task_results", [])}
             for task in self.task_table.get_children():
                 result = final_tasks.get(task)
-                state = STATUS_LABELS.get(result["status"], result["status"]) if result else "未执行"
+                state = display_status(result["status"], result.get("reason", "")) if result else "未执行"
                 reason = display_reason(result["reason"]) if result else "运行已结束"
                 self.task_table.item(task, values=(self._task_label(task), state, reason))
             self.report_path = event["report"]
