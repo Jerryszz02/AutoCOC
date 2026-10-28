@@ -1,0 +1,312 @@
+{
+  "source": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window01-session\\frames\\00008-scout-camera-ready.png",
+  "source_sha256": "def5f9dbfaeef2fe3a6c605fa7d6aba69a532db7a1c4b359d48232b564c20f0e",
+  "max_side_len": 1280,
+  "game_inputs": 0,
+  "status": "success",
+  "texts": [
+    {
+      "text": "*MYBaseCaMp3★",
+      "confidence": 0.86162,
+      "bbox": [
+        124,
+        24,
+        568,
+        95
+      ]
+    },
+    {
+      "text": "开战倒计时",
+      "confidence": 0.9999,
+      "bbox": [
+        1162,
+        22,
+        1362,
+        78
+      ]
+    },
+    {
+      "text": "5 667 515",
+      "confidence": 0.96857,
+      "bbox": [
+        2222,
+        40,
+        2450,
+        111
+      ]
+    },
+    {
+      "text": "KEDIRI WAR 2",
+      "confidence": 0.99028,
+      "bbox": [
+        128,
+        75,
+        400,
+        121
+      ]
+    },
+    {
+      "text": "20秒",
+      "confidence": 0.99976,
+      "bbox": [
+        1190,
+        67,
+        1368,
+        164
+      ]
+    },
+    {
+      "text": "可获得的战利品：",
+      "confidence": 0.99963,
+      "bbox": [
+        124,
+        128,
+        384,
+        176
+      ]
+    },
+    {
+      "text": "10 786343",
+      "confidence": 0.94518,
+      "bbox": [
+        2188,
+        139,
+        2446,
+        205
+      ]
+    },
+    {
+      "text": "839150",
+      "confidence": 0.99998,
+      "bbox": [
+        124,
+        177,
+        306,
+        232
+      ]
+    },
+    {
+      "text": "955 054",
+      "confidence": 0.9949,
+      "bbox": [
+        122,
+        253,
+        316,
+        307
+      ]
+    },
+    {
+      "text": "48717",
+      "confidence": 0.99998,
+      "bbox": [
+        2288,
+        245,
+        2442,
+        299
+      ]
+    },
+    {
+      "text": "8754",
+      "confidence": 0.99997,
+      "bbox": [
+        120,
+        325,
+        262,
+        389
+      ]
+    },
+    {
+      "text": "110",
+      "confidence": 0.99597,
+      "bbox": [
+        1612,
+        337,
+        1640,
+        363
+      ]
+    },
+    {
+      "text": "下一个",
+      "confidence": 0.99978,
+      "bbox": [
+        2306,
+        961,
+        2462,
+        1040
+      ]
+    },
+    {
+      "text": "KEDIRIWAR 2",
+      "confidence": 0.96656,
+      "bbox": [
+        1184,
+        985,
+        1376,
+        1025
+      ]
+    },
+    {
+      "text": "1700",
+      "confidence": 0.99998,
+      "bbox": [
+        2296,
+        1026,
+        2448,
+        1099
+      ]
+    },
+    {
+      "text": "结束战斗",
+      "confidence": 0.99966,
+      "bbox": [
+        118,
+        1055,
+        250,
+        1103
+      ]
+    },
+    {
+      "text": "强化军队",
+      "confidence": 0.99043,
+      "bbox": [
+        436,
+        1055,
+        566,
+        1103
+      ]
+    },
+    {
+      "text": "强化英雄",
+      "confidence": 0.99193,
+      "bbox": [
+        874,
+        1055,
+        1004,
+        1103
+      ]
+    },
+    {
+      "text": "x11",
+      "confidence": 0.99177,
+      "bbox": [
+        276,
+        1182,
+        360,
+        1244
+      ]
+    },
+    {
+      "text": "x1",
+      "confidence": 0.99556,
+      "bbox": [
+        488,
+        1192,
+        546,
+        1240
+      ]
+    },
+    {
+      "text": "x1",
+      "confidence": 0.99728,
+      "bbox": [
+        684,
+        1190,
+        742,
+        1240
+      ]
+    },
+    {
+      "text": "x9",
+      "confidence": 0.99347,
+      "bbox": [
+        1896,
+        1184,
+        1972,
+        1246
+      ]
+    },
+    {
+      "text": "x1",
+      "confidence": 0.99588,
+      "bbox": [
+        2102,
+        1186,
+        2166,
+        1244
+      ]
+    },
+    {
+      "text": "12",
+      "confidence": 0.99999,
+      "bbox": [
+        392,
+        1358,
+        436,
+        1400
+      ]
+    },
+    {
+      "text": "8",
+      "confidence": 0.99999,
+      "bbox": [
+        596,
+        1364,
+        620,
+        1393
+      ]
+    },
+    {
+      "text": "29",
+      "confidence": 0.99998,
+      "bbox": [
+        1010,
+        1354,
+        1068,
+        1402
+      ]
+    },
+    {
+      "text": "51",
+      "confidence": 0.99993,
+      "bbox": [
+        1214,
+        1362,
+        1250,
+        1395
+      ]
+    },
+    {
+      "text": "80",
+      "confidence": 0.99999,
+      "bbox": [
+        1592,
+        1358,
+        1646,
+        1400
+      ]
+    },
+    {
+      "text": "2",
+      "confidence": 0.99999,
+      "bbox": [
+        1820,
+        1358,
+        1852,
+        1398
+      ]
+    },
+    {
+      "text": "3",
+      "confidence": 0.99998,
+      "bbox": [
+        2016,
+        1362,
+        2040,
+        1393
+      ]
+    }
+  ],
+  "all_boxes_in_original_image": true,
+  "right_half_texts": 11,
+  "elapsed_sec": 1.798
+}

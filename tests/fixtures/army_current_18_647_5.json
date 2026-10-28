@@ -1,0 +1,83 @@
+{
+  "client_version": "18.647.5",
+  "version_code": 180647006,
+  "baseline_resolution": [
+    1280,
+    720
+  ],
+  "review_method": "agent_visual",
+  "human_ground_truth": false,
+  "meaning": "redacted real My Army frames; initial calibration and independent live animation failure frame",
+  "preserved_rois_1280": [
+    [
+      195,
+      48,
+      1050,
+      110
+    ],
+    [
+      16,
+      125,
+      155,
+      190
+    ],
+    [
+      545,
+      130,
+      710,
+      190
+    ],
+    [
+      545,
+      310,
+      680,
+      370
+    ],
+    [
+      1000,
+      310,
+      1110,
+      370
+    ],
+    [
+      15,
+      180,
+      540,
+      670
+    ],
+    [
+      545,
+      185,
+      1255,
+      305
+    ],
+    [
+      545,
+      365,
+      995,
+      483
+    ],
+    [
+      1005,
+      370,
+      1250,
+      480
+    ]
+  ],
+  "frames": [
+    {
+      "name": "initial",
+      "fixture": "army_current_18_647_5_initial.png",
+      "fixture_sha256": "8b3ab2bcb7e3fac09eaccd71f95696e83c48d6097216444c70b700c82275871f",
+      "source_frame": "E:\\projects\\AutoCOC-batch01\\reports\\batch01-20261028\\new-army-1.png",
+      "source_sha256": "8e14902d85491ec7061a97886a746acc5f78b00b93a77ed9ab9bfd8fd8d5e420"
+    },
+    {
+      "name": "animated",
+      "fixture": "army_current_18_647_5_animated.png",
+      "fixture_sha256": "88d38c7cb79bd933d3e6caf7eedd8abe2c0a23e9eb53ee048882eb73c9e30253",
+      "source_frame": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v2\\frames\\00008-pilot-army-2.png",
+      "source_sha256": "36453a7bef064a5da70d3bd726fab52b7d0301c78ab94b040df057479f082032"
+    }
+  ]
+}

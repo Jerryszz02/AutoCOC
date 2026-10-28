@@ -59,9 +59,11 @@ def recognize_army_siege(
     if used == 0:
         result["unknowns"].append("empty_siege_row_not_calibrated")
         return result
-    current_client = client_version == "18.647.2"
+    version_suffix = ({"18.647.2": "18_647_2", "18.647.5": "18_647_5"}
+                      .get(client_version))
     provenance_path = CATALOG_ROOT / (
-        "siege_count_provenance_18_647_2.json" if current_client else "siege_count_provenance.json")
+        f"siege_count_provenance_{version_suffix}.json" if version_suffix
+        else "siege_count_provenance.json")
     try:
         provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -72,7 +74,20 @@ def recognize_army_siege(
         return result
     image = cv2.resize(image, _BASE, interpolation=cv2.INTER_AREA)
     sample_path = CATALOG_ROOT / (
-        "siege_count_x1_18_647_2.png" if current_client else "siege_count_x1_18_600_7.png")
+        f"siege_count_x1_{version_suffix}.png" if version_suffix
+        else "siege_count_x1_18_600_7.png")
+    if version_suffix == "18_647_5":
+        try:
+            if (provenance.get("version_code") != 180647006
+                    or provenance.get("coordinate_resolution") != [1280, 720]
+                    or template_manifest(client_version=client_version).get("version_code") != 180647006
+                    or hashlib.sha256(sample_path.read_bytes()).hexdigest() !=
+                    provenance.get("template_sha256")):
+                result["unknowns"].append("siege_count_provenance_mismatch")
+                return result
+        except OSError:
+            result["unknowns"].append("siege_count_header_sample_missing")
+            return result
     sample = cv2.imdecode(np.fromfile(sample_path, dtype=np.uint8), cv2.IMREAD_COLOR) if sample_path.is_file() else None
     if sample is None:
         result["unknowns"].append("siege_count_header_sample_missing")
@@ -415,18 +430,24 @@ def _read_count(path, provider, texts, box, native_resolution, baseline_resoluti
 
 
 def _x1_template_paths(client_version: str | None) -> tuple[Path, Path] | None:
-    if (client_version not in {"18.600.7", "18.647.2"}
+    if (client_version not in {"18.600.7", "18.647.2", "18.647.5"}
             or client_version != template_manifest(client_version=client_version).get("client")):
         return None
     if client_version == "18.600.7":
         return (CATALOG_ROOT / "siege_count_x1_18_600_7.png",
                 CATALOG_ROOT / "army_count_x1_18_600_7.png")
-    paths = (CATALOG_ROOT / "army_count_x1_glyph_18_647_2.png",
-             CATALOG_ROOT / "army_count_x1_18_647_2.png")
+    suffix = "18_647_5" if client_version == "18.647.5" else "18_647_2"
+    paths = (CATALOG_ROOT / f"army_count_x1_glyph_{suffix}.png",
+             CATALOG_ROOT / f"army_count_x1_{suffix}.png")
     try:
-        provenance = json.loads((CATALOG_ROOT / "army_count_provenance_18_647_2.json").read_text(encoding="utf8"))
+        provenance = json.loads((CATALOG_ROOT / f"army_count_provenance_{suffix}.json").read_text(encoding="utf8"))
         if (not isinstance(provenance, dict) or provenance.get("client") != client_version
                 or type(provenance.get("observed_count")) is not int or provenance["observed_count"] != 1):
+            return None
+        if (client_version == "18.647.5"
+                and (provenance.get("version_code") != 180647006
+                     or provenance.get("coordinate_resolution") != [1280, 720]
+                     or template_manifest(client_version=client_version).get("version_code") != 180647006)):
             return None
         samples = provenance.get("samples")
         if not isinstance(samples, dict):

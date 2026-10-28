@@ -7,6 +7,7 @@ unlocked unit in the current village. Templates are deliberately opt-in.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -96,7 +97,8 @@ def get_unit(unit_id: str) -> Unit | None:
 
 def template_manifest(root: Path = CATALOG_ROOT, *, client_version: str | None = None) -> dict:
     filename = "unit_templates.json" if client_version in (None, "18.600.7") else (
-        "unit_templates_18_647_2.json" if client_version == "18.647.2" else None)
+        "unit_templates_18_647_2.json" if client_version == "18.647.2" else
+        "unit_templates_18_647_5.json" if client_version == "18.647.5" else None)
     if filename is None:
         return {"client": "unknown", "templates": []}
     path = root / filename
@@ -106,6 +108,29 @@ def template_manifest(root: Path = CATALOG_ROOT, *, client_version: str | None =
     if not isinstance(data, dict) or not isinstance(data.get("templates"), list):
         raise ValueError("Invalid unit template manifest")
     return data
+
+
+def _manifest_version_verified(manifest: dict, client_version: str | None) -> bool:
+    if (client_version is None or manifest.get("client") == "unknown"
+            or manifest.get("client") != client_version):
+        return False
+    if client_version == "18.647.5":
+        return type(manifest.get("version_code")) is int and manifest["version_code"] == 180647006
+    return True
+
+
+def _entry_verified(entry: dict, path: Path, client_version: str | None) -> bool:
+    """Bind new-client identity samples to their declared version and bytes."""
+    if client_version != "18.647.5":
+        return True
+    if (entry.get("client_version") != client_version
+            or type(entry.get("version_code")) is not int
+            or entry["version_code"] != 180647006):
+        return False
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest() == entry.get("template_sha256")
+    except OSError:
+        return False
 
 
 def coverage(root: Path = CATALOG_ROOT, *, client_version: str | None = None) -> dict[str, dict[str, object]]:
@@ -139,8 +164,7 @@ def recognize_card_identity(
     left, top, right, bottom = box
     manifest = template_manifest(root, client_version=client_version)
     manifest_version = str(manifest.get("client", "unknown"))
-    version_verified = (client_version is not None and manifest_version != "unknown"
-                        and client_version == manifest_version)
+    version_verified = _manifest_version_verified(manifest, client_version)
     result: dict[str, object] = {"unit_id": None, "confidence": None,
                                   "reason": "no_supported_template", "evidence": [],
                                   "template_client_version": manifest_version,
@@ -162,7 +186,8 @@ def recognize_card_identity(
         if not isinstance(relative, str):
             continue
         template_path = (root / relative).resolve()
-        if not template_path.is_relative_to(root.resolve()) or not template_path.is_file():
+        if (not template_path.is_relative_to(root.resolve()) or not template_path.is_file()
+                or not _entry_verified(entry, template_path, client_version)):
             continue
         template = cv2.imdecode(np.fromfile(template_path, dtype=np.uint8), cv2.IMREAD_COLOR)
         if template is None or min(template.shape[:2]) < 12:
@@ -215,7 +240,7 @@ def recognize_large_hero_identity(
     result: dict[str, object] = {"unit_id": None, "confidence": None,
                                   "reason": "no_supported_template", "evidence": [],
                                   "template_client_version": version,
-                                  "version_verified": version != "unknown" and client_version == version}
+                                  "version_verified": _manifest_version_verified(manifest, client_version)}
     if not result["version_verified"]:
         result["reason"] = "client_version_unverified"
         return result
@@ -242,7 +267,8 @@ def recognize_large_hero_identity(
         if not isinstance(relative, str):
             continue
         path = (root / relative).resolve()
-        if not path.is_relative_to(root.resolve()) or not path.is_file():
+        if (not path.is_relative_to(root.resolve()) or not path.is_file()
+                or not _entry_verified(entry, path, client_version)):
             continue
         template = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
         if template is None:

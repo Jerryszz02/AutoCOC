@@ -1,0 +1,23 @@
+{
+  "kind": "batch_1_window02_budget",
+  "created_before_collection": true,
+  "client_version": "18.647.5",
+  "version_code": 180647006,
+  "prerequisite": "successful_pilot_baseline_v5_with_bounded_ocr",
+  "mode": "regular_enemy_preview_only",
+  "window_max_samples": 10,
+  "window_max_search_cost_gold": 17000,
+  "max_window_seconds": 600,
+  "max_windows": 5,
+  "total_search_cost_gold_cap": 85000,
+  "deployments": 0,
+  "formal_training": false,
+  "stop": "first failure or uncertain input; diagnose before new window; never retry paid uncertain input",
+  "source_config_sha256": "2cb8828c5e96f75c041db90b77c443830a37a5e5043daa78e873818bc5cdf7b9",
+  "config": "reports/batch01-20261028/collection-device-bounded.toml",
+  "previous_attempted_cost_gold": 1700,
+  "remaining_total_search_cost_gold_cap": 83300,
+  "window": "window02",
+  "repair": "max_side_len=1280; original failed frame replay passed; original frame coords maintained",
+  "previous_resources_change": "unattributed; new baseline v5 only"
+}

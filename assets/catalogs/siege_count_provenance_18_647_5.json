@@ -1,0 +1,16 @@
+{
+  "client": "18.647.5",
+  "version_code": 180647006,
+  "coordinate_resolution": [1280, 720],
+  "surface": "army",
+  "source_frame": "reports/batch01-20261028/new-army-1.png",
+  "source_sha256": "8e14902d85491ec7061a97886a746acc5f78b00b93a77ed9ab9bfd8fd8d5e420",
+  "crop_at_1280x720": [
+    1017,
+    374,
+    1041,
+    400
+  ],
+  "template_sha256": "d1ad6189ff9c247b709d23505574110aa11fc9e7625db346da69babef97c3459",
+  "meaning": "observed x1 count-header anchor, not a siege identity"
+}

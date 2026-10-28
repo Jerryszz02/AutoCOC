@@ -1,0 +1,144 @@
+{
+  "max_side_len": 1280,
+  "game_inputs": 0,
+  "results": [
+    {
+      "path": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window01-session\\frames\\00008-scout-camera-ready.png",
+      "sha256": "def5f9dbfaeef2fe3a6c605fa7d6aba69a532db7a1c4b359d48232b564c20f0e",
+      "scene": "enemy_village",
+      "confidence": 0.92,
+      "resources": {
+        "gold": null,
+        "elixir": null,
+        "dark_elixir": null,
+        "gems": null
+      },
+      "resource_source": null,
+      "buttons": [
+        {
+          "name": "next",
+          "text": "下一个",
+          "confidence": 0.99978,
+          "bbox": [
+            1153,
+            480,
+            1231,
+            520
+          ],
+          "point": [
+            1192,
+            500
+          ]
+        },
+        {
+          "name": "end_battle",
+          "text": "结束战斗",
+          "confidence": 0.99966,
+          "bbox": [
+            59,
+            528,
+            125,
+            552
+          ],
+          "point": [
+            92,
+            540
+          ]
+        }
+      ],
+      "elapsed_sec": 1.147
+    },
+    {
+      "path": "E:\\projects\\AutoCOC-batch01\\reports\\batch01-20261028\\collection-recovery-home-1.png",
+      "sha256": "32139f982354f54345db1ba3288abb323c345ab77a5a59eabb527275f9bbb3a9",
+      "scene": "village",
+      "confidence": 0.9,
+      "resources": {
+        "gold": 5667515,
+        "elixir": 10786343,
+        "dark_elixir": 48717,
+        "gems": 1343
+      },
+      "resource_source": "village_inventory",
+      "buttons": [
+        {
+          "name": "shop",
+          "text": "商店",
+          "confidence": 1.0,
+          "bbox": [
+            1191,
+            378,
+            1234,
+            405
+          ],
+          "point": [
+            1212,
+            391
+          ]
+        },
+        {
+          "name": "attack",
+          "text": "战斗（图标）",
+          "confidence": 1.0,
+          "bbox": [
+            45,
+            590,
+            120,
+            665
+          ],
+          "point": [
+            82,
+            627
+          ]
+        }
+      ],
+      "elapsed_sec": 1.7
+    },
+    {
+      "path": "E:\\projects\\AutoCOC-batch01\\reports\\batch01-20261028\\collection-recovery-home-2.png",
+      "sha256": "43b2faba715d2f99f545247a840fb66e006bf10bcc68c5a9e2445dfef4160c49",
+      "scene": "village",
+      "confidence": 0.9,
+      "resources": {
+        "gold": 6057482,
+        "elixir": 11166206,
+        "dark_elixir": 52897,
+        "gems": 1349
+      },
+      "resource_source": "village_inventory",
+      "buttons": [
+        {
+          "name": "shop",
+          "text": "商店",
+          "confidence": 1.0,
+          "bbox": [
+            1191,
+            378,
+            1234,
+            405
+          ],
+          "point": [
+            1212,
+            391
+          ]
+        },
+        {
+          "name": "attack",
+          "text": "战斗（图标）",
+          "confidence": 1.0,
+          "bbox": [
+            45,
+            590,
+            120,
+            665
+          ],
+          "point": [
+            82,
+            627
+          ]
+        }
+      ],
+      "elapsed_sec": 1.774
+    }
+  ]
+}

@@ -105,6 +105,13 @@ class OCRConfig:
     language: str = "en"
     confidence_threshold: float = 0.75
     roi_padding: int = 4
+    max_side_len: int | None = None
+
+    def __post_init__(self) -> None:
+        # The optional cap may reduce RapidOCR's default (2000), never enlarge it.
+        value = self.max_side_len
+        if value is not None and (type(value) is not int or not 512 <= value <= 2000):
+            raise ConfigError("ocr.max_side_len must be an integer between 512 and 2000")
 
 
 @dataclass(frozen=True)
@@ -320,6 +327,8 @@ def _load_ocr(section: dict[str, Any]) -> OCRConfig:
         language=_string(section, "language", "en"),
         confidence_threshold=_ratio(section, "confidence_threshold", 0.75),
         roi_padding=_non_negative_int(section, "roi_padding", 4),
+        max_side_len=_positive_int(section, "max_side_len", 2000)
+        if "max_side_len" in section else None,
     )
 
 

@@ -53,7 +53,8 @@ class NullOCRProvider:
 class RapidOCRProvider:
     """Use bundled ONNX models without downloading anything during inference."""
 
-    def __init__(self) -> None:
+    def __init__(self, config: OCRConfig | None = None) -> None:
+        config = config or OCRConfig()
         spec = find_spec("rapidocr")
         if spec is None or spec.origin is None:
             raise OCRError("Local OCR is unavailable. Install with: python -m pip install -e .")
@@ -69,12 +70,15 @@ class RapidOCRProvider:
         try:
             from rapidocr import RapidOCR
 
-            self._engine = RapidOCR(params={
+            params = {
                 **{key: str(path) for key, path in models.items()},
                 "Global.log_level": "warning",
                 "EngineConfig.onnxruntime.intra_op_num_threads": 4,
                 "EngineConfig.onnxruntime.inter_op_num_threads": 1,
-            })
+            }
+            if config.max_side_len is not None:
+                params["Global.max_side_len"] = config.max_side_len
+            self._engine = RapidOCR(params=params)
         except Exception as exc:
             raise OCRError(f"Unable to initialize local RapidOCR: {exc}") from exc
 
@@ -160,7 +164,7 @@ def create_ocr_provider(config: OCRConfig) -> OCRProvider:
     if provider in {"", "none", "disabled"}:
         return NullOCRProvider("OCR disabled by configuration")
     if provider in {"auto", "rapidocr"}:
-        return RapidOCRProvider()
+        return RapidOCRProvider(config)
     raise OCRError(
         f"Unsupported OCR provider {config.provider!r}. "
         "Set ocr.provider to 'auto', 'rapidocr', or 'none'."

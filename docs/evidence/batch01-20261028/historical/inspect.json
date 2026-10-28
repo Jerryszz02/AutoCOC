@@ -1,0 +1,18 @@
+{
+  "sample_count": 8,
+  "annotation_count": 8,
+  "leakage_groups": 8,
+  "near_duplicates_needing_review": [],
+  "review_status": {
+    "pending": 8
+  },
+  "client_version": {
+    "18.647.2": 8
+  },
+  "scene_labels": {
+    "missing": 8
+  },
+  "building_reviewed": 0,
+  "missing_layout_group": 0,
+  "missing_source_group": 0
+}

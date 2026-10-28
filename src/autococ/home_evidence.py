@@ -13,7 +13,6 @@ from pathlib import Path
 import struct
 
 
-VERSION = "18.647.2"
 BASELINE = [1280, 720]
 RESOURCE_NAMES = ("gold", "elixir", "dark_elixir", "gems")
 RESOURCE_ROIS = {
@@ -23,8 +22,11 @@ RESOURCE_ROIS = {
     "gems": (1130, 164, 1240, 208),
 }
 CURRENT_ICON_FILES = {
-    "village_home_battle_18_647_2.png",
-    "village_home_battle_checklist_18_647_2.png",
+    "18.647.2": frozenset({
+        "village_home_battle_18_647_2.png",
+        "village_home_battle_checklist_18_647_2.png",
+    }),
+    "18.647.5": frozenset({"village_home_battle_18_647_5.png"}),
 }
 
 
@@ -90,7 +92,9 @@ def home_navigation_verified(snapshot) -> bool:
     proof = observations.get("home_hud_proof")
     if not isinstance(proof, dict) or proof.get("method") != "current_icon_builder_four_full_ocr":
         return False
-    if (proof.get("client_version") != VERSION or proof.get("baseline_resolution") != BASELINE
+    version = proof.get("client_version")
+    if (type(version) is not str or version not in CURRENT_ICON_FILES
+            or proof.get("baseline_resolution") != BASELINE
             or proof.get("source_resolution") != observations.get("source_resolution")
             or observations.get("baseline_resolution") != BASELINE
             or observations.get("village_type") != "home"
@@ -109,7 +113,7 @@ def home_navigation_verified(snapshot) -> bool:
     if not isinstance(icon, dict) or icon != observed_icon or icon.get("type") != "home":
         return False
     template = icon.get("template")
-    if not isinstance(template, str) or Path(template).name not in CURRENT_ICON_FILES:
+    if not isinstance(template, str) or Path(template).name not in CURRENT_ICON_FILES[version]:
         return False
     catalog = Path(__file__).resolve().parents[2] / "assets" / "catalogs"
     if Path(template).resolve() != (catalog / Path(template).name).resolve():

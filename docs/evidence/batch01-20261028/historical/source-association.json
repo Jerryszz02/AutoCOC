@@ -1,0 +1,304 @@
+{
+  "kind": "historical_train_reuse_metadata_audit_v1",
+  "source_audit_path": "E:\\projects\\AutoCOC-batch01\\reports\\batch01-20261028\\historical-reuse-audit.json",
+  "source_audit_sha256": "02010edae207c2819a3960177981c610038a0cb73460e875fc7569f9dfa1ffd5",
+  "source_candidate_count": 10,
+  "allowlisted_count": 8,
+  "excluded_heldout_count": 2,
+  "new_independent_layouts_claimed": 0,
+  "allowed_existing_train_only": [
+    {
+      "sample_id": "CB-pending-20261016-031904-613827-13555b73-00014",
+      "source_run": "20261016-031904-613827-13555b73",
+      "source_group": "run:20261016-031904-613827-13555b73",
+      "verified_file_sha256": "78cfa333689ad615771f18c4ccdfb1cd2901d4f535f9472bcd3c326d2baf2601",
+      "pixel_sha256": "e47d06a5e465edb8c79cc32e69cc9dc57e9fae678c7bc56681f3ec19ea702385",
+      "client_version": "18.647.2",
+      "layout_group_id": "pending-layout:20261016-031904-613827-13555b73",
+      "associated_snapshot_assignments": [
+        {
+          "snapshot": "building-current-th-only-postb11-prototype-20261016-v1",
+          "split": "train",
+          "match_keys": [
+            "file_sha256",
+            "pixel_sha256",
+            "source_group",
+            "source_ref",
+            "source_session_or_battle_id"
+          ]
+        },
+        {
+          "snapshot": "building-current-th-only-prototype-20261016-v1",
+          "split": "train",
+          "match_keys": [
+            "file_sha256",
+            "pixel_sha256",
+            "source_group",
+            "source_ref",
+            "source_session_or_battle_id"
+          ]
+        }
+      ],
+      "decision": "allow_existing_train_only_duplicate_review"
+    },
+    {
+      "sample_id": "CB-pending-20261016-024858-453163-d946a9d8-00013",
+      "source_run": "20261016-024858-453163-d946a9d8",
+      "source_group": "run:20261016-024858-453163-d946a9d8",
+      "verified_file_sha256": "0193badfce9c065c365e1490a03b135a2fa0d428c973442c7d4d5fdf11f3f723",
+      "pixel_sha256": "20127f94364212cb1559319cf6455c5cc03020be133ab848d507f7abb2572356",
+      "client_version": "18.647.2",
+      "layout_group_id": "pending-layout:20261016-024858-453163-d946a9d8",
+      "associated_snapshot_assignments": [
+        {
+          "snapshot": "building-current-th-only-postb11-prototype-20261016-v1",
+          "split": "train",
+          "match_keys": [
+            "file_sha256",
+            "pixel_sha256",
+            "source_group",
+            "source_ref",
+            "source_session_or_battle_id"
+          ]
+        },
+        {
+          "snapshot": "building-current-th-only-prototype-20261016-v1",
+          "split": "train",
+          "match_keys": [
+            "file_sha256",
+            "pixel_sha256",
+            "source_group",
+            "source_ref",
+            "source_session_or_battle_id"
+          ]
+        }
+      ],
+      "decision": "allow_existing_train_only_duplicate_review"
+    },
+    {
+      "sample_id": "CB-pending-20261016-023418-946454-3d29fc0d-00014",
+      "source_run": "20261016-023418-946454-3d29fc0d",
+      "source_group": "run:20261016-023418-946454-3d29fc0d",
+      "verified_file_sha256": "3490929c323636c96f2b2f25a28dae119df5301ecec7b55ba5ec24427a3ba7f4",
+      "pixel_sha256": "a677cd0807889e1290e6af26bc285bc8fad3f450ea94f725bf1d70bd0989e633",
+      "client_version": "18.647.2",
+      "layout_group_id": "pending-layout:20261016-023418-946454-3d29fc0d",
+      "associated_snapshot_assignments": [
+        {
+          "snapshot": "building-current-th-only-postb11-prototype-20261016-v1",
+          "split": "train",
+          "match_keys": [
+            "file_sha256",
+            "pixel_sha256",
+            "source_group",
+            "source_ref",
+            "source_session_or_battle_id"
+          ]
+        },
+        {
+          "snapshot": "building-current-th-only-prototype-20261016-v1",
+          "split": "train",
+          "match_keys": [
+            "file_sha256",
+            "pixel_sha256",
+            "source_group",
+            "source_ref",
+            "source_session_or_battle_id"
+          ]
+        }
+      ],
+      "decision": "allow_existing_train_only_duplicate_review"
+    },
+    {
+      "sample_id": "CB-pending-20261016-021021-768621-9236d757-00014",
+      "source_run": "20261016-021021-768621-9236d757",
+      "source_group": "run:20261016-021021-768621-9236d757",
+      "verified_file_sha256": "a65b6403f09648d094521874e49a81b0ccf6216cf8eca3e4a4a33d266ab003fc",
+      "pixel_sha256": "d92c863544f87d246191ca1a81dade63f56ec33af8f681402abf8a5661f4d57d",
+      "client_version": "18.647.2",
+      "layout_group_id": "pending-layout:20261016-021021-768621-9236d757",
+      "associated_snapshot_assignments": [
+        {
+          "snapshot": "building-current-th-only-postb11-prototype-20261016-v1",
+          "split": "train",
+          "match_keys": [
+            "file_sha256",
+            "pixel_sha256",
+            "source_group",
+            "source_ref",
+            "source_session_or_battle_id"
+          ]
+        },
+        {
+          "snapshot": "building-current-th-only-prototype-20261016-v1",
+          "split": "train",
+          "match_keys": [
+            "file_sha256",
+            "pixel_sha256",
+            "source_group",
+            "source_ref",
+            "source_session_or_battle_id"
+          ]
+        }
+      ],
+      "decision": "allow_existing_train_only_duplicate_review"
+    },
+    {
+      "sample_id": "CB-pending-20261016-005304-767109-058a9bfa-00009",
+      "source_run": "20261016-005304-767109-058a9bfa",
+      "source_group": "run:20261016-005304-767109-058a9bfa",
+      "verified_file_sha256": "1013ffca99a8c95e26431d39874164d01b5e36c98c5ecbcf46d1e5a6e4ab1d74",
+      "pixel_sha256": "1e2aff080cbe79470918c127a4f0b960bfff8af9df2de8f958296c294937a635",
+      "client_version": "18.647.2",
+      "layout_group_id": "pending-layout:20261016-005304-767109-058a9bfa",
+      "associated_snapshot_assignments": [
+        {
+          "snapshot": "building-current-th-only-postb11-prototype-20261016-v1",
+          "split": "train",
+          "match_keys": [
+            "file_sha256",
+            "pixel_sha256",
+            "source_group",
+            "source_ref",
+            "source_session_or_battle_id"
+          ]
+        },
+        {
+          "snapshot": "building-current-th-only-prototype-20261016-v1",
+          "split": "train",
+          "match_keys": [
+            "file_sha256",
+            "pixel_sha256",
+            "source_group",
+            "source_ref",
+            "source_session_or_battle_id"
+          ]
+        }
+      ],
+      "decision": "allow_existing_train_only_duplicate_review"
+    },
+    {
+      "sample_id": "CB-pending-20261016-004133-128284-7bbef46c-00013",
+      "source_run": "20261016-004133-128284-7bbef46c",
+      "source_group": "run:20261016-004133-128284-7bbef46c",
+      "verified_file_sha256": "01179049163368b0b15f864dfd3e7670e3cfa3e568162cb0bba1fd42aa6dba5d",
+      "pixel_sha256": "94591370339d2a548720f424fffe77b94ef52ff357cd43aece4e54d5fc05042d",
+      "client_version": "18.647.2",
+      "layout_group_id": "pending-layout:20261016-004133-128284-7bbef46c",
+      "associated_snapshot_assignments": [
+        {
+          "snapshot": "building-current-th-only-postb11-prototype-20261016-v1",
+          "split": "train",
+          "match_keys": [
+            "file_sha256",
+            "pixel_sha256",
+            "source_group",
+            "source_ref",
+            "source_session_or_battle_id"
+          ]
+        },
+        {
+          "snapshot": "building-current-th-only-prototype-20261016-v1",
+          "split": "train",
+          "match_keys": [
+            "file_sha256",
+            "pixel_sha256",
+            "source_group",
+            "source_ref",
+            "source_session_or_battle_id"
+          ]
+        }
+      ],
+      "decision": "allow_existing_train_only_duplicate_review"
+    },
+    {
+      "sample_id": "CB-pending-20261015-235131-370965-f8aa237e-00009",
+      "source_run": "20261015-235131-370965-f8aa237e",
+      "source_group": "run:20261015-235131-370965-f8aa237e",
+      "verified_file_sha256": "cdd3eb0d55c7a53e8b87d8956f896ac5cce18a915261ebbe47cee55593e128a5",
+      "pixel_sha256": "e3b25fb94a20cda2aabaf0892add8aea071eb03afe251c6cde66d6ce85a8626b",
+      "client_version": "18.647.2",
+      "layout_group_id": "pending-layout:20261015-235131-370965-f8aa237e",
+      "associated_snapshot_assignments": [
+        {
+          "snapshot": "building-current-th-only-postb11-prototype-20261016-v1",
+          "split": "train",
+          "match_keys": [
+            "file_sha256",
+            "pixel_sha256",
+            "source_group",
+            "source_ref",
+            "source_session_or_battle_id"
+          ]
+        },
+        {
+          "snapshot": "building-current-th-only-prototype-20261016-v1",
+          "split": "train",
+          "match_keys": [
+            "file_sha256",
+            "pixel_sha256",
+            "source_group",
+            "source_ref",
+            "source_session_or_battle_id"
+          ]
+        }
+      ],
+      "decision": "allow_existing_train_only_duplicate_review"
+    },
+    {
+      "sample_id": "CB-pending-20261015-223639-910436-2bb23c8d-00010",
+      "source_run": "20261015-223639-910436-2bb23c8d",
+      "source_group": "run:20261015-223639-910436-2bb23c8d",
+      "verified_file_sha256": "750588700b046997edb17072fb9c8918bf6ff17a1a7ffbcdaaaf5d34c483ef02",
+      "pixel_sha256": "1b0c8138d07d37738f7de52f74d4195e2fff3d0724a9abee40bad2e632432076",
+      "client_version": "18.647.2",
+      "layout_group_id": "pending-layout:20261015-223639-910436-2bb23c8d",
+      "associated_snapshot_assignments": [
+        {
+          "snapshot": "building-current-th-only-postb11-prototype-20261016-v1",
+          "split": "train",
+          "match_keys": [
+            "file_sha256",
+            "pixel_sha256",
+            "source_group",
+            "source_ref",
+            "source_session_or_battle_id"
+          ]
+        },
+        {
+          "snapshot": "building-current-th-only-prototype-20261016-v1",
+          "split": "train",
+          "match_keys": [
+            "file_sha256",
+            "pixel_sha256",
+            "source_group",
+            "source_ref",
+            "source_session_or_battle_id"
+          ]
+        }
+      ],
+      "decision": "allow_existing_train_only_duplicate_review"
+    }
+  ],
+  "excluded_by_heldout_association": [
+    {
+      "sample_id": "CB-pending-20261016-001038-401680-d5107440-00014",
+      "decision": "isolate_from_training",
+      "heldout_split_conflicts": [
+        "test"
+      ]
+    },
+    {
+      "sample_id": "CB-pending-20261015-225031-213561-45e835f9-00013",
+      "decision": "isolate_from_training",
+      "heldout_split_conflicts": [
+        "val"
+      ]
+    }
+  ],
+  "heldout_snapshot_images_or_labels_opened": false,
+  "candidate_images_decoded_for_hash": 10,
+  "heldout_associated_candidates_decoded_for_hash": 2,
+  "heldout_associated_images_visually_reviewed": false,
+  "heldout_labels_or_predictions_read": false
+}

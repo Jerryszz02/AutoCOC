@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "status": "failed",
+  "session_id": "c8ac59537d84496aaba29c02afaeda4f",
+  "max_samples": 10,
+  "max_search_cost_gold": 17000,
+  "client_version": "18.647.5",
+  "samples": 0,
+  "attempts": [
+    {
+      "candidate": 1,
+      "quoted_fee_gold": 1700,
+      "fee_evidence": {
+        "frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window01-session\\frames\\00003-collection-menu.png",
+        "frame_sha256": "daf0f211c05ad9fe0840490a1f63d085161ed51ab672306f307273a7fbcfc024",
+        "roi_baseline": [
+          145,
+          530,
+          245,
+          573
+        ],
+        "full_ocr": {
+          "text": "1700",
+          "confidence": 0.99998
+        },
+        "independent_ocr": {
+          "text": "1700",
+          "confidence": 0.99987,
+          "bbox": [
+            145,
+            530,
+            245,
+            573
+          ]
+        }
+      },
+      "action": "find_match_regular",
+      "action_history": [
+        "find_match_regular",
+        "attack"
+      ],
+      "source_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window01-session\\frames\\00003-collection-menu.png",
+      "state": "input_uncertain",
+      "candidate_frame": null,
+      "confirmation_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window01-session\\frames\\00005-collection-first-transition.png"
+    }
+  ],
+  "quoted_confirmed_gold": 0,
+  "quoted_attempted_gold": 1700,
+  "actual_search_cost_gold": null,
+  "actual_search_cost_basis": "observed_home_gold_delta_when_available",
+  "fee_reconciled": null,
+  "home_gold_before": 5669215,
+  "home_gold_after": null,
+  "returned_home": false,
+  "reason": "Local OCR failed for E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window01-session\\frames\\00008-scout-camera-ready.png: Traceback (most recent call last):\n  File \"E:\\projects\\AutoCOC\\.venv\\Lib\\site-packages\\rapidocr\\inference_engine\\onnxruntime\\main.py\", line 98, in __call__\n    return self.session.run(self.get_output_names(), input_dict)[0]\n           ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"E:\\projects\\AutoCOC\\.venv\\Lib\\site-packages\\onnxruntime\\capi\\onnxruntime_inference_collection.py\", line 395, in run\n    return self._sess.run(output_names, input_feed, run_options)\n           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nonnxruntime.capi.onnxruntime_pybind11_state.RuntimeException: [ONNXRuntimeError] : 6 : RUNTIME_EXCEPTION : Non-zero status code returned while running ConvTranspose node. Name:'ConvTranspose.0' Status Message: bad allocation\n",
+  "manifest": "unreviewed-manifest.jsonl"
+}

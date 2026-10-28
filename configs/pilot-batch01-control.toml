@@ -1,0 +1,24 @@
+# Batch 0 control specification. Current-version battle execution is not accepted.
+# Run baseline capture only with an explicit machine-specific --config.
+[runtime]
+dry_run = true
+step_timeout_sec = 10
+task_timeout_sec = 180
+[game]
+package_name = "com.supercell.clashofclans"
+baseline_resolution = [1280, 720]
+[battle]
+strategy = "edrag_line"
+strategy_file = "strategies/single_edge.toml"
+line_execution_mode = "continuous"
+line_tactics = "single_edge"
+post_deployment_hero_skill = ""
+min_expected_resources = 300000
+max_searches = 10
+[vision_agent]
+enabled = false
+jev_enabled = false
+[stop]
+max_runs = 1
+max_duration_sec = 180
+max_failures = 1

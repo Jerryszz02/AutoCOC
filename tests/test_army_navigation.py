@@ -23,6 +23,19 @@ class CurrentSiegeNavigationTests(TestCase):
         self.assertEqual(evidence, [menu.screenshot_path])
         session.click_template.assert_not_called()
 
+    def test_18_647_5_uses_observed_free_army_entrance(self):
+        home = SceneSnapshot("village", .95, Path("new-home.png"))
+        menu = SceneSnapshot("search", .95, Path("new-menu.png"))
+        army = SceneSnapshot("training", .95, Path("new-army.png"))
+        session = Mock(client_version="18.647.5")
+        session.wait_for.side_effect = [menu, army]
+        evidence = []
+        self.assertIs(open_current_army(session, home, evidence), army)
+        self.assertEqual([call.args[1] for call in session.click.call_args_list],
+                         ["attack", "edit_army"])
+        self.assertEqual(evidence, [menu.screenshot_path])
+        session.click_template.assert_not_called()
+
     def test_missing_edit_button_never_falls_back_to_find_match(self):
         home = SceneSnapshot("village", .95, Path("home.png"))
         session = Mock(client_version="18.647.2")

@@ -14,7 +14,7 @@ import cv2
 from autococ.flow import return_to_village
 from autococ.home_evidence import home_navigation_verified
 from autococ.ocr import OCRText
-from autococ.vision import ScreenshotRecognizer
+from autococ.vision import ScreenshotRecognizer, recognize_village_type
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -79,6 +79,31 @@ class HomeEvidenceTests(unittest.TestCase):
         self.assertIsNone(shot.observations["home_hud_proof"])
         self.assertEqual({button["name"] for button in shot.observations["buttons"]}, {"attack", "shop"})
         self.assertTrue(home_navigation_verified(shot))
+
+    def test_new_client_icon_and_hidden_shop_proof_are_version_bound(self):
+        icon = cv2.imread(str(Path(__file__).resolve().parents[1] /
+                                   "assets/catalogs/village_home_battle_18_647_5.png"))
+        self.assertEqual(icon.shape[:2], (75, 75))
+        with TemporaryDirectory() as directory:
+            source = cv2.imread(str(PROMO))
+            source[570:700, 25:145] = 0
+            source[590:665, 45:120] = icon
+            frame = Path(directory) / "new-home.png"
+            self.assertTrue(cv2.imwrite(str(frame), source))
+            evidence = recognize_village_type(frame, client_version="18.647.5")
+            self.assertEqual(evidence["type"], "home")
+            self.assertEqual(Path(evidence["template"]).name,
+                             "village_home_battle_18_647_5.png")
+            other_version = recognize_village_type(frame, client_version="18.647.2")
+            self.assertNotEqual(Path(str(other_version.get("template", ""))).name,
+                                "village_home_battle_18_647_5.png")
+            shot = self._recognize(frame, version="18.647.5")
+            self.assertEqual(shot.scene, "village")
+            self.assertTrue(home_navigation_verified(shot))
+            self.assertEqual(shot.observations["home_hud_proof"]["client_version"], "18.647.5")
+            observations = deepcopy(shot.observations)
+            observations["home_hud_proof"]["client_version"] = "18.647.2"
+            self.assertFalse(home_navigation_verified(replace(shot, observations=observations)))
 
     def test_one_low_full_ocr_row_requires_matching_independent_line(self):
         shot, provider = self._recognize_low()
@@ -191,6 +216,7 @@ class HomeEvidenceTests(unittest.TestCase):
             ("missing_attack", lambda o: o.__setitem__("buttons", [])),
             ("duplicate_attack", lambda o: o["buttons"].append(deepcopy(o["buttons"][0]))),
             ("version", lambda o: o["home_hud_proof"].__setitem__("client_version", "18.600.7")),
+            ("malformed_version", lambda o: o["home_hud_proof"].__setitem__("client_version", [])),
             ("roi", lambda o: o["home_hud_proof"]["builder"].__setitem__("bbox", [0, 0, 20, 20])),
             ("template", lambda o: o["home_hud_proof"].__setitem__("attack_template_sha256", "0" * 64)),
             ("frame_hash", lambda o: o["home_hud_proof"].__setitem__("frame_sha256", "0" * 64)),

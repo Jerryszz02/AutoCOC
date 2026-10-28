@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "report_kind": "unassigned_candidate_coverage_preflight",
+  "diagnostic_only": true,
+  "candidate_pool_only": true,
+  "task": "building",
+  "building_scope": [
+    "town_hall",
+    "air_defense"
+  ],
+  "seed": 42,
+  "source_validation": {
+    "valid": true,
+    "image_hashes_and_pixels_verified": true
+  },
+  "candidate_inventory": {
+    "samples": 8,
+    "annotations": 8,
+    "definite_independent_groups": 8,
+    "manifest_review_status": {
+      "pending": 8
+    },
+    "manifest_review_methods": {
+      "agent_visual": 8
+    },
+    "annotation_review_methods": {
+      "agent_visual": 8
+    },
+    "client_versions": {
+      "18.647.2": 8
+    }
+  },
+  "classes": {
+    "town_hall": {
+      "candidate_positives": {
+        "positive_images": 8,
+        "positive_instances": 8,
+        "independent_groups": 8
+      },
+      "reviewed_complete": {
+        "images": 0,
+        "independent_groups": 0,
+        "meaning": "annotation-side reviewed completeness declaration only; not formal eligibility"
+      },
+      "prototype_eligible_positives": {
+        "positive_images": 0,
+        "positive_instances": 0,
+        "independent_groups": 0,
+        "split_minimum_independent_groups": 3,
+        "split_minimum_scope": "overall independent groups required by the existing split algorithm; not a per-class-per-split or release quota",
+        "missing_independent_groups_to_split_minimum": 3
+      },
+      "prototype_eligible_complete": {
+        "images": 0,
+        "independent_groups": 0,
+        "meaning": "annotation-side reviewed completeness declaration only; not formal eligibility"
+      },
+      "formal_precondition_positives": {
+        "positive_images": 0,
+        "positive_instances": 0,
+        "independent_groups": 0,
+        "split_minimum_independent_groups": 3,
+        "split_minimum_scope": "overall independent groups required by the existing split algorithm; not a per-class-per-split or release quota",
+        "missing_independent_groups_to_split_minimum": 3
+      },
+      "formal_precondition_complete": {
+        "images": 0,
+        "independent_groups": 0,
+        "meaning": "annotation-side reviewed completeness declaration only; not formal eligibility"
+      }
+    },
+    "air_defense": {
+      "candidate_positives": {
+        "positive_images": 7,
+        "positive_instances": 19,
+        "independent_groups": 7
+      },
+      "reviewed_complete": {
+        "images": 0,
+        "independent_groups": 0,
+        "meaning": "annotation-side reviewed completeness declaration only; not formal eligibility"
+      },
+      "prototype_eligible_positives": {
+        "positive_images": 0,
+        "positive_instances": 0,
+        "independent_groups": 0,
+        "split_minimum_independent_groups": 3,
+        "split_minimum_scope": "overall independent groups required by the existing split algorithm; not a per-class-per-split or release quota",
+        "missing_independent_groups_to_split_minimum": 3
+      },
+      "prototype_eligible_complete": {
+        "images": 0,
+        "independent_groups": 0,
+        "meaning": "annotation-side reviewed completeness declaration only; not formal eligibility"
+      },
+      "formal_precondition_positives": {
+        "positive_images": 0,
+        "positive_instances": 0,
+        "independent_groups": 0,
+        "split_minimum_independent_groups": 3,
+        "split_minimum_scope": "overall independent groups required by the existing split algorithm; not a per-class-per-split or release quota",
+        "missing_independent_groups_to_split_minimum": 3
+      },
+      "formal_precondition_complete": {
+        "images": 0,
+        "independent_groups": 0,
+        "meaning": "annotation-side reviewed completeness declaration only; not formal eligibility"
+      }
+    }
+  },
+  "near_duplicate_candidates": [],
+  "qualification": {
+    "prototype": {
+      "eligible_samples": 0,
+      "eligible_independent_groups": 0,
+      "review_methods": {},
+      "client_versions": {},
+      "forecast": null,
+      "status": "no_eligible_samples",
+      "formal_eligibility_claim": false
+    },
+    "formal_preconditions": {
+      "eligible_samples": 0,
+      "eligible_independent_groups": 0,
+      "review_methods": {},
+      "client_versions": {},
+      "forecast": null,
+      "status": "no_eligible_samples",
+      "formal_eligibility_claim": false
+    }
+  },
+  "formal_success": false,
+  "snapshot_created": false,
+  "split_file_written": false,
+  "training_started": false,
+  "heldout_test_accessed": false,
+  "source_files": {
+    "root": "E:\\projects\\AutoCOC-training\\candidates\\building-th-ad-trial-20261028-v1",
+    "manifest": {
+      "path": "E:\\projects\\AutoCOC-training\\candidates\\building-th-ad-trial-20261028-v1\\manifest.jsonl",
+      "sha256": "74b33454c025efeedc2cd7adfebd641f74fbcee1b41e89aa36c8ea727857faa1"
+    },
+    "annotations": {
+      "path": "E:\\projects\\AutoCOC-training\\candidates\\building-th-ad-trial-20261028-v1\\annotations.jsonl",
+      "sha256": "ee55bb621b9c09d56cdb39cfc719dfdc11baffbd5be86cde4805ba4e8f59b058"
+    },
+    "taxonomy": {
+      "path": "E:\\projects\\AutoCOC-batch01\\training\\vision\\taxonomy.json",
+      "sha256": "2abc16713757569b6d23d981ed365d774386e1a03ffc7ba7cf52ccf273d8a053"
+    },
+    "near_duplicate_review": null
+  }
+}

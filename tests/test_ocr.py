@@ -20,7 +20,30 @@ class OCRTests(unittest.TestCase):
 
     def test_auto_initializes_real_provider(self) -> None:
         with patch("autococ.ocr.RapidOCRProvider") as provider:
-            self.assertIs(create_ocr_provider(OCRConfig()), provider.return_value)
+            config = OCRConfig(max_side_len=1280)
+            self.assertIs(create_ocr_provider(config), provider.return_value)
+            provider.assert_called_once_with(config)
+
+    def test_rapidocr_uses_optional_side_limit_without_changing_default(self) -> None:
+        from types import ModuleType
+        from unittest.mock import Mock
+        import sys
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp) / "rapidocr"
+            model_dir = root / "models"
+            model_dir.mkdir(parents=True)
+            for name in ("PP-OCRv6_det_small.onnx", "ch_ppocr_mobile_v2.0_cls_mobile.onnx",
+                         "PP-OCRv6_rec_small.onnx"):
+                (model_dir / name).touch()
+            fake = ModuleType("rapidocr")
+            fake.RapidOCR = Mock()
+            with patch("autococ.ocr.find_spec", return_value=SimpleNamespace(origin=str(root / "__init__.py"))), \
+                    patch.dict(sys.modules, {"rapidocr": fake}):
+                RapidOCRProvider(OCRConfig(max_side_len=1280))
+                self.assertEqual(fake.RapidOCR.call_args.kwargs["params"]["Global.max_side_len"], 1280)
+                RapidOCRProvider()
+                self.assertNotIn("Global.max_side_len", fake.RapidOCR.call_args.kwargs["params"])
 
     def test_missing_runtime_fails_explicitly(self) -> None:
         with patch("autococ.ocr.find_spec", return_value=None):

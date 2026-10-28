@@ -1,0 +1,24 @@
+{
+  "client_version": "18.647.5",
+  "version_code": 180647006,
+  "baseline_resolution": [
+    1280,
+    720
+  ],
+  "templates": [
+    {
+      "type": "home",
+      "state": "battle_icon",
+      "file": "village_home_battle_18_647_5.png",
+      "source_frame": "reports/batch01-20261028/initial-probe-updated/frames/00027-pilot-startup.png",
+      "source_sha256": "2f555e17ae167e1efa442c33ee2e135aa9918039c6a101f18e98254500a600fb",
+      "crop_at_1280x720": [
+        45,
+        590,
+        120,
+        665
+      ],
+      "template_sha256": "cec3e26d3f0c3a3c112f9be5bbc1ffe03612303231a10f009f50ca026903f070"
+    }
+  ]
+}

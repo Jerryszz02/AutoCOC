@@ -1,0 +1,2 @@
+# Preserve the byte hashes of this task's copied evidence on every platform.
+/docs/evidence/batch01-20261028/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

@@ -1,0 +1,145 @@
+[
+  {
+    "window": "pilot-baseline-20261028-v1",
+    "summary_path": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v1\\summary.json",
+    "summary_sha256": "c2095fc5e34236a02a1bf136a91519ade834ac488c5b2a1208b3ffd4d235fa5e",
+    "status": "failed",
+    "reason": "SceneCollectionStopped: expected_village_got_starting",
+    "client_version": "18.647.2",
+    "client_version_code": 180647003,
+    "elapsed_sec": 5.103,
+    "action_count": 0,
+    "raw_frames": [
+      {
+        "path": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v1\\frames\\00001-pilot-home-1.png",
+        "sha256": "e660512c0ba6d645952db0118ff451ac5df4925ce06ea5272f3cca66a6af3005"
+      }
+    ],
+    "source_unchanged": true,
+    "config_unchanged": true,
+    "templates_unchanged": true,
+    "catalogs_unchanged": true,
+    "resources_before": null,
+    "resources_after": null,
+    "returned_home": false,
+    "input_names": []
+  },
+  {
+    "window": "pilot-baseline-20261028-v2",
+    "summary_path": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v2\\summary.json",
+    "summary_sha256": "a56240c035228b0a2a989c61851ca4dbdffb97c4e8feb4e8ee2026af9e39b981",
+    "status": "failed",
+    "reason": "SamplingStopped: current_hero_siege_coverage_incomplete",
+    "client_version": "18.647.5",
+    "client_version_code": 180647006,
+    "elapsed_sec": 39.867,
+    "action_count": 2,
+    "raw_frames": [
+      {
+        "path": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v2\\frames\\00001-pilot-home-1.png",
+        "sha256": "9e5356b250a7fa201cf444b1105ebf6ada5fcf882a0da902a2c4cc978c82937d"
+      },
+      {
+        "path": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v2\\frames\\00002-pilot-home-2.png",
+        "sha256": "a8a416b581baad3dfeba195d15790655af71f5e4f1db13307906cef10d1cda77"
+      },
+      {
+        "path": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v2\\frames\\00003-pilot-army-menu.png",
+        "sha256": "048a4e43c4bb2ab3a169002bf1073ca768c4c7384a4b6241921439d6f2d9b6f7"
+      },
+      {
+        "path": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v2\\frames\\00004-pilot-army-menu.png",
+        "sha256": "940dc6665fd7d14163e07d5b6ddb05e38272f5b61464a0c81c041205ad47980d"
+      },
+      {
+        "path": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v2\\frames\\00005-pilot-army-open.png",
+        "sha256": "2342759efaf0c31dd31e4cbfc0624bdaa24b629a511850f47a6fa510df4e02cf"
+      },
+      {
+        "path": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v2\\frames\\00006-pilot-army-open.png",
+        "sha256": "bc1ed9863355dfd8e576c97c7384a03a2ec9303153cc65b504ac0110e6ee6a78"
+      },
+      {
+        "path": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v2\\frames\\00007-pilot-army-1.png",
+        "sha256": "85f3446b14bdcb2797d0b12a988743b540d16799715eca8f9901c1506753191a"
+      },
+      {
+        "path": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v2\\frames\\00008-pilot-army-2.png",
+        "sha256": "36453a7bef064a5da70d3bd726fab52b7d0301c78ab94b040df057479f082032"
+      }
+    ],
+    "source_unchanged": true,
+    "config_unchanged": true,
+    "templates_unchanged": true,
+    "catalogs_unchanged": true,
+    "resources_before": {
+      "gold": 5669215,
+      "elixir": 10786343,
+      "dark_elixir": 48717,
+      "gems": 1343
+    },
+    "resources_after": null,
+    "returned_home": false,
+    "input_names": [
+      "attack_menu",
+      "open_army"
+    ]
+  },
+  {
+    "window": "pilot-baseline-20261028-v3",
+    "summary_path": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v3\\summary.json",
+    "summary_sha256": "ebdf3bdaf4d38b6bd1e6a8558ce5fee982214657ea062ec69e2f7994bacb0394",
+    "status": "failed",
+    "reason": "SamplingStopped: current_hero_siege_coverage_incomplete",
+    "client_version": "18.647.5",
+    "client_version_code": 180647006,
+    "elapsed_sec": 37.687,
+    "action_count": 2,
+    "raw_frames": [
+      {
+        "path": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v3\\frames\\00001-pilot-home-1.png",
+        "sha256": "5ac04987b7eb9e646e04c157349316aa557235e22d463a4f94f1e7ffc71caa7d"
+      },
+      {
+        "path": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v3\\frames\\00002-pilot-home-2.png",
+        "sha256": "069e6cfc82ae28677b399bbf6d7b4f66340bd60a4455efccf9f581f2714f65fc"
+      },
+      {
+        "path": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v3\\frames\\00003-pilot-army-menu.png",
+        "sha256": "dbacef8554ca0bf12f47fc19d661d3fbadaab0edfde3c6a8f91cc06f7468051a"
+      },
+      {
+        "path": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v3\\frames\\00004-pilot-army-menu.png",
+        "sha256": "994c0f7d125624a93129b4d77c3ddb3f0ecb079a81c006b13066566773f4ddae"
+      },
+      {
+        "path": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v3\\frames\\00005-pilot-army-open.png",
+        "sha256": "e55b6256396211250bf594b1512fa7d3b2a4fa2099920db723d603307a201cd0"
+      },
+      {
+        "path": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v3\\frames\\00006-pilot-army-open.png",
+        "sha256": "3274151b4814d86f3b3e6b261e64a472e651360c46f0651eab0d0292d8dd9d8b"
+      },
+      {
+        "path": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v3\\frames\\00007-pilot-army-1.png",
+        "sha256": "533fd788b17a26248712b16c58ab9cea9a3a92a376b5dc597ad9be1485e2ab0d"
+      }
+    ],
+    "source_unchanged": true,
+    "config_unchanged": true,
+    "templates_unchanged": true,
+    "catalogs_unchanged": true,
+    "resources_before": {
+      "gold": 5669215,
+      "elixir": 10786343,
+      "dark_elixir": 48717,
+      "gems": 1343
+    },
+    "resources_after": null,
+    "returned_home": false,
+    "input_names": [
+      "attack_menu",
+      "open_army"
+    ]
+  }
+]

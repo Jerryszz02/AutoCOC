@@ -1,0 +1,15 @@
+{
+  "kind": "v6_failed_home_default_ocr_replay",
+  "game_inputs": 0,
+  "ocr_max_side_len": null,
+  "frame": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v6\\frames\\00001-pilot-home-1.png",
+  "elapsed_sec": 3.886,
+  "scene": "village",
+  "resources": {
+    "gold": 5996282,
+    "elixir": 11166206,
+    "dark_elixir": 52897,
+    "gems": 1349
+  },
+  "resource_source": "village_inventory"
+}
