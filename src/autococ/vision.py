@@ -16,7 +16,7 @@ from .locator import find_template, scale_box
 from .ocr import OCRProvider, OCRText, create_ocr_provider, filter_ocr_results
 from .scene import SCENE_ACCOUNT_IN_USE, SCENE_BATTLE, SCENE_BATTLE_REWARD, SCENE_CLAN_CHAT, SCENE_DISCONNECTED, SCENE_ENEMY_VILLAGE, SCENE_MAINTENANCE, SCENE_POPUP, SCENE_REQUEST, SCENE_SEARCH, SCENE_SETTLEMENT, SCENE_STARTING, SCENE_TRAINING, SCENE_UNKNOWN, SCENE_VILLAGE, SceneSnapshot, account_in_use_dialog_evidence, classify_scene_text, surrender_dialog_evidence
 from .model_vision import ModelUnavailable, SceneModel, BuildingModel
-from .home_evidence import RESOURCE_NAMES, RESOURCE_ROIS, ocr_sha256
+from .home_evidence import CURRENT_ICON_FILES, RESOURCE_NAMES, RESOURCE_ROIS, ocr_sha256
 
 
 BUTTON_LABELS: dict[str, tuple[str, ...]] = {
@@ -127,9 +127,11 @@ def recognize_village_type(screenshot_path: str | Path, *, client_version: str |
         ("home", "village_home_attack_stars.png", cv2.TM_CCOEFF_NORMED),
         ("home", "village_home_battle_18_647_2.png", cv2.TM_SQDIFF_NORMED),
         ("home", "village_home_battle_checklist_18_647_2.png", cv2.TM_SQDIFF_NORMED),
+        ("home", "village_home_battle_18_647_5.png", cv2.TM_SQDIFF_NORMED),
         ("builder_base", "village_builder_attack.png", cv2.TM_CCOEFF_NORMED),
     ):
-        if filename.endswith("_18_647_2.png") and client_version != "18.647.2":
+        if (filename.endswith(("_18_647_2.png", "_18_647_5.png"))
+                and filename not in CURRENT_ICON_FILES.get(client_version, ())):
             continue
         template = read_template(root / filename)
         if template is None or template.shape[0] > region.shape[0] or template.shape[1] > region.shape[1]:
@@ -443,10 +445,8 @@ class ScreenshotRecognizer:
                 if village_type_evidence["type"] == "home" and shop:
                     scene, confidence, reasons = SCENE_VILLAGE, .9, ["home_battle_icon", "shop_and_build_hud"]
                 elif (village_type_evidence["type"] == "home" and not shop and len(builder) == 1
-                      and self.client_version == "18.647.2"
-                      and Path(str(village_type_evidence.get("template", ""))).name in {
-                          "village_home_battle_18_647_2.png",
-                          "village_home_battle_checklist_18_647_2.png"}):
+                      and Path(str(village_type_evidence.get("template", ""))).name in
+                      CURRENT_ICON_FILES.get(self.client_version, ())):
                     with path.open("rb") as source:
                         frame_sha256 = hashlib.file_digest(source, "sha256").hexdigest()
                     anchors = _current_home_full_ocr_resources(
@@ -662,8 +662,8 @@ class ScreenshotRecognizer:
             village_type = village_type_evidence or recognize_village_type(path, client_version=self.client_version)
             observations["village_type"] = village_type["type"]
             observations["village_type_evidence"] = village_type
-            new_home_hud = str(village_type.get("template", "")).endswith((
-                "village_home_battle_18_647_2.png", "village_home_battle_checklist_18_647_2.png"))
+            new_home_hud = (Path(str(village_type.get("template", ""))).name in
+                            CURRENT_ICON_FILES.get(self.client_version, ()))
             resources, evidence = (current_home_resources if current_home_resources is not None else
                                    self._village_resources(path, texts, resolution, new_home_hud=new_home_hud))
             observations["resources"] = resources

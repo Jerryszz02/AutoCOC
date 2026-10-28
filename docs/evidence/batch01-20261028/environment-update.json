@@ -1,0 +1,19 @@
+{
+  "installed_version": "18.647.5",
+  "version_code": 180647006,
+  "raw_package_version_path": "E:\\projects\\AutoCOC-batch01\\reports\\batch01-20261028\\installed-version-updated.txt",
+  "raw_package_version_sha256": "adcb65a441d46936e84f2aa324ed63927920f2cbd25683e7f565ce012c0148bf",
+  "update_source": "official Google Play com.android.vending",
+  "user_authorized_update": true,
+  "manual_calibration_not_automated_acceptance": true,
+  "actions": [
+    "Started initially stopped MuMu instance 1",
+    "Old CoC forced update blocked HOME",
+    "Initial unscoped display tap was not a verified CoC action; subsequent store actions explicitly used display 2",
+    "Installed official update, dismissed Play Pass promotion without purchase",
+    "After ADB became unresponsive, restarted the instance started by this task",
+    "Opened army and read unit/hero info panels without changing lineup",
+    "Assisted return after failed preflight windows recorded separately"
+  ],
+  "economic_claim": "No paid-search or deployment input in calibration; manual observations are not an independent automatic accounting pass"
+}

@@ -2,7 +2,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from autococ.config import BattleConfig, VisionAgentConfig, load_config
+from autococ.config import BattleConfig, OCRConfig, VisionAgentConfig, load_config
 from autococ.errors import ConfigError
 
 
@@ -55,6 +55,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.game.baseline_resolution, (1280, 720))
             self.assertEqual(config.vision.template_threshold, 0.8)
             self.assertEqual(config.ocr.provider, "auto")
+            self.assertIsNone(config.ocr.max_side_len)
             self.assertIn("core-loop", config.profiles)
             self.assertEqual(config.battle.max_searches, 30)
             self.assertTrue(config.reporting.write_markdown)
@@ -67,6 +68,20 @@ class ConfigTests(unittest.TestCase):
 
             with self.assertRaises(ConfigError):
                 load_config(path)
+
+    def test_optional_ocr_side_limit_is_bounded_and_typed(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text("[ocr]\nmax_side_len = 1280\n", encoding="utf-8")
+            self.assertEqual(load_config(path).ocr.max_side_len, 1280)
+            for value in ("511", "2001", "true", "1280.0", '"1280"'):
+                with self.subTest(value=value):
+                    path.write_text(f"[ocr]\nmax_side_len = {value}\n", encoding="utf-8")
+                    with self.assertRaises(ConfigError):
+                        load_config(path)
+        for value in (511, 2001, True, 1280.0, "1280"):
+            with self.subTest(value=value), self.assertRaises(ConfigError):
+                OCRConfig(max_side_len=value)
 
     def test_loads_profile_and_battle_settings(self) -> None:
         with TemporaryDirectory() as tmp:

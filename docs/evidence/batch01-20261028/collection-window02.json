@@ -1,0 +1,346 @@
+{
+  "schema_version": 1,
+  "status": "completed",
+  "session_id": "bad6ed9de6cc452ebc374b245eb6651d",
+  "max_samples": 10,
+  "max_search_cost_gold": 17000,
+  "client_version": "18.647.5",
+  "samples": 10,
+  "attempts": [
+    {
+      "candidate": 1,
+      "quoted_fee_gold": 1700,
+      "fee_evidence": {
+        "frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00003-collection-menu.png",
+        "frame_sha256": "721e3926ffe1629bfed7fefeecfd2361d52f2b44d622d6aaa536d766b85625c5",
+        "roi_baseline": [
+          145,
+          530,
+          245,
+          573
+        ],
+        "full_ocr": {
+          "text": "1700",
+          "confidence": 0.99998
+        },
+        "independent_ocr": {
+          "text": "1700",
+          "confidence": 0.99987,
+          "bbox": [
+            145,
+            530,
+            245,
+            573
+          ]
+        }
+      },
+      "action": "find_match_regular",
+      "action_history": [
+        "find_match_regular",
+        "attack"
+      ],
+      "source_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00003-collection-menu.png",
+      "state": "candidate_confirmed",
+      "candidate_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00008-scout-camera-ready.png",
+      "confirmation_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00005-collection-first-transition.png"
+    },
+    {
+      "candidate": 2,
+      "quoted_fee_gold": 1700,
+      "action": "next",
+      "fee_evidence": {
+        "frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00008-scout-camera-ready.png",
+        "frame_sha256": "50a22229da624c00a9547c956226f7131653b3eba07a9191643738a87bf1a920",
+        "roi_baseline": [
+          1098,
+          515,
+          1250,
+          560
+        ],
+        "full_ocr": {
+          "text": "1700",
+          "confidence": 0.99998
+        },
+        "independent_ocr": {
+          "text": "1700",
+          "confidence": 0.99953,
+          "bbox": [
+            1098,
+            515,
+            1250,
+            560
+          ]
+        }
+      },
+      "source_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00008-scout-camera-ready.png",
+      "state": "candidate_confirmed",
+      "candidate_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00011-scout-camera-ready.png"
+    },
+    {
+      "candidate": 3,
+      "quoted_fee_gold": 1700,
+      "action": "next",
+      "fee_evidence": {
+        "frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00011-scout-camera-ready.png",
+        "frame_sha256": "bf2d967de88921e56980a851120a2b28b8069f0bf127c6cf4d6814236ba44333",
+        "roi_baseline": [
+          1098,
+          515,
+          1250,
+          560
+        ],
+        "full_ocr": {
+          "text": "1700",
+          "confidence": 0.99998
+        },
+        "independent_ocr": {
+          "text": "1700",
+          "confidence": 0.99953,
+          "bbox": [
+            1098,
+            515,
+            1250,
+            560
+          ]
+        }
+      },
+      "source_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00011-scout-camera-ready.png",
+      "state": "candidate_confirmed",
+      "candidate_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00016-scout-camera-ready.png"
+    },
+    {
+      "candidate": 4,
+      "quoted_fee_gold": 1700,
+      "action": "next",
+      "fee_evidence": {
+        "frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00016-scout-camera-ready.png",
+        "frame_sha256": "c04b0fcf09bcbc6b1cea7815555700c2dea0b9ede16e510e0a7a291423cdd538",
+        "roi_baseline": [
+          1098,
+          515,
+          1250,
+          560
+        ],
+        "full_ocr": {
+          "text": "1700",
+          "confidence": 0.99998
+        },
+        "independent_ocr": {
+          "text": "1700",
+          "confidence": 0.99953,
+          "bbox": [
+            1098,
+            515,
+            1250,
+            560
+          ]
+        }
+      },
+      "source_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00016-scout-camera-ready.png",
+      "state": "candidate_confirmed",
+      "candidate_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00019-scout-camera-ready.png"
+    },
+    {
+      "candidate": 5,
+      "quoted_fee_gold": 1700,
+      "action": "next",
+      "fee_evidence": {
+        "frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00019-scout-camera-ready.png",
+        "frame_sha256": "81fc534e1fbd758b046c474f0692d2b807a193287e8bd069f6e1adc833a63e8d",
+        "roi_baseline": [
+          1098,
+          515,
+          1250,
+          560
+        ],
+        "full_ocr": {
+          "text": "1700",
+          "confidence": 0.99998
+        },
+        "independent_ocr": {
+          "text": "1700",
+          "confidence": 0.99953,
+          "bbox": [
+            1098,
+            515,
+            1250,
+            560
+          ]
+        }
+      },
+      "source_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00019-scout-camera-ready.png",
+      "state": "candidate_confirmed",
+      "candidate_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00024-scout-camera-ready.png"
+    },
+    {
+      "candidate": 6,
+      "quoted_fee_gold": 1700,
+      "action": "next",
+      "fee_evidence": {
+        "frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00024-scout-camera-ready.png",
+        "frame_sha256": "e98b470fc7e93aae7f30b6fba1cf9008c731268e303fc5978e2b757f50c7d801",
+        "roi_baseline": [
+          1098,
+          515,
+          1250,
+          560
+        ],
+        "full_ocr": {
+          "text": "1700",
+          "confidence": 0.99998
+        },
+        "independent_ocr": {
+          "text": "1700",
+          "confidence": 0.99953,
+          "bbox": [
+            1098,
+            515,
+            1250,
+            560
+          ]
+        }
+      },
+      "source_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00024-scout-camera-ready.png",
+      "state": "candidate_confirmed",
+      "candidate_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00027-scout-camera-ready.png"
+    },
+    {
+      "candidate": 7,
+      "quoted_fee_gold": 1700,
+      "action": "next",
+      "fee_evidence": {
+        "frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00027-scout-camera-ready.png",
+        "frame_sha256": "f899cff58c01314d4670aceec486b4387b15f66242c811c095dc48722284af9e",
+        "roi_baseline": [
+          1098,
+          515,
+          1250,
+          560
+        ],
+        "full_ocr": {
+          "text": "1700",
+          "confidence": 0.99998
+        },
+        "independent_ocr": {
+          "text": "1700",
+          "confidence": 0.99953,
+          "bbox": [
+            1098,
+            515,
+            1250,
+            560
+          ]
+        }
+      },
+      "source_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00027-scout-camera-ready.png",
+      "state": "candidate_confirmed",
+      "candidate_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00032-scout-camera-ready.png"
+    },
+    {
+      "candidate": 8,
+      "quoted_fee_gold": 1700,
+      "action": "next",
+      "fee_evidence": {
+        "frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00032-scout-camera-ready.png",
+        "frame_sha256": "302bde858c448f564f38f0cb97da3592e52780d3b4cf9c63a3f4a775d5c3dbb8",
+        "roi_baseline": [
+          1098,
+          515,
+          1250,
+          560
+        ],
+        "full_ocr": {
+          "text": "1700",
+          "confidence": 0.99998
+        },
+        "independent_ocr": {
+          "text": "1700",
+          "confidence": 0.99953,
+          "bbox": [
+            1098,
+            515,
+            1250,
+            560
+          ]
+        }
+      },
+      "source_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00032-scout-camera-ready.png",
+      "state": "candidate_confirmed",
+      "candidate_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00035-scout-camera-ready.png"
+    },
+    {
+      "candidate": 9,
+      "quoted_fee_gold": 1700,
+      "action": "next",
+      "fee_evidence": {
+        "frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00035-scout-camera-ready.png",
+        "frame_sha256": "0d7534b1ae6676f8869c7db9894a8dc1f0c3dbc32d8668ac2823273b2db9883a",
+        "roi_baseline": [
+          1098,
+          515,
+          1250,
+          560
+        ],
+        "full_ocr": {
+          "text": "1700",
+          "confidence": 0.99998
+        },
+        "independent_ocr": {
+          "text": "1700",
+          "confidence": 0.99953,
+          "bbox": [
+            1098,
+            515,
+            1250,
+            560
+          ]
+        }
+      },
+      "source_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00035-scout-camera-ready.png",
+      "state": "candidate_confirmed",
+      "candidate_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00040-scout-camera-ready.png"
+    },
+    {
+      "candidate": 10,
+      "quoted_fee_gold": 1700,
+      "action": "next",
+      "fee_evidence": {
+        "frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00040-scout-camera-ready.png",
+        "frame_sha256": "cd455e8bd149c7d144c3daceb583cafe709927eb9474843ffa9dfc5e738f82db",
+        "roi_baseline": [
+          1098,
+          515,
+          1250,
+          560
+        ],
+        "full_ocr": {
+          "text": "1700",
+          "confidence": 0.99998
+        },
+        "independent_ocr": {
+          "text": "1700",
+          "confidence": 0.99953,
+          "bbox": [
+            1098,
+            515,
+            1250,
+            560
+          ]
+        }
+      },
+      "source_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00040-scout-camera-ready.png",
+      "state": "candidate_confirmed",
+      "candidate_frame": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window02-session\\frames\\00043-scout-camera-ready.png"
+    }
+  ],
+  "quoted_confirmed_gold": 17000,
+  "quoted_attempted_gold": 17000,
+  "actual_search_cost_gold": 17000,
+  "actual_search_cost_basis": "observed_home_gold_delta_when_available",
+  "fee_reconciled": true,
+  "home_gold_before": 6057482,
+  "home_gold_after": 6040482,
+  "returned_home": true,
+  "reason": "Sample limit or safe stopping condition reached",
+  "manifest": "unreviewed-manifest.jsonl"
+}

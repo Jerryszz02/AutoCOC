@@ -7,7 +7,7 @@ def open_current_army(session, home, evidence: list):
     """Use the current client's observed army entrance without starting a match."""
     if home.scene != "village":
         raise FlowError("Army navigation requires a recognized village")
-    if getattr(session, "client_version", None) == "18.647.2":
+    if getattr(session, "client_version", None) in {"18.647.2", "18.647.5"}:
         session.click(home, "attack")
         menu = session.wait_for({"search"}, timeout_sec=30, label="army-menu")
         evidence.append(menu.screenshot_path)

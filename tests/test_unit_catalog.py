@@ -3,6 +3,7 @@ import hashlib
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -16,6 +17,58 @@ from autococ.vision import ScreenshotRecognizer
 
 
 class UnitCatalogTests(unittest.TestCase):
+    def test_18_647_5_identity_samples_reject_wrong_entry_version_code_or_hash(self):
+        root = Path(__file__).parents[1]
+        path = root / "tests/fixtures/army_current_18_647_5_initial.png"
+        image = cv2.imread(str(path))
+        manifest = template_manifest(client_version="18.647.5")
+        card = next(entry for entry in manifest["templates"]
+                    if entry["unit_id"] == "electro_dragon")
+        hero = [entry for entry in manifest["templates"]
+                if entry["unit_id"] == "grand_warden"]
+        for field, bad in (("client_version", "18.647.2"),
+                           ("version_code", 180647003),
+                           ("template_sha256", "0" * 64)):
+            with self.subTest(field=field):
+                wrong_card = {**manifest, "templates": [{**card, field: bad}]}
+                with patch("autococ.unit_catalog.template_manifest", return_value=wrong_card):
+                    observed = recognize_card_identity(
+                        image, (557, 194, 655, 291), "troop", surface="army",
+                        client_version="18.647.5")
+                self.assertIsNone(observed["unit_id"])
+                wrong_hero = {**manifest, "templates": [
+                    {**entry, field: bad} if entry["role"] == "face" else entry
+                    for entry in hero]}
+                with patch("autococ.unit_catalog.template_manifest", return_value=wrong_hero):
+                    observed = recognize_large_hero_identity(
+                        image, (23, 185, 147, 668), client_version="18.647.5")
+                self.assertIsNone(observed["unit_id"])
+        wrong_manifest = {**manifest, "version_code": 180647003}
+        with patch("autococ.unit_catalog.template_manifest", return_value=wrong_manifest):
+            self.assertFalse(recognize_card_identity(
+                image, (557, 194, 655, 291), "troop", surface="army",
+                client_version="18.647.5")["version_verified"])
+            self.assertFalse(recognize_large_hero_identity(
+                image, (23, 185, 147, 668),
+                client_version="18.647.5")["version_verified"])
+        self.assertEqual(template_manifest(client_version="18.647.6")["client"], "unknown")
+
+    def test_18_647_5_animated_face_is_reproducible_from_portable_fixture(self):
+        root = Path(__file__).parents[1]
+        entry = next(item for item in template_manifest(client_version="18.647.5")["templates"]
+                     if item["path"] == "units/minion_prince_army_face_pose3_18_647_5.png")
+        fixture = root / entry["portable_fixture"]
+        self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(),
+                         entry["portable_fixture_sha256"])
+        left, top, right, bottom = entry["portable_crop_at_1280"]
+        crop = cv2.imread(str(fixture))[top:bottom, left:right]
+        self.assertEqual(hashlib.sha256(crop.tobytes()).hexdigest(),
+                         entry["portable_crop_pixel_sha256"])
+        template = cv2.imread(str(root / "assets/catalogs" / entry["path"]))
+        self.assertTrue(np.array_equal(crop, template))
+        self.assertEqual(hashlib.sha256((root / "assets/catalogs" / entry["path"]).read_bytes()).hexdigest(),
+                         entry["template_sha256"])
+
     def test_current_gray_lightning_picker_sample_and_anonymous_frames(self):
         root = Path(__file__).parents[1]
         metadata = json.loads((root / "tests/fixtures/lightning_info_18_647_2.json")

@@ -1,0 +1,45 @@
+{
+  "kind": "first_collection_failure_recovery",
+  "original_collection_status": "failed",
+  "original_rewritten": false,
+  "automatic_samples": 0,
+  "attempted_searches": 1,
+  "quoted_fee_gold": 1700,
+  "automatic_fee_reconciled": false,
+  "manual_recovery": {
+    "action": "end_battle",
+    "count": 1,
+    "troops_deployed": 0,
+    "note": "Preview timed out before manual recovery; visible battle timer was active, destruction0 and all ordinary troop counts intact. This is manual assistance, not an automatic returned_home result."
+  },
+  "observed_home_after_recovery": {
+    "gold": 5667515,
+    "elixir": 10786343,
+    "dark_elixir": 48717,
+    "gems": 1343
+  },
+  "observed_gold_before": 5669215,
+  "observed_gold_difference": 1700,
+  "basis": "preserved recovery HOME frame visual review plus independent later bounded OCR replay; no second contemporaneous HOME frame",
+  "frames": [
+    {
+      "path": "E:\\projects\\AutoCOC-batch01\\reports\\batch01-20261028\\collection-failure-current.png",
+      "sha256": "0a430ece89d66b37005c1608625cc14c334c0623ec39d0d9170dd7fd92e59c3e"
+    },
+    {
+      "path": "E:\\projects\\AutoCOC-batch01\\reports\\batch01-20261028\\collection-recovery-home-1.png",
+      "sha256": "32139f982354f54345db1ba3288abb323c345ab77a5a59eabb527275f9bbb3a9"
+    },
+    {
+      "path": "E:\\projects\\AutoCOC-batch01\\reports\\batch01-20261028\\collection-recovery-home-2.png",
+      "sha256": "43b2faba715d2f99f545247a840fb66e006bf10bcc68c5a9e2445dfef4160c49"
+    }
+  ],
+  "later_home_resources": {
+    "gold": 6057482,
+    "elixir": 11166206,
+    "dark_elixir": 52897,
+    "gems": 1349
+  },
+  "later_difference": "unattributed; not program earnings; v5 establishes a fresh baseline"
+}

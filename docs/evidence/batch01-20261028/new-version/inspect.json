@@ -1,0 +1,51 @@
+{
+  "sample_count": 36,
+  "annotation_count": 36,
+  "leakage_groups": 5,
+  "near_duplicates_needing_review": [
+    {
+      "sample_ids": [
+        "C-07f16c846c9c44ce92f6781bd2a3efe0-03",
+        "C-d1bf67322e3748a69d9eed46e889c6cd-05"
+      ],
+      "dhash_distance": 5,
+      "status": "needs_review"
+    },
+    {
+      "sample_ids": [
+        "C-d1bf67322e3748a69d9eed46e889c6cd-04",
+        "C-4c5bf5a6be78400c9f5d9892aa64d34d-02"
+      ],
+      "dhash_distance": 2,
+      "status": "needs_review"
+    },
+    {
+      "sample_ids": [
+        "C-d1bf67322e3748a69d9eed46e889c6cd-10",
+        "C-4c5bf5a6be78400c9f5d9892aa64d34d-06"
+      ],
+      "dhash_distance": 5,
+      "status": "needs_review"
+    },
+    {
+      "sample_ids": [
+        "C-d1bf67322e3748a69d9eed46e889c6cd-10",
+        "C-4c5bf5a6be78400c9f5d9892aa64d34d-07"
+      ],
+      "dhash_distance": 5,
+      "status": "needs_review"
+    }
+  ],
+  "review_status": {
+    "pending": 36
+  },
+  "client_version": {
+    "18.647.5": 36
+  },
+  "scene_labels": {
+    "missing": 36
+  },
+  "building_reviewed": 0,
+  "missing_layout_group": 0,
+  "missing_source_group": 0
+}

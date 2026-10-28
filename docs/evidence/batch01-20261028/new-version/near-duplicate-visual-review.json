@@ -1,0 +1,168 @@
+{
+  "kind": "batch01_new_candidate_near_duplicate_visual_review",
+  "inspect_source": "E:\\projects\\AutoCOC-batch01\\docs\\evidence\\batch01-20261028\\new-version\\inspect.json",
+  "inspect_sha256": "0eead36e3e7bd715f1e8521d60b48af8365d85af7ee9fa4acb9694936403b907",
+  "manifest_source": "E:\\projects\\AutoCOC-training\\candidates\\building-th-ad-186475-trial-20261028-v1\\manifest.jsonl",
+  "manifest_sha256": "b01b731170e0ed6ee34cea575609358a1dd86fb7e3fe922676e2e593b65007aa",
+  "review_method": "agent_visual",
+  "human_review": false,
+  "pairs_reviewed": 4,
+  "dataset_mutated": false,
+  "split_mutated": false,
+  "original_inspect_mutated": false,
+  "reviews": [
+    {
+      "sample_ids": [
+        "C-07f16c846c9c44ce92f6781bd2a3efe0-03",
+        "C-d1bf67322e3748a69d9eed46e889c6cd-05"
+      ],
+      "dhash_distance": 5,
+      "source_evidence": [
+        {
+          "sample_id": "C-07f16c846c9c44ce92f6781bd2a3efe0-03",
+          "file_path": "E:\\projects\\AutoCOC-training\\candidates\\building-th-ad-186475-trial-20261028-v1\\raw\\window04\\C-07f16c846c9c44ce92f6781bd2a3efe0-03.png",
+          "raw_source_path": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window04-session\\frames\\00018-scout-camera-ready.png",
+          "file_sha256": "d0d2ec50ff64c843c6d1eba6d4ffd4f0eb92c76001fd64ae7712d1bdbeef8871",
+          "width": 2560,
+          "height": 1440
+        },
+        {
+          "sample_id": "C-d1bf67322e3748a69d9eed46e889c6cd-05",
+          "file_path": "E:\\projects\\AutoCOC-training\\candidates\\building-th-ad-186475-trial-20261028-v1\\raw\\window05\\C-d1bf67322e3748a69d9eed46e889c6cd-05.png",
+          "raw_source_path": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window05-session\\frames\\00023-scout-camera-ready.png",
+          "file_sha256": "1c5cede35ea80959885260f97b879b3cb5e543cde3900d605ee155e2646cbff3",
+          "width": 2560,
+          "height": 1440
+        }
+      ],
+      "visual_assessment": "visibly_different_layouts",
+      "assessment_zh": "可见墙体与关键塔分布明显不同",
+      "basis_zh": [
+        "两图都有菱形外轮廓，但内部墙分区不同：A由较长的平行条带/大隔间围绕中心组成；B上半部为大北部隔间、下方接多个左右对称的小菱形隔间。",
+        "A大本营位于图中央核心，部落城堡紧邻其下方；B大本营明显位于核心的下半部，城堡更靠底部顶点。两者相对于墙交点的关系不同。",
+        "A四个绿金防空分布在核心外围较远处，B四个蓝金防空位于上中部左右成对的小隔间内；差异不只是建筑等级或颜色。"
+      ],
+      "review_method": "agent_visual",
+      "human_review": false,
+      "formal_independence_confirmed": false,
+      "original_near_duplicate_flag_preserved": true,
+      "split_decision": "none; root owner decides conservative grouping",
+      "limitations": "Only these flagged pairs were compared visually using the complete original 2560x1440 files; rendering scaled to2048x1152. No player-name difference was used. No claim that all36 samples are independent, or that all shared layout ancestry is ruled out."
+    },
+    {
+      "sample_ids": [
+        "C-d1bf67322e3748a69d9eed46e889c6cd-04",
+        "C-4c5bf5a6be78400c9f5d9892aa64d34d-02"
+      ],
+      "dhash_distance": 2,
+      "source_evidence": [
+        {
+          "sample_id": "C-d1bf67322e3748a69d9eed46e889c6cd-04",
+          "file_path": "E:\\projects\\AutoCOC-training\\candidates\\building-th-ad-186475-trial-20261028-v1\\raw\\window05\\C-d1bf67322e3748a69d9eed46e889c6cd-04.png",
+          "raw_source_path": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window05-session\\frames\\00020-scout-camera-ready.png",
+          "file_sha256": "be7231db3ed03adf5334ad21a3e333fc745c7f4ea5f10a77a6f89db1346e6c3b",
+          "width": 2560,
+          "height": 1440
+        },
+        {
+          "sample_id": "C-4c5bf5a6be78400c9f5d9892aa64d34d-02",
+          "file_path": "E:\\projects\\AutoCOC-training\\candidates\\building-th-ad-186475-trial-20261028-v1\\raw\\window06\\C-4c5bf5a6be78400c9f5d9892aa64d34d-02.png",
+          "raw_source_path": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window06-session\\frames\\00011-scout-camera-ready.png",
+          "file_sha256": "13be23f27dbe99bfe60db9c34fb6745b1d43e69e160bad11313ec9b24c82f169",
+          "width": 2560,
+          "height": 1440
+        }
+      ],
+      "visual_assessment": "visibly_different_layouts",
+      "assessment_zh": "可见墙体与关键塔分布明显不同",
+      "basis_zh": [
+        "虽然dHash距离仅2且外轮廓相近，A顶部是一个含多类建筑的大菱形隔间；B顶部两侧有分段开口/短墙，内部另有纵向小隔间与走廊，墙交点拓扑不同。",
+        "A部落城堡在大本营左侧，单体高柱在其左近；B城堡在大本营正下方，高柱在大本营正上方，核心建筑与墙分区的关系明显不同。",
+        "A防空位于上左/上右与下左/下右的外侧区域；B上方两座在左右翼中段，下方两座更靠中轴。不是仅换墙颜色或改变缩放可对齐。"
+      ],
+      "review_method": "agent_visual",
+      "human_review": false,
+      "formal_independence_confirmed": false,
+      "original_near_duplicate_flag_preserved": true,
+      "split_decision": "none; root owner decides conservative grouping",
+      "limitations": "Only these flagged pairs were compared visually using the complete original 2560x1440 files; rendering scaled to2048x1152. No player-name difference was used. No claim that all36 samples are independent, or that all shared layout ancestry is ruled out."
+    },
+    {
+      "sample_ids": [
+        "C-d1bf67322e3748a69d9eed46e889c6cd-10",
+        "C-4c5bf5a6be78400c9f5d9892aa64d34d-06"
+      ],
+      "dhash_distance": 5,
+      "source_evidence": [
+        {
+          "sample_id": "C-d1bf67322e3748a69d9eed46e889c6cd-10",
+          "file_path": "E:\\projects\\AutoCOC-training\\candidates\\building-th-ad-186475-trial-20261028-v1\\raw\\window05\\C-d1bf67322e3748a69d9eed46e889c6cd-10.png",
+          "raw_source_path": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window05-session\\frames\\00038-scout-camera-ready.png",
+          "file_sha256": "c2aa52c228c96edc9ad0bbb439181dd6c590d9bd354915b4f420be5734f65f4b",
+          "width": 2560,
+          "height": 1440
+        },
+        {
+          "sample_id": "C-4c5bf5a6be78400c9f5d9892aa64d34d-06",
+          "file_path": "E:\\projects\\AutoCOC-training\\candidates\\building-th-ad-186475-trial-20261028-v1\\raw\\window06\\C-4c5bf5a6be78400c9f5d9892aa64d34d-06.png",
+          "raw_source_path": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window06-session\\frames\\00028-scout-camera-ready.png",
+          "file_sha256": "f34f6b207995da702be781855e0dc4afd23a5222c99a57a3aa88b70befcb1686",
+          "width": 2560,
+          "height": 1440
+        }
+      ],
+      "visual_assessment": "visibly_different_layouts",
+      "assessment_zh": "可见墙体与关键塔分布明显不同",
+      "basis_zh": [
+        "A核心只由一圈较宽的菱形墙域围出，周边有多个独立相连的侧隔间；B大本营周围可见两层平行蓝墙形成的隔离带，中心与周边连接关系不同。",
+        "A部落城堡位于核心正下较远位置，B城堡在大本营左下相邻隔间；A单体高柱在左侧翼，B在左上翼。",
+        "A右上大炮与右下防御呈对角分布；B北部有白墙围成的独立隔间，北部防御/资源排列与A不同。此判断依据墙体和塔位置，不使用玩家名。"
+      ],
+      "review_method": "agent_visual",
+      "human_review": false,
+      "formal_independence_confirmed": false,
+      "original_near_duplicate_flag_preserved": true,
+      "split_decision": "none; root owner decides conservative grouping",
+      "limitations": "Only these flagged pairs were compared visually using the complete original 2560x1440 files; rendering scaled to2048x1152. No player-name difference was used. No claim that all36 samples are independent, or that all shared layout ancestry is ruled out."
+    },
+    {
+      "sample_ids": [
+        "C-d1bf67322e3748a69d9eed46e889c6cd-10",
+        "C-4c5bf5a6be78400c9f5d9892aa64d34d-07"
+      ],
+      "dhash_distance": 5,
+      "source_evidence": [
+        {
+          "sample_id": "C-d1bf67322e3748a69d9eed46e889c6cd-10",
+          "file_path": "E:\\projects\\AutoCOC-training\\candidates\\building-th-ad-186475-trial-20261028-v1\\raw\\window05\\C-d1bf67322e3748a69d9eed46e889c6cd-10.png",
+          "raw_source_path": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window05-session\\frames\\00038-scout-camera-ready.png",
+          "file_sha256": "c2aa52c228c96edc9ad0bbb439181dd6c590d9bd354915b4f420be5734f65f4b",
+          "width": 2560,
+          "height": 1440
+        },
+        {
+          "sample_id": "C-4c5bf5a6be78400c9f5d9892aa64d34d-07",
+          "file_path": "E:\\projects\\AutoCOC-training\\candidates\\building-th-ad-186475-trial-20261028-v1\\raw\\window06\\C-4c5bf5a6be78400c9f5d9892aa64d34d-07.png",
+          "raw_source_path": "E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window06-session\\frames\\00032-scout-camera-ready.png",
+          "file_sha256": "9fc050d5befc59584096e3126521a9039000e3eb731bc9c55f8b6a42f2978aa4",
+          "width": 2560,
+          "height": 1440
+        }
+      ],
+      "visual_assessment": "visibly_different_layouts",
+      "assessment_zh": "可见墙体与关键塔分布明显不同",
+      "basis_zh": [
+        "A中央菱形核心较小，周围有多个独立的侧格与一个顶部隔间；B中央较大菱形区包含大本营及周围防御，左右长墙/通道与顶部窄隔间的连接不同。",
+        "A部落城堡在大本营下方远处，B在大本营左侧近处；A单体高柱在左翼，B在右下翼。核心相对布局不同。",
+        "B四座防空更接近上/左/右/下四向分布，A四座防空为偏斜的两列排列；同时比较墙交点后，不支持仅由平移、缩放或建筑外观变化造成相似。"
+      ],
+      "review_method": "agent_visual",
+      "human_review": false,
+      "formal_independence_confirmed": false,
+      "original_near_duplicate_flag_preserved": true,
+      "split_decision": "none; root owner decides conservative grouping",
+      "limitations": "Only these flagged pairs were compared visually using the complete original 2560x1440 files; rendering scaled to2048x1152. No player-name difference was used. No claim that all36 samples are independent, or that all shared layout ancestry is ruled out."
+    }
+  ],
+  "overall": "Four flagged pairs have visible structural differences. This is a provisional agent visual comparison, not an independent-layout or train/val/test release decision."
+}

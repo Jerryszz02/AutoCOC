@@ -1,0 +1,12 @@
+{
+  "kind": "version_metadata_guard_regression",
+  "trigger": "unknown version and missing version code both produced None == None, allowing gate; float code also compared equal to integer",
+  "before": {
+    "failed": 3,
+    "passed": 1,
+    "report_sha256": "8e23c95441786ee054a341cdb1ff93cd61caf38e83508b648f01e1e16c7e7d95"
+  },
+  "fix": "require whitelisted version plus exact integer version code before observation/input",
+  "after": "included in final256-pass regression",
+  "game_inputs_for_regression": 0
+}

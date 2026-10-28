@@ -1,0 +1,39 @@
+{
+  "client": "18.647.5",
+  "version_code": 180647006,
+  "surface": "army",
+  "observed_count": 1,
+  "reviewer_kind": "agent_visual",
+  "human_reviewed": false,
+  "coordinate_resolution": [
+    1280,
+    720
+  ],
+  "resize_interpolation": "INTER_AREA",
+  "samples": {
+    "army_count_x1_glyph_18_647_5.png": {
+      "sha256": "903948fb33f323d2f50dde5fb95118e24682f08203bfe75be69643685987b0eb",
+      "source_frame": "reports/batch01-20261028/new-army-1.png",
+      "source_sha256": "8e14902d85491ec7061a97886a746acc5f78b00b93a77ed9ab9bfd8fd8d5e420",
+      "source_bbox_1280": [
+        662,
+        196,
+        685,
+        219
+      ],
+      "role": "independent_glyph"
+    },
+    "army_count_x1_18_647_5.png": {
+      "sha256": "defae41a3a0b6d2facb54a8eafb90d5b39843421a68ceae6f30e4035c4f1fe7a",
+      "source_frame": "reports/batch01-20261028/new-army-1.png",
+      "source_sha256": "8e14902d85491ec7061a97886a746acc5f78b00b93a77ed9ab9bfd8fd8d5e420",
+      "source_bbox_1280": [
+        661,
+        195,
+        703,
+        221
+      ],
+      "role": "whole_header"
+    }
+  }
+}

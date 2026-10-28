@@ -1,16 +1,20 @@
 from dataclasses import replace
 import json
+import hashlib
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import cv2
 import numpy as np
 
-from autococ.army_manifest import recognize_army_heroes, recognize_army_manifest, recognize_army_siege
+from autococ.army_manifest import _x1_template_paths, recognize_army_heroes, recognize_army_manifest, recognize_army_siege
 from autococ.army_editor import recognize_hero_loadout, visual_fingerprint_matches
 from autococ.ocr import OCRText, RapidOCRProvider
+from autococ.picker_collection import _army_counts, _roster_signature
+from autococ.unit_catalog import get_unit, template_manifest
+from autococ.vision import ScreenshotRecognizer
 
 
 ANCHORS = [OCRText("我的军队", .99, (222, 63, 294, 90)),
@@ -19,6 +23,80 @@ ANCHORS = [OCRText("我的军队", .99, (222, 63, 294, 90)),
 
 
 class ArmyManifestTests(unittest.TestCase):
+    def test_18_647_5_quantity_provenance_rejects_wrong_code_geometry_and_hash(self):
+        root = Path(__file__).resolve().parents[1] / "assets/catalogs"
+        names = ("army_count_x1_glyph_18_647_5.png", "army_count_x1_18_647_5.png",
+                 "siege_count_x1_18_647_5.png", "army_count_provenance_18_647_5.json",
+                 "siege_count_provenance_18_647_5.json")
+        fixture = Path(__file__).parent / "fixtures/army_current_18_647_5_initial.png"
+        with TemporaryDirectory() as directory:
+            catalog = Path(directory)
+            for name in names:
+                (catalog / name).write_bytes((root / name).read_bytes())
+            with patch("autococ.army_manifest.CATALOG_ROOT", catalog):
+                self.assertIsNotNone(_x1_template_paths("18.647.5"))
+                for field, bad in (("version_code", 180647003),
+                                   ("coordinate_resolution", [1440, 720])):
+                    with self.subTest(field=field):
+                        p = catalog / "army_count_provenance_18_647_5.json"
+                        good = json.loads((root / p.name).read_text(encoding="utf8"))
+                        p.write_text(json.dumps({**good, field: bad}), encoding="utf8")
+                        self.assertIsNone(_x1_template_paths("18.647.5"))
+                for field, bad in (("version_code", 180647003),
+                                   ("coordinate_resolution", [1440, 720]),
+                                   ("template_sha256", "0" * 64)):
+                    with self.subTest(siege_field=field):
+                        p = catalog / "siege_count_provenance_18_647_5.json"
+                        good = json.loads((root / p.name).read_text(encoding="utf8"))
+                        p.write_text(json.dumps({**good, field: bad}), encoding="utf8")
+                        result = recognize_army_siege(
+                            fixture, Mock(), {"used": 3, "capacity": 3},
+                            client_version="18.647.5")
+                        self.assertIn("siege_count_provenance_mismatch", result["unknowns"])
+
+    def test_18_647_5_real_army_frames_bind_complete_roster_across_hero_animation(self):
+        fixture_dir = Path(__file__).parent / "fixtures"
+        metadata = json.loads((fixture_dir / "army_current_18_647_5.json").read_text(encoding="utf8"))
+        self.assertEqual((metadata["client_version"], metadata["version_code"]),
+                         ("18.647.5", 180647006))
+        self.assertEqual(template_manifest(client_version="18.647.5")["client"], "18.647.5")
+        self.assertIsNone(get_unit("wall_breaker").housing_space)
+        self.assertIsNone(get_unit("revival_spell").housing_space)
+        sampled_spaces = {entry["unit_id"]: entry["housing_space"]
+                          for entry in template_manifest(client_version="18.647.5")["templates"]
+                          if "housing_space" in entry}
+        self.assertEqual(sampled_spaces, {"wall_breaker": 2, "revival_spell": 2})
+        recognizer = ScreenshotRecognizer()
+        recognizer.client_version = "18.647.5"
+        for frame in metadata["frames"]:
+            with self.subTest(frame=frame["fixture"]):
+                path = fixture_dir / frame["fixture"]
+                self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),
+                                 frame["fixture_sha256"])
+                shot = recognizer.recognize(path)
+                self.assertEqual(shot.scene, "training")
+                self.assertEqual(_army_counts(shot), (
+                    ("heroes", 4, 4), ("troops", 352, 352),
+                    ("spells", 11, 11), ("siege", 3, 3)))
+                self.assertEqual(len(_roster_signature(shot)), 3)
+                army = shot.observations["army"]
+                self.assertEqual([(card["unit_id"], card["count"])
+                                  for card in army["manifest"]["troops"]],
+                                 [("electro_dragon", 11), ("dragon", 1), ("wall_breaker", 1)])
+                self.assertEqual([(card["unit_id"], card["count"])
+                                  for card in army["manifest"]["spells"]],
+                                 [("totem_spell", 9), ("revival_spell", 1)])
+                self.assertEqual(army["manifest"]["troops"][1]["evidence"]["count"]["source"],
+                                 "sampled_x1_header")
+                self.assertEqual([card["unit_id"] for card in army["hero_evidence"]["cards"]],
+                                 ["grand_warden", "royal_champion", "minion_prince", "archer_queen"])
+                self.assertEqual([card["unit_id"] for card in army["siege_evidence"]["cards"]],
+                                 ["siege_barracks", "sky_wagon", "troop_launcher"])
+        other = recognize_army_heroes(fixture_dir / metadata["frames"][1]["fixture"],
+                                     {"used": 4, "capacity": 4}, client_version="18.647.6")
+        self.assertFalse(other["complete"])
+        self.assertTrue(all(card["unit_id"] is None for card in other["cards"]))
+
     def setUp(self) -> None:
         self.temp = TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

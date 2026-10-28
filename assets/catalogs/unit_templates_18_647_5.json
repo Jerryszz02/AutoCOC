@@ -1,0 +1,395 @@
+{
+  "client": "18.647.5",
+  "version_code": 180647006,
+  "coordinate_resolution": [
+    1280,
+    720
+  ],
+  "review_method": "agent_visual",
+  "human_ground_truth": false,
+  "scope": "observed_my_army_cards_only",
+  "templates": [
+    {
+      "unit_id": "electro_dragon",
+      "surface": "army",
+      "path": "units/electro_dragon_army_18_647_5.png",
+      "source_frame": "reports/batch01-20261028/new-army-1.png",
+      "source_bbox_1280": [
+        580,
+        226,
+        625,
+        268
+      ],
+      "client_version": "18.647.5",
+      "version_code": 180647006,
+      "source_sha256": "8e14902d85491ec7061a97886a746acc5f78b00b93a77ed9ab9bfd8fd8d5e420",
+      "template_sha256": "02c22e5235f53f175f84b351c372051017493854b8d1510274273a4b7ba88fcd",
+      "identity_evidence_status": "agent_visual_my_army_card"
+    },
+    {
+      "unit_id": "dragon",
+      "surface": "army",
+      "path": "units/dragon_army_18_647_5.png",
+      "source_frame": "reports/batch01-20261028/new-army-1.png",
+      "source_bbox_1280": [
+        683,
+        226,
+        728,
+        268
+      ],
+      "client_version": "18.647.5",
+      "version_code": 180647006,
+      "source_sha256": "8e14902d85491ec7061a97886a746acc5f78b00b93a77ed9ab9bfd8fd8d5e420",
+      "template_sha256": "cb5640e4c69510d42f363e0c68e18ebcfb0da020b7528cf281d9638d22a90252",
+      "identity_evidence_status": "agent_visual_my_army_card"
+    },
+    {
+      "unit_id": "wall_breaker",
+      "surface": "army",
+      "path": "units/wall_breaker_army_18_647_5.png",
+      "source_frame": "reports/batch01-20261028/new-army-1.png",
+      "source_bbox_1280": [
+        785,
+        226,
+        830,
+        268
+      ],
+      "client_version": "18.647.5",
+      "version_code": 180647006,
+      "source_sha256": "8e14902d85491ec7061a97886a746acc5f78b00b93a77ed9ab9bfd8fd8d5e420",
+      "template_sha256": "911b9ebd85ec9fda2de1b3ab28b16ddd3ebce64ded86bdea26ca31decaed56db",
+      "identity_evidence_status": "agent_visual_detail_title_and_housing",
+      "identity_evidence_frame": "reports/batch01-20261028/detail-wall.png",
+      "identity_evidence_sha256": "5317074576f7ea9140a96191faadd8729d803acba749d083857bad035a3411d8",
+      "identity_evidence_title": "8级炸弹人",
+      "housing_space": 2
+    },
+    {
+      "unit_id": "totem_spell",
+      "surface": "army",
+      "path": "units/totem_spell_army_18_647_5.png",
+      "source_frame": "reports/batch01-20261028/new-army-1.png",
+      "source_bbox_1280": [
+        580,
+        405,
+        625,
+        447
+      ],
+      "client_version": "18.647.5",
+      "version_code": 180647006,
+      "source_sha256": "8e14902d85491ec7061a97886a746acc5f78b00b93a77ed9ab9bfd8fd8d5e420",
+      "template_sha256": "f327d15db11e0ac710ca57db63e93a23b1980233dadf92bfd9a6a53d031cbd47",
+      "identity_evidence_status": "agent_visual_my_army_card"
+    },
+    {
+      "unit_id": "revival_spell",
+      "surface": "army",
+      "path": "units/revival_spell_army_18_647_5.png",
+      "source_frame": "reports/batch01-20261028/new-army-1.png",
+      "source_bbox_1280": [
+        683,
+        405,
+        728,
+        447
+      ],
+      "client_version": "18.647.5",
+      "version_code": 180647006,
+      "source_sha256": "8e14902d85491ec7061a97886a746acc5f78b00b93a77ed9ab9bfd8fd8d5e420",
+      "template_sha256": "122347acc91c6e52d7aadf0d2891c9d8b76225890dcc6a5961874428ed71c61c",
+      "identity_evidence_status": "agent_visual_detail_title_and_housing",
+      "identity_evidence_frame": "reports/batch01-20261028/detail-gold-spell.png",
+      "identity_evidence_sha256": "43ed355fe0b7bd622b276e7b8d911e61ed9eb3437040b6c1e19fa15c4eb4db44",
+      "identity_evidence_title": "3级复苏法术",
+      "housing_space": 2
+    },
+    {
+      "unit_id": "siege_barracks",
+      "surface": "army",
+      "path": "units/siege_barracks_army_18_647_5.png",
+      "source_frame": "reports/batch01-20261028/new-army-1.png",
+      "source_bbox_1280": [
+        1030,
+        400,
+        1080,
+        445
+      ],
+      "client_version": "18.647.5",
+      "version_code": 180647006,
+      "source_sha256": "8e14902d85491ec7061a97886a746acc5f78b00b93a77ed9ab9bfd8fd8d5e420",
+      "template_sha256": "8e42c5aa3d949af35506e31593b210d373c4ffb67fd5babd3a3f58da278f7ea9",
+      "identity_evidence_status": "agent_visual_my_army_card"
+    },
+    {
+      "unit_id": "sky_wagon",
+      "surface": "army",
+      "path": "units/sky_wagon_army_18_647_5.png",
+      "source_frame": "reports/batch01-20261028/new-army-1.png",
+      "source_bbox_1280": [
+        1097,
+        400,
+        1147,
+        445
+      ],
+      "client_version": "18.647.5",
+      "version_code": 180647006,
+      "source_sha256": "8e14902d85491ec7061a97886a746acc5f78b00b93a77ed9ab9bfd8fd8d5e420",
+      "template_sha256": "12132687556c6c5c6075790351eb0847b4b75b3d7115a0ef747e90c1e6617497",
+      "identity_evidence_status": "agent_visual_my_army_card"
+    },
+    {
+      "unit_id": "troop_launcher",
+      "surface": "army",
+      "path": "units/troop_launcher_army_18_647_5.png",
+      "source_frame": "reports/batch01-20261028/new-army-1.png",
+      "source_bbox_1280": [
+        1164,
+        400,
+        1214,
+        445
+      ],
+      "client_version": "18.647.5",
+      "version_code": 180647006,
+      "source_sha256": "8e14902d85491ec7061a97886a746acc5f78b00b93a77ed9ab9bfd8fd8d5e420",
+      "template_sha256": "445232e44a2f54c674f9dcec22b562c50cb3438e5d68f6dfdd772e37e3a9b9bc",
+      "identity_evidence_status": "agent_visual_my_army_card"
+    },
+    {
+      "unit_id": "grand_warden",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/grand_warden_army_face_18_647_5.png",
+      "source_frame": "reports/batch01-20261028/new-army-1.png",
+      "source_bbox_1280": [
+        60,
+        330,
+        95,
+        360
+      ],
+      "client_version": "18.647.5",
+      "version_code": 180647006,
+      "source_sha256": "8e14902d85491ec7061a97886a746acc5f78b00b93a77ed9ab9bfd8fd8d5e420",
+      "template_sha256": "4da159735b0a24bebbde914e4448e792e088e0785c486a676aab7b50f86cff3f",
+      "identity_evidence_status": "agent_visual_army_portrait"
+    },
+    {
+      "unit_id": "grand_warden",
+      "surface": "army_hero",
+      "role": "color_profile",
+      "path": "units/grand_warden_army_color_profile_18_647_5.png",
+      "source_frame": "reports/batch01-20261028/new-army-1.png",
+      "source_bbox_1280": [
+        28,
+        220,
+        142,
+        540
+      ],
+      "client_version": "18.647.5",
+      "version_code": 180647006,
+      "source_sha256": "8e14902d85491ec7061a97886a746acc5f78b00b93a77ed9ab9bfd8fd8d5e420",
+      "template_sha256": "19c4cf33cc38df83fb930fe7815210dec58bc890eeb9a7400eadb720c489d963",
+      "identity_evidence_status": "agent_visual_army_portrait"
+    },
+    {
+      "unit_id": "royal_champion",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/royal_champion_army_face_18_647_5.png",
+      "source_frame": "reports/batch01-20261028/new-army-1.png",
+      "source_bbox_1280": [
+        194,
+        298,
+        229,
+        328
+      ],
+      "client_version": "18.647.5",
+      "version_code": 180647006,
+      "source_sha256": "8e14902d85491ec7061a97886a746acc5f78b00b93a77ed9ab9bfd8fd8d5e420",
+      "template_sha256": "f16042b4aae520732f9566a0fa9a9e841c7d4b1c991f4a9c8ac6e377941e76f0",
+      "identity_evidence_status": "agent_visual_detail_title_and_selected_hero_menu",
+      "identity_evidence_frame": "reports/batch01-20261028/detail-hero2.png",
+      "identity_evidence_sha256": "9d0a1559c007fcb206b1310c8ff3a8aabf7a5748da27720fcdd148d6f0ab626a",
+      "identity_evidence_title": "51级飞盾战神",
+      "identity_menu_frame": "reports/batch01-20261028/hero2-menu-2.png",
+      "identity_menu_sha256": "f4f0d7147d03e5b73418282d02f2c6e8a5564e9e885cf34df9803f66d60db659"
+    },
+    {
+      "unit_id": "royal_champion",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/royal_champion_army_face_pose2_18_647_5.png",
+      "source_frame": "reports/batch01-20261028/new-army-2.png",
+      "source_bbox_1280": [
+        194,
+        298,
+        229,
+        328
+      ],
+      "client_version": "18.647.5",
+      "version_code": 180647006,
+      "source_sha256": "bb41c36ae4285df770fcdc257806fe0e1393df5a097d3fa313e36e92a74e679c",
+      "template_sha256": "9df112492c33bd01b4c4131f3e7a8fbe96c2c2fa37f1b0652e1b11a3b68e8d65",
+      "identity_evidence_status": "agent_visual_detail_title_and_selected_hero_menu",
+      "identity_evidence_frame": "reports/batch01-20261028/detail-hero2.png",
+      "identity_evidence_sha256": "9d0a1559c007fcb206b1310c8ff3a8aabf7a5748da27720fcdd148d6f0ab626a",
+      "identity_evidence_title": "51级飞盾战神",
+      "identity_menu_frame": "reports/batch01-20261028/hero2-menu-2.png",
+      "identity_menu_sha256": "f4f0d7147d03e5b73418282d02f2c6e8a5564e9e885cf34df9803f66d60db659"
+    },
+    {
+      "unit_id": "royal_champion",
+      "surface": "army_hero",
+      "role": "color_profile",
+      "path": "units/royal_champion_army_color_profile_18_647_5.png",
+      "source_frame": "reports/batch01-20261028/new-army-1.png",
+      "source_bbox_1280": [
+        158,
+        220,
+        272,
+        540
+      ],
+      "client_version": "18.647.5",
+      "version_code": 180647006,
+      "source_sha256": "8e14902d85491ec7061a97886a746acc5f78b00b93a77ed9ab9bfd8fd8d5e420",
+      "template_sha256": "71bd50998d568fb8c06e74da140208c6ca9b8d2df4ed3cf40c9efab14de39710",
+      "identity_evidence_status": "agent_visual_detail_title_and_selected_hero_menu",
+      "identity_evidence_frame": "reports/batch01-20261028/detail-hero2.png",
+      "identity_evidence_sha256": "9d0a1559c007fcb206b1310c8ff3a8aabf7a5748da27720fcdd148d6f0ab626a",
+      "identity_evidence_title": "51级飞盾战神",
+      "identity_menu_frame": "reports/batch01-20261028/hero2-menu-2.png",
+      "identity_menu_sha256": "f4f0d7147d03e5b73418282d02f2c6e8a5564e9e885cf34df9803f66d60db659"
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/minion_prince_army_face_18_647_5.png",
+      "source_frame": "reports/batch01-20261028/new-army-1.png",
+      "source_bbox_1280": [
+        325,
+        290,
+        360,
+        320
+      ],
+      "client_version": "18.647.5",
+      "version_code": 180647006,
+      "source_sha256": "8e14902d85491ec7061a97886a746acc5f78b00b93a77ed9ab9bfd8fd8d5e420",
+      "template_sha256": "d4c00289908b55a3a8e3776239baa39e6b89c4f868241efbb68d0d6d44a67652",
+      "identity_evidence_status": "agent_visual_army_portrait"
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "army_hero",
+      "role": "color_profile",
+      "path": "units/minion_prince_army_color_profile_18_647_5.png",
+      "source_frame": "reports/batch01-20261028/new-army-1.png",
+      "source_bbox_1280": [
+        288,
+        220,
+        402,
+        540
+      ],
+      "client_version": "18.647.5",
+      "version_code": 180647006,
+      "source_sha256": "8e14902d85491ec7061a97886a746acc5f78b00b93a77ed9ab9bfd8fd8d5e420",
+      "template_sha256": "57667821e12c6b59ed7e3cc770af62f532d384519576cfe40e165193a23d9d18",
+      "identity_evidence_status": "agent_visual_army_portrait"
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/archer_queen_army_face_18_647_5.png",
+      "source_frame": "reports/batch01-20261028/new-army-1.png",
+      "source_bbox_1280": [
+        445,
+        295,
+        480,
+        325
+      ],
+      "client_version": "18.647.5",
+      "version_code": 180647006,
+      "source_sha256": "8e14902d85491ec7061a97886a746acc5f78b00b93a77ed9ab9bfd8fd8d5e420",
+      "template_sha256": "41181247be1c61bb3818b9d0377fc71db7c49a7d17242d3d9d89924f4fc835df",
+      "identity_evidence_frame": "reports/batch01-20261028/detail-hero4.png",
+      "identity_evidence_sha256": "3e26adcb1075dfde854c0a66338139e857ba5580e097e78bcba27c79c252937b",
+      "identity_evidence_title": "80级弓箭女皇",
+      "identity_menu_frame": "reports/batch01-20261028/hero4-menu-2.png",
+      "identity_menu_sha256": "8dd0cb0a9dfd6b8ab78f1a53480ecfd227525ae35fc5e37d5279cc1c237e1934",
+      "identity_evidence_status": "agent_visual_detail_title_and_selected_hero_menu"
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/archer_queen_army_face_pose2_18_647_5.png",
+      "source_frame": "reports/batch01-20261028/new-army-2.png",
+      "source_bbox_1280": [
+        445,
+        295,
+        480,
+        325
+      ],
+      "client_version": "18.647.5",
+      "version_code": 180647006,
+      "source_sha256": "bb41c36ae4285df770fcdc257806fe0e1393df5a097d3fa313e36e92a74e679c",
+      "template_sha256": "90de34f3ff52c0da4ca073452f69089ceb5fe135333d5b535d13d12148ba57e8",
+      "identity_evidence_frame": "reports/batch01-20261028/detail-hero4.png",
+      "identity_evidence_sha256": "3e26adcb1075dfde854c0a66338139e857ba5580e097e78bcba27c79c252937b",
+      "identity_evidence_title": "80级弓箭女皇",
+      "identity_menu_frame": "reports/batch01-20261028/hero4-menu-2.png",
+      "identity_menu_sha256": "8dd0cb0a9dfd6b8ab78f1a53480ecfd227525ae35fc5e37d5279cc1c237e1934",
+      "identity_evidence_status": "agent_visual_detail_title_and_selected_hero_menu"
+    },
+    {
+      "unit_id": "archer_queen",
+      "surface": "army_hero",
+      "role": "color_profile",
+      "path": "units/archer_queen_army_color_profile_18_647_5.png",
+      "source_frame": "reports/batch01-20261028/new-army-1.png",
+      "source_bbox_1280": [
+        418,
+        220,
+        532,
+        540
+      ],
+      "client_version": "18.647.5",
+      "version_code": 180647006,
+      "source_sha256": "8e14902d85491ec7061a97886a746acc5f78b00b93a77ed9ab9bfd8fd8d5e420",
+      "template_sha256": "a90616cd3c15afdb59f0b678507882fc0d14e8edadd269356fa33ba6a6e393f9",
+      "identity_evidence_frame": "reports/batch01-20261028/detail-hero4.png",
+      "identity_evidence_sha256": "3e26adcb1075dfde854c0a66338139e857ba5580e097e78bcba27c79c252937b",
+      "identity_evidence_title": "80级弓箭女皇",
+      "identity_menu_frame": "reports/batch01-20261028/hero4-menu-2.png",
+      "identity_menu_sha256": "8dd0cb0a9dfd6b8ab78f1a53480ecfd227525ae35fc5e37d5279cc1c237e1934",
+      "identity_evidence_status": "agent_visual_detail_title_and_selected_hero_menu"
+    },
+    {
+      "unit_id": "minion_prince",
+      "surface": "army_hero",
+      "role": "face",
+      "path": "units/minion_prince_army_face_pose3_18_647_5.png",
+      "source_frame": "E:\\projects\\AutoCOC-training\\candidates\\pilot-baseline-20261028-v2\\frames\\00008-pilot-army-2.png",
+      "source_bbox_1280": [
+        325,
+        290,
+        360,
+        320
+      ],
+      "client_version": "18.647.5",
+      "version_code": 180647006,
+      "source_sha256": "36453a7bef064a5da70d3bd726fab52b7d0301c78ab94b040df057479f082032",
+      "template_sha256": "7256fe9ba721d6582d6bdc385431aeca697da27992a8effb5e407c4c39ecaf2b",
+      "identity_evidence_status": "agent_visual_selected_roster_animation_pose",
+      "note": "Read-only captured My Army card; alternate pose for same previously identified Minion Prince.",
+      "portable_fixture": "tests/fixtures/army_current_18_647_5_animated.png",
+      "portable_fixture_sha256": "88d38c7cb79bd933d3e6caf7eedd8abe2c0a23e9eb53ee048882eb73c9e30253",
+      "portable_crop_at_1280": [
+        325,
+        290,
+        360,
+        320
+      ],
+      "portable_crop_pixel_sha256": "6c4996e048020f51b5fb1d03f740e83c6787f7cd34a160f5d62f8a420b4fa102"
+    }
+  ]
+}

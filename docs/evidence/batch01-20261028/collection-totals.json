@@ -1,0 +1,84 @@
+{
+  "kind": "batch1_collection_totals",
+  "version": "18.647.5",
+  "version_code": 180647006,
+  "windows": [
+    {
+      "window": 1,
+      "status": "failed",
+      "samples": 0,
+      "quoted_attempted_gold": 1700,
+      "actual_search_cost_gold": null,
+      "fee_reconciled": null,
+      "returned_home": false,
+      "reason": "Local OCR failed for E:\\projects\\AutoCOC-training\\candidates\\building-186475-20261028-window01-session\\frames\\00008-scout-camera-ready.png: Traceback (most recent call last):\n  File \"E:\\projects\\AutoCOC\\.venv\\Lib\\site-packages\\rapidocr\\inference_engine\\onnxruntime\\main.py\", line 98, in __call__\n    return self.session.run(self.get_output_names(), input_dict)[0]\n           ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"E:\\projects\\AutoCOC\\.venv\\Lib\\site-packages\\onnxruntime\\capi\\onnxruntime_inference_collection.py\", line 395, in run\n    return self._sess.run(output_names, input_feed, run_options)\n           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nonnxruntime.capi.onnxruntime_pybind11_state.RuntimeException: [ONNXRuntimeError] : 6 : RUNTIME_EXCEPTION : Non-zero status code returned while running ConvTranspose node. Name:'ConvTranspose.0' Status Message: bad allocation\n",
+      "report_sha256": "d17c6322fb3a7d655101459c0a83984fdf45bfe992fb0801dc354b77db20fb9c"
+    },
+    {
+      "window": 2,
+      "status": "completed",
+      "samples": 10,
+      "quoted_attempted_gold": 17000,
+      "actual_search_cost_gold": 17000,
+      "fee_reconciled": true,
+      "returned_home": true,
+      "reason": "Sample limit or safe stopping condition reached",
+      "report_sha256": "e6097fce109cf24e27ced1f9cbc46b24b1af923bccc3914be86e4605483ddb55"
+    },
+    {
+      "window": 3,
+      "status": "completed",
+      "samples": 4,
+      "quoted_attempted_gold": 6800,
+      "actual_search_cost_gold": 6800,
+      "fee_reconciled": true,
+      "returned_home": true,
+      "reason": "Current preview countdown too short for another search",
+      "report_sha256": "ca201dcdeb178190e348859b1df73ea29636ae6dcd69946a7012ab4a56565cf1"
+    },
+    {
+      "window": 4,
+      "status": "completed",
+      "samples": 5,
+      "quoted_attempted_gold": 8500,
+      "actual_search_cost_gold": 8500,
+      "fee_reconciled": true,
+      "returned_home": true,
+      "reason": "Current preview countdown unavailable; no next search",
+      "report_sha256": "4962dab179ce99e05fe6132d3c1df9278241f2d33c310ca775b7136881cc20cf"
+    },
+    {
+      "window": 5,
+      "status": "completed",
+      "samples": 10,
+      "quoted_attempted_gold": 17000,
+      "actual_search_cost_gold": 17000,
+      "fee_reconciled": true,
+      "returned_home": true,
+      "reason": "Sample limit or safe stopping condition reached",
+      "report_sha256": "c98a45cf9b55128372427425cdb24b1c123d2daeaa41fc12818ed34a48fec821"
+    },
+    {
+      "window": 6,
+      "status": "completed",
+      "samples": 7,
+      "quoted_attempted_gold": 11900,
+      "actual_search_cost_gold": 11900,
+      "fee_reconciled": true,
+      "returned_home": true,
+      "reason": "Current preview countdown unavailable; no next search",
+      "report_sha256": "0b59222e952bcb8c3ad23b78d1f57142597d6d4b2482131715d0ed6ad277d30a"
+    }
+  ],
+  "new_candidate_images": 36,
+  "successful_windows": 5,
+  "automatic_reconciled_fee_gold": 61200,
+  "failed_window_manual_observed_fee_gold": 1700,
+  "total_budget_charged_gold": 62900,
+  "budget_cap_gold": 85000,
+  "new_verified_independent_layouts": null,
+  "deployments": 0,
+  "formal_accepted_samples": 0,
+  "status": "candidate_trial_only",
+  "stopping_reason": "Window count cap reached; three successful windows safely stopped early on short/unavailable countdown. Do not claim50 independent layouts or formal data freeze."
+}
