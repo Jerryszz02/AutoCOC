@@ -332,7 +332,7 @@ python -m pytest -q tests/test_building_vision.py tests/test_terrain.py tests/te
 
 ### 10.1 Windows 临时防息屏与防睡眠流程
 
-本节独立定义项目要求，新克隆无需依赖本机未入库的 `AGENTS.md`。适用于 Windows 上的开发、测试、基准、训练等待与实机任务；Mac 训练进程的保活由其运行环境另行配置，不能用 Windows 请求证明 Mac 已保活。
+项目根目录的 [AGENTS.md](../../AGENTS.md) 规定了 Windows 任务的保活要求。本节说明开发、测试、基准、训练等待与实机任务的具体操作。Mac 训练进程的保活由其运行环境另行配置。
 
 1. **创建本任务的持有者。**开始任务前，用任务专属目录保存状态和 `stop.request` 停止入口；记录持有进程 PID、启动时间和脚本路径。后台启动时使用 `Start-Process -WindowStyle Hidden`，避免弹出窗口。预先设置有限截止时间，例如 90 分钟；预计超过时先设置覆盖该任务的有限时长，避免任务仍运行而保活已到期。
 2. **由持续存活的同一线程申请。**调用 Windows `SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED)`，对应 `0x80000003`。检查返回值非 0；在同一线程周期性检查停止标志、截止时间并续期，例如每 2 秒一次。不能在立即退出的命令里调用后就宣称持续生效。
